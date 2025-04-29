@@ -112,11 +112,11 @@ class TorchDistributedCkptClient(ShmTrOnlyKVStoreTensorClient):
         store_key = self._encode_train_key(key, step)[0]
         return self.get_tensor_tree(store_key, device=device)
 
-    def load_train_checkpoint(self, key: str, step: int, state_dict: dict[str, Any]):
+    def load_train_checkpoint(self, key: str, step: int, state_dict: dict[str, Any], strict: bool = True):
         if not self.has_train_checkpoint(key, step):
             raise ValueError(f"train checkpoint {key}-{step} not found.")
         store_key = self._encode_train_key(key, step)[0]
-        return self.load_tensor_tree(store_key, state_dict)
+        return self.load_tensor_tree(store_key, state_dict,  strict=strict)
 
     def get_all_train_checkpoint_metas(self,  key: str):
         rank = _get_rank_may_distributed()

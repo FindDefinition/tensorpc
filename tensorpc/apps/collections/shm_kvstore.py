@@ -84,20 +84,30 @@ _JSON_INDEX_KEY = "__shm_jidx__"
 
 def _extract_tensor_descs(arr_tree: Any):
     import torch
-    from torch.distributed.tensor import DTensor
     variables, treespec = core_io.extract_arrays_from_data(arr_tree, (torch.Tensor,), json_index=_JSON_INDEX_KEY)
+    new_variables, arr_descs = _extract_tensor_descs_from_variables(variables)
+    return new_variables, arr_descs, treespec
+
+def _get_tensor_info_from_tensor(tensor: Any):
+    from torch.distributed.tensor import DTensor
+    if isinstance(tensor, DTensor):
+        tensor = tensor.to_local()
+    np_dtype = _torch_dtype_to_np_dtype_size_equal(tensor.dtype)
+    th_meta = tensor.dtype 
+    return tensor, TensorInfo(list(tensor.shape), np_dtype, th_meta)
+
+def _extract_tensor_descs_from_variables(variables: Any):
+    import torch
+    from torch.distributed.tensor import DTensor
     arr_descs: list[TensorInfo] = []
     new_variables: list[torch.Tensor] = []
     with torch.no_grad():
         for v in variables:
             assert isinstance(v, torch.Tensor)
-            if isinstance(v, DTensor):
-                v = v.to_local()
-            new_variables.append(v)
-            np_dtype = _torch_dtype_to_np_dtype_size_equal(v.dtype)
-            th_meta = v.dtype 
-            arr_descs.append(TensorInfo(list(v.shape), np_dtype, th_meta))
-    return new_variables, arr_descs, treespec
+            ten, info = _get_tensor_info_from_tensor(v)
+            new_variables.append(ten)
+            arr_descs.append(info)
+    return new_variables, arr_descs
 
 def _validate_load_tensor_tree(arr_descs: list[TensorInfo], segment_descs: Sequence[TensorInfo]):
     if len(arr_descs) != len(segment_descs):
@@ -277,11 +287,44 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
         res = core_io.put_arrays_to_data(variables, treespec, _JSON_INDEX_KEY)
         return res 
 
-    def load_tensor_tree(self, key: str, arr_tree: Any):
+    def load_tensor_tree(self, key: str, arr_tree: Any, strict=True):
         import torch
-        variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
-        store_arr_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_item_arr_desc", key)
-        _validate_load_tensor_tree(arr_descs, store_arr_descs)
+        from torch.utils import _pytree as pytree
+        variables: list[Any] = []
+        stored_index_need_load_to_tensor = {}
+        tensorpc_treespec = self.get_item_tree_spec(key)
+
+        if strict:
+            variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
+            store_arr_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_item_arr_desc", key)
+            _validate_load_tensor_tree(arr_descs, store_arr_descs)
+        else:
+            # we use {_JSON_INDEX_KEY: ...} as leaf node, convert to pytree spec
+            path_with_var, _ = pytree.tree_flatten_with_path(tensorpc_treespec, is_leaf=lambda x: isinstance(x, dict) and _JSON_INDEX_KEY in x)
+            path_with_var_to_load, _ = pytree.tree_flatten_with_path(arr_tree, is_leaf=lambda x: isinstance(x, torch.Tensor))
+            path_with_var_dict = dict(path_with_var)
+            loaded_paths = set(path_with_var_dict.keys())
+            path_with_var_to_load_dict = dict(path_with_var_to_load)
+            tensor_count = 0
+            for path, ten in path_with_var_to_load_dict.items():
+                if isinstance(ten, torch.Tensor):
+                    tensor_count += 1
+            load_arr_descs: list[TensorInfo] = []
+            store_arr_descs_need_load: list[TensorInfo] = []
+            store_arr_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_item_arr_desc", key)
+            for path, ten in path_with_var_to_load_dict.items():
+                if isinstance(ten, torch.Tensor):
+                    index = path_with_var_dict[path][_JSON_INDEX_KEY]
+                    store_arr_descs_need_load.append(store_arr_descs[index])
+                    ten, info = _get_tensor_info_from_tensor(ten)
+                    load_arr_descs.append(info)
+                    stored_index_need_load_to_tensor[index] = ten
+                    loaded_paths.remove(path)
+            _validate_load_tensor_tree(load_arr_descs, store_arr_descs_need_load)
+            # if loaded_paths:
+            #     print("------ Missing Keys ------")
+            #     for path in loaded_paths:
+            #         print(path)
         q = queue.Queue()
         q.put(0)
         with torch.no_grad():
@@ -293,7 +336,13 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
                 segments = data.get_segments()
 
                 for i, segment_desc in enumerate(segments.descs):
-                    v = variables[segment_desc.var_idx]
+                    if strict:
+                        v = variables[segment_desc.var_idx]
+                    else:
+                        stored_var_idx = segment_desc.var_idx
+                        if stored_var_idx not in stored_index_need_load_to_tensor:
+                            continue
+                        v = stored_index_need_load_to_tensor[segment_desc.var_idx]
                     arr_view_raw = segments.get_array_view_raw(i)
                     assert isinstance(v, torch.Tensor)
                     partial_info = segment_desc.partial_info
@@ -306,7 +355,7 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
                 torch.cuda.synchronize()
                 segments.close_in_remote()
                 q.put(0)
-        return self.get_item_tree_spec(key)
+        return tensorpc_treespec
 
 
 class ShmKVStoreAsyncClient:

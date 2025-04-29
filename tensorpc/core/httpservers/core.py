@@ -615,8 +615,8 @@ class WebsocketHandler:
 
     async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
                           shutdown_ev: asyncio.Event):
-        _shutdown_task = asyncio.create_task(shutdown_ev.wait())
-        rpc_q_task = asyncio.create_task(rpc_queue.get())
+        _shutdown_task = asyncio.create_task(shutdown_ev.wait(), name="ws-shutdown_ev-wait")
+        rpc_q_task = asyncio.create_task(rpc_queue.get(), name="ws-rpc_queue-get")
         wait_tasks: List[asyncio.Task] = [
             rpc_q_task,
             _shutdown_task,
@@ -630,7 +630,7 @@ class WebsocketHandler:
                     await _cancel(task)
                 break
             await rpc_q_task.result()
-            rpc_q_task = asyncio.create_task(rpc_queue.get())
+            rpc_q_task = asyncio.create_task(rpc_queue.get(), name="ws-rpc_queue-get")
             wait_tasks = [
                 rpc_q_task,
                 _shutdown_task,

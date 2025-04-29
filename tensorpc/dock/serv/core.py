@@ -1951,8 +1951,6 @@ class Flow:
         time_limit_rate = 0.05
         event_caches: List[Tuple[str, Any]] = []
         last_send_timestamp_ns = time.time_ns()
-        # if self._prev_ssh_q_task is None:
-        #     self._prev_ssh_q_task = asyncio.create_task(self._ssh_q.get())
         while True:
             cur_timestamp = time.time_ns()
             event = await self._ssh_q.get()

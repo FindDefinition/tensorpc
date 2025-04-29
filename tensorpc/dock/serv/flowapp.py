@@ -465,10 +465,10 @@ class FlowApp:
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
-        shut_task = asyncio.create_task(self.shutdown_ev.wait())
+        shut_task = asyncio.create_task(self.shutdown_ev.wait(), name="app-shutdown-wait")
         grpc_url = self.master_meta.grpc_url
         async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
-            send_task = asyncio.create_task(self._send_loop_queue.get())
+            send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             master_disconnect = 0.0
             retry_duration = 2.0  # 2s
@@ -487,13 +487,13 @@ class FlowApp:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
                     send_task = asyncio.create_task(
-                        self._send_loop_queue.get())
+                        self._send_loop_queue.get(), name="app-send_loop_queue-get")
                     wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                     continue
                 ts = time.time()
                 # assign uid here.
                 ev.uid = self._uid
-                send_task = asyncio.create_task(self._send_loop_queue.get())
+                send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 if master_disconnect >= 0:
                     previous_event = previous_event.merge_new(ev)
@@ -548,8 +548,8 @@ class FlowApp:
     async def _send_loop_stream_main(self, robj: tensorpc.AsyncRemoteManager):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
-        shut_task = asyncio.create_task(self.shutdown_ev.wait())
-        send_task = asyncio.create_task(self._send_loop_queue.get())
+        shut_task = asyncio.create_task(self.shutdown_ev.wait(), name="app-shutdown-wait")
+        send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
         wait_tasks: List[asyncio.Task] = [shut_task, send_task]
         previous_event = AppEvent(self._uid, {})
         try:
@@ -567,13 +567,13 @@ class FlowApp:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
                     send_task = asyncio.create_task(
-                        self._send_loop_queue.get())
+                        self._send_loop_queue.get(), name="app-send_loop_queue-get")
                     wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                     continue
                 ts = time.time()
                 # assign uid here.
                 ev.uid = self._uid
-                send_task = asyncio.create_task(self._send_loop_queue.get())
+                send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 # this is stream remote call, will use stream data to call a remote function, 
                 # so we must yield (args, kwargs) instead of data.

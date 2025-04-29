@@ -29,10 +29,10 @@ import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
-from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState, MasterActions
+from ..typedefs import FTState, FTSSHServerArgs, FTStatus, PyspyTraceMode, SSHStatus, CmdStatus, MasterUIState, MasterActions
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 import shlex
-from tensorpc.utils.pyspyutil import get_all_subprocess_traceback_by_pyspy, get_torchrun_traceback_by_pyspy
+from tensorpc.utils.pyspyutil import get_all_subprocess_traceback_by_pyspy, get_process_traceback_by_pyspy, get_pyspy_style_asyncio_task_traceback, get_torchrun_traceback_by_pyspy
 
 LOGGER = rich_logging.get_logger("distssh")
 
@@ -375,11 +375,26 @@ class FaultToleranceSSHServer:
         else:
             await self._master_cancel_cmd()
 
-    async def fetch_pyspy_info(self, pytorch_mode: bool = False):
+    async def fetch_pyspy_info(self, mode: PyspyTraceMode):
+        if mode == PyspyTraceMode.SERVER_PROCESS:
+            pid = os.getpid()
+            res = await get_process_traceback_by_pyspy(pid)
+            res_dict = {}
+            for thread_info in res:
+                tid = thread_info["thread_id"]
+                res_dict[tid] = [
+                    thread_info
+                ]
+            return {"" : res_dict}
+        if mode == PyspyTraceMode.LOCAL_AIO_TASKS:
+            res = get_pyspy_style_asyncio_task_traceback()
+            # import rich 
+            # rich.print(res)
+            return {"" : res}
         state = self._terminal.get_current_state()
         assert state is not None 
         pid = state.pid
-        if pytorch_mode:
+        if mode == PyspyTraceMode.PYTORCH_DISTRIBUTED or mode == PyspyTraceMode.PYTORCH_LOCAL:
             try:
                 return await get_torchrun_traceback_by_pyspy(root_pid=pid, ignore_error=True)
             except:
@@ -388,17 +403,18 @@ class FaultToleranceSSHServer:
         else:
             return await get_all_subprocess_traceback_by_pyspy(pid=pid)
 
-    async def master_fetch_pyspy_info(self, pytorch_mode: bool = False):
+    async def master_fetch_pyspy_info(self, mode: PyspyTraceMode):
         res: dict[tuple[int, int], Any] = {}
-        if pytorch_mode:
+        if mode == PyspyTraceMode.PYTORCH_DISTRIBUTED:
             # only pytorch mode collect all rank.
-            client_res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "fetch_pyspy_info"), set(), pytorch_mode)
+            client_res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "fetch_pyspy_info"), set(), mode)
             if client_res is None:
                 return None 
             for rank, r in client_res.items():
-                for pid, info in r.items():
-                    res[(rank, pid)] = info
-        root_pyspy_info = await self.fetch_pyspy_info(pytorch_mode)
+                for v in r.values():
+                    for pid, info in v.items():
+                        res[(rank, pid)] = info
+        root_pyspy_info = await self.fetch_pyspy_info(mode)
         for v in root_pyspy_info.values():
             for pid, info in v.items():
                 res[(self._master_rank, pid)] = info

@@ -1312,7 +1312,7 @@ class SSHClient:
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task, line_raw_callback))
                 wait_tasks = [
-                    asyncio.create_task(inp_queue.get()), 
+                    asyncio.create_task(inp_queue.get(), name=f"autossh-connect_queue-inp_queue-get"), 
                     shutdown_task, loop_task,
                 ]
                 raw_ev_task = asyncio.create_task(raw_ev.wait())
@@ -1395,7 +1395,7 @@ class SSHClient:
                                 stdin.write(text.encode("utf-8"))
                             else:
                                 stdin.write(text)
-                    wait_tasks[0] = asyncio.create_task(inp_queue.get())
+                    wait_tasks[0] = asyncio.create_task(inp_queue.get(), name=f"autossh-connect_queue-inp_queue-get")
                 # await loop_task
         except BaseException as exc:
             await callback(_warp_exception_to_event(exc, self.uid))

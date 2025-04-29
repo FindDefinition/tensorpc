@@ -142,6 +142,7 @@ class FTStatusBoxState:
             num_bkpt_proc=ft_state.num_bkpt_proc,
         )
 
+
 class MasterActions(enum.Enum):
     RECONNECT_ALL_CLIENT = "Reconnect All Client"
     CLEAR_ALL_CKPT = "Clear All Checkpoint"
@@ -150,6 +151,7 @@ class MasterActions(enum.Enum):
     SHUTDOWN_ALL = "Shutdown All"
     KILL_ALL = "KILL ALL"
     START_OR_CANCEL = "Start/Cancel"
+
 
 class UILocalActions(enum.Enum):
     PYTORCH_SPY = "_local_PYTORCH_SPY"
@@ -160,3 +162,11 @@ class CheckpointActions(enum.Enum):
     LOAD_ITEM = "LOAD_ITEM"
     # DELETE_ITEM = "Delete Item"
     SAVE = "SAVE"
+
+
+class PyspyTraceMode(enum.IntEnum):
+    PYTORCH_DISTRIBUTED = 0
+    ALL_SUBPROCESS = 1
+    LOCAL_AIO_TASKS = 2
+    SERVER_PROCESS = 3
+    PYTORCH_LOCAL = 4

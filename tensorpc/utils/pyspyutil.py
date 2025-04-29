@@ -2,8 +2,30 @@ import asyncio
 from pathlib import Path
 import psutil 
 import json 
-from typing import Any
+from typing import Any, Optional
 import traceback
+
+from tensorpc.core import dataclass_dispatch as dataclasses
+from tensorpc.core.inspecttools import get_co_qualname_from_frame
+
+@dataclasses.dataclass
+class PyspyFrame:
+    name: str 
+    filename: str 
+    module: Optional[str]
+    short_filename: str
+    line: int 
+    locals: Optional[Any] = None
+    # for mui AutoComplete
+    label: str = ""
+
+@dataclasses.dataclass
+class PyspyTrace:
+    pid: int 
+    thread_id: int 
+    thread_name: str
+    frames: list[PyspyFrame]
+
 
 async def get_process_traceback_by_pyspy(pid: int, with_locals: bool = False) -> Any:
     cmd = [
@@ -84,7 +106,7 @@ async def get_all_subprocess_traceback_by_pyspy(pid: int, ignore_error: bool = T
         except ValueError as e:
             if ignore_error:
                 print(f"Failed to get traceback for pid {child.pid}: {e}")
-                name_to_pid_to_tb[name][child.pid] = {}
+                name_to_pid_to_tb[name][child.pid] = []
                 continue
             else:
                 raise e
@@ -152,7 +174,7 @@ async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_dat
         except ValueError as e:
             if ignore_error:
                 print(f"Failed to get traceback for pid {child.pid}: {e}")
-                name_to_pid_to_tb[name][child.pid] = {}
+                name_to_pid_to_tb[name][child.pid] = []
                 continue
             else:
                 raise e
@@ -171,6 +193,39 @@ async def get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, root_pi
 
 async def get_torchrun_dataworker_traceback_by_pyspy(main_thread_only: bool = True, root_pid: int = -1):
     return await _get_torchrun_traceback_by_pyspy(main_thread_only, is_data_worker=True)
+
+def get_pyspy_style_asyncio_task_traceback():
+    all_tasks = asyncio.all_tasks()
+    res_traces: dict[int, list[dict]] = {}
+    for i, task in enumerate(all_tasks):
+        task_id = f"{task.get_name()}-{i}"
+        stack = task.get_stack()
+        if not stack:
+            continue 
+        # stack to PyspyFrame
+        frames = []
+        for cur_frame in stack:
+            fname = cur_frame.f_code.co_filename
+            if cur_frame.f_lineno is None:
+                continue
+            qname = get_co_qualname_from_frame(cur_frame)
+            module = ".".join(qname.split(".")[:-1])
+            if module == "":
+                module = None
+            frame_info = PyspyFrame(
+                    name=cur_frame.f_code.co_name, 
+                    filename=cur_frame.f_code.co_filename, 
+                    line=cur_frame.f_lineno, module=module, 
+                    short_filename=Path(fname).name)
+            frames.append(frame_info)
+        trace = PyspyTrace(
+            pid=i,
+            thread_id=i,
+            thread_name=task_id,
+            frames=frames,
+        )
+        res_traces[i] = [dataclasses.asdict(trace)]
+    return res_traces
 
 def _main():
     import rich 

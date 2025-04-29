@@ -17,7 +17,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
                                              TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
                                              )
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
-from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
+from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, PyspyTraceMode, UILocalActions
 from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
 from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
@@ -195,7 +195,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
                  term: terminal.AsyncSSHTerminal, debug_panel: MasterDebugPanel, port: int,
                  master_action_fn: Callable[[MasterActions], mui.CORO_ANY],
                  release_bkpt_fn: Callable[[Any], Awaitable[None]],
-                 fetch_debug_info_fn: Callable[[bool], Awaitable[Optional[dict[tuple[int, int], Any]]]],
+                 fetch_debug_info_fn: Callable[[PyspyTraceMode], Awaitable[Optional[dict[tuple[int, int], Any]]]],
                  enabled: bool = True):
         master_state = ui_state.client_states[master_rank]
         states = ui_state.client_states
@@ -241,8 +241,10 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self._pyspy_viewer = PyspyViewer()
         pyspy_dbg_dialog = mui.Dialog([
             mui.HBox([
-                mui.Button("Scan Pth Distributed", partial(self._on_pyspy_scan, True)).prop(variant="outlined"),
-                mui.Button("Scan Local", partial(self._on_pyspy_scan, False)).prop(variant="outlined"),
+                mui.Button("Scan Pth Local", partial(self._on_pyspy_scan, PyspyTraceMode.PYTORCH_LOCAL)).prop(variant="outlined"),
+                mui.Button("Scan Pth Distributed", partial(self._on_pyspy_scan, PyspyTraceMode.PYTORCH_DISTRIBUTED)).prop(variant="outlined"),
+                mui.Button("Scan Local", partial(self._on_pyspy_scan, PyspyTraceMode.ALL_SUBPROCESS)).prop(variant="outlined"),
+                mui.Button("Scan Aio Tasks", partial(self._on_pyspy_scan, PyspyTraceMode.LOCAL_AIO_TASKS)).prop(variant="outlined"),
             ]),
             mui.Divider(orientation="horizontal"),
             self._pyspy_viewer.prop(flex=1)
@@ -386,8 +388,8 @@ class FaultToleranceUIMaster(mui.FlexBox):
         ])
         self.prop(flexDirection="column", flex=1)
 
-    async def _on_pyspy_scan(self, pytorch_mode: bool):
-        data = await self._fetch_debug_info_fn(pytorch_mode)
+    async def _on_pyspy_scan(self, mode: PyspyTraceMode):
+        data = await self._fetch_debug_info_fn(mode)
         if data is not None:
             data_with_str_id = {}
             for (rank, pid), v in data.items():
