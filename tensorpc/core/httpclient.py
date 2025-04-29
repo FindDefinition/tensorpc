@@ -15,7 +15,7 @@ import time
 async def http_remote_call(sess: aiohttp.ClientSession, url: str, key: str,
                            *args, **kwargs):
     arrays, decoupled = core_io.extract_arrays_from_data((args, kwargs),
-                                                         json_index=True)
+                                                         json_index=core_io.JSON_INDEX_KEY)
     arrays = [core_io.data2pb(a) for a in arrays]
     request = rpc_message_pb2.RemoteJsonCallRequest(service_key=key,
                                                     arrays=arrays,
@@ -35,14 +35,14 @@ async def http_remote_call(sess: aiohttp.ClientSession, url: str, key: str,
     data_skeleton = json.loads(resp_pb.data)
     results = core_io.put_arrays_to_data(arrays,
                                          data_skeleton,
-                                         json_index=True)
+                                         json_index=core_io.JSON_INDEX_KEY)
     results = results[0]
     return results
 
 
 def http_remote_call_request(url: str, key: str, *args, **kwargs):
     arrays, decoupled = core_io.extract_arrays_from_data((args, kwargs),
-                                                         json_index=True)
+                                                         json_index=core_io.JSON_INDEX_KEY)
     arrays = [core_io.data2pb(a) for a in arrays]
     request = rpc_message_pb2.RemoteJsonCallRequest(service_key=key,
                                                     arrays=arrays,
@@ -61,7 +61,7 @@ def http_remote_call_request(url: str, key: str, *args, **kwargs):
     data_skeleton = json.loads(resp_pb.data)
     results = core_io.put_arrays_to_data(arrays,
                                          data_skeleton,
-                                         json_index=True)
+                                         json_index=core_io.JSON_INDEX_KEY)
     results = results[0]
     return results
 

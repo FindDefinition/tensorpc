@@ -545,7 +545,7 @@ def extract_arrays_from_data(data,
     return arrays, data_skeleton
 
 
-def put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY) -> Any:
+def put_arrays_to_data(arrays, data_skeleton, json_index="") -> Any:
     if not arrays:
         return data_skeleton
     return _put_arrays_to_data(arrays, data_skeleton, json_index)
@@ -1178,7 +1178,7 @@ def parse_message_chunks(header: TensoRPCHeader, chunks: List[bytes]):
                     np.frombuffer(data_arr[start:start + size],
                                   dtype=dtype_np).reshape(shape))
                 start += size
-        data = put_arrays_to_data(arrs, skeleton, True)
+        data = put_arrays_to_data(arrs, skeleton, JSON_INDEX_KEY)
         return data
     res = parse_array_of_chunked_message(req, chunks)
     return res
