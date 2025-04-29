@@ -490,7 +490,12 @@ class MasterDebugPanel(mui.FlexBox):
                 sleep_task = asyncio.create_task(
                     asyncio.sleep(self._scan_duration))
                 wait_tasks.append(sleep_task)
-                await self._update_remote_server_discover_lst()
+                try:
+                    await self._update_remote_server_discover_lst()
+                except Exception as e:
+                    print("Failed to update remote server list", e)
+                    traceback.print_exc()
+                    continue
 
     def _modify_debug_info(self, info: DebugServerProcessInfo, debug_info: DebugInfo):
         frame_meta = debug_info.frame_meta
@@ -592,12 +597,6 @@ class MasterDebugPanel(mui.FlexBox):
                         continue
             async with self.dm.draft_update():
                 draft.infos = process_infos
-                bkpt_proc_cnt = 0
-                for info in process_infos:
-                    if info.is_paused:
-                        bkpt_proc_cnt += 1
-                await self.flow_event_emitter.emit_async(self._backend_bkpt_proc_change, 
-                    mui.Event(self._backend_bkpt_proc_change, bkpt_proc_cnt))
                 found = False
                 if cur_model.cur_mounted_info_uid is not None:
                     # check infos still contains this uid
@@ -607,6 +606,12 @@ class MasterDebugPanel(mui.FlexBox):
                             break
                 if not found:
                     draft.cur_mounted_info_uid = None
+            bkpt_proc_cnt = 0
+            for info in process_infos:
+                if info.is_paused:
+                    bkpt_proc_cnt += 1
+            await self.flow_event_emitter.emit_async(self._backend_bkpt_proc_change, 
+                mui.Event(self._backend_bkpt_proc_change, bkpt_proc_cnt))
 
     async def _unmount_remote_comp(self):
         async with self.dm.draft_update():
@@ -1019,7 +1024,7 @@ class MasterDebugPanel(mui.FlexBox):
 
 
     async def handle_breadcrumb_click(self, data: list[str]):
-        # print(data)
+        print("handle_breadcrumb_click", data)
         if len(data) == 1:
             async with self.dm.draft_update():
                 self.dm.get_draft().cur_mounted_info_uid = None

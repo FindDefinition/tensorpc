@@ -3277,6 +3277,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
     async def _reconnect_to_remote_comp(self):
         _use_remote_generator: bool = True
+        LOGGER.warning(f"reconnect to remote component {self._key}")
         try:
             await self.shutdown_remote_object()
             await self._close_remote_loop()
@@ -3285,6 +3286,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             # node_uid = get_unique_node_id(master_meta.graph_id,
             #                     master_meta.node_id)
             await self.setup_remote_object()
+            LOGGER.warning(f"reconnect to remote component {self._key}: setup remote object done")
+
             prefixes = self._flow_uid.parts
             if not _use_remote_generator:
                 master_meta = MasterMeta()
@@ -3319,6 +3322,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except BaseException as e:
             await self.send_exception(e)
             await self.disconnect()
+        LOGGER.warning(f"reconnect to remote component {self._key}: finish")
 
     async def _close_remote_loop(self):
         self._shutdown_ev.set()

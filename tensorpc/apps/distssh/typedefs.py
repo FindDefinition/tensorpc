@@ -70,6 +70,8 @@ class FTSSHServerArgs:
     cmd_shutdown_timeout: int = 10
     cmd_ctrl_c_retry: int = 3
 
+    nproc_per_node: int = -1
+
     logdir: str = ""
 
     cmd_retry_when_reconnect: bool = True
@@ -152,3 +154,9 @@ class MasterActions(enum.Enum):
 class UILocalActions(enum.Enum):
     PYTORCH_SPY = "_local_PYTORCH_SPY"
     INTERNAL_DEBUG = "_local_INTERNAL_DEBUG"
+
+
+class CheckpointActions(enum.Enum):
+    LOAD_ITEM = "LOAD_ITEM"
+    # DELETE_ITEM = "Delete Item"
+    SAVE = "SAVE"

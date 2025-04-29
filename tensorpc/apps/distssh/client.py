@@ -11,6 +11,7 @@ from tensorpc.core import BuiltinServiceKeys
 from tensorpc.core.tree_id import UniqueTreeId
 import traceback
 from tensorpc.apps.dbg.bkpt import breakpoint, init, force_stop_trace
+from tensorpc.core.bgserver import BACKGROUND_SERVER
 
 _DISTSSH_URL = os.getenv(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
 
@@ -167,10 +168,11 @@ def pth_control_point(*, _frame_cnt: int = 2):
     if not should_enter_breakpoint:
         # tell dbg server disable all running traces.
         # trace result won't be saved.
-        init()
+        if not BACKGROUND_SERVER.is_started:
+            return 
         force_stop_trace()
         return 
-
+    init()
     res = breakpoint(_frame_cnt=_frame_cnt)
     # we must sync bkpt res from rank 0 to avoid inconsistent state.
     obj_list = [res] * world_size

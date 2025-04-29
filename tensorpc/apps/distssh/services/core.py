@@ -314,7 +314,7 @@ class FaultToleranceSSHServer:
                 return False 
         return True 
 
-    def start_logging(self, logdir: str):
+    def start_logging(self, logdir: str, open_mode: str = "a"):
         # real logger will be created when a command started, and reset
         # when the command finished.
         if self._cur_logger is not None:
@@ -323,7 +323,7 @@ class FaultToleranceSSHServer:
             logpath = Path(self._cfg.logdir) / f"cmd-log-{self.state.rank}.jsonl"
             if not logpath.parent.exists():
                 logpath.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-            logger = SSHEventLogger(logpath, open_mode="a")
+            logger = SSHEventLogger(logpath, open_mode=open_mode)
             logger.open()
             if self._root_logger is not None:
                 ts = time.time_ns()
@@ -380,7 +380,11 @@ class FaultToleranceSSHServer:
         assert state is not None 
         pid = state.pid
         if pytorch_mode:
-            return await get_torchrun_traceback_by_pyspy(root_pid=pid)
+            try:
+                return await get_torchrun_traceback_by_pyspy(root_pid=pid, ignore_error=True)
+            except:
+                LOGGER.exception("get torchrun traceback failed", exc_info=True)
+                return {}
         else:
             return await get_all_subprocess_traceback_by_pyspy(pid=pid)
 

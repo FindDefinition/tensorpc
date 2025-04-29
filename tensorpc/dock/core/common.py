@@ -15,7 +15,7 @@
 from functools import partial
 from typing import Any, Tuple, Union
 import asyncio
-from tensorpc.dock.core.component import Component, Event, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType, ALL_POINTER_EVENTS
+from tensorpc.dock.core.component import Component, Event, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType, ALL_POINTER_EVENTS, LOGGER
 
 _STATE_CHANGE_EVENTS = set([
     FrontendEventType.Change.value,
@@ -132,6 +132,11 @@ async def handle_standard_event(comp: Component,
     """
     # print("WTF", event.type, event.data, comp._flow_comp_status)
     if comp._flow_comp_status == UIRunStatus.Running.value:
+        flowuid = comp._flow_uid
+        if flowuid is not None:
+            LOGGER.warning("Component (%s) %s is running, ignore user event %s", type(comp).__name__, flowuid, event.type)
+        else:
+            LOGGER.warning("Component (%s) is running, ignore user event %s", type(comp).__name__, event.type)
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
         return

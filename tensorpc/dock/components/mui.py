@@ -1864,13 +1864,16 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def set_line_number(self, lineno: int):
-        ev = self.create_comp_event({
+    async def set_line_number(self, lineno: int, select_line: Optional[bool] = None):
+        ev_dict = {
             "type":
             int(_MonacoEditorControlType.SetLineNumber),
             "value":
             lineno,
-        })
+        }
+        if select_line is not None:
+            ev_dict["selectLine"] = select_line
+        ev = self.create_comp_event(ev_dict)
         await self.send_and_wait(ev)
 
     async def save(self, userdata: Optional[Any] = None):
@@ -5355,6 +5358,8 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         masterDetail: Union[Undefined, Component] = undefined
         customHeaders: Union[Undefined, List[Component]] = undefined
         customFooters: Union[Undefined, List[Component]] = undefined
+        # only available for no-virtual table.
+        customPaginationFooters: Union[Undefined, List[Component]] = undefined
 
         @field_validator('columnDefs')
         def column_def_validator(cls, v: List[DataGridColumnDef]):
@@ -5377,12 +5382,13 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         customFooters: Union[Undefined, List[Component]] = undefined,
         customHeaderDatas: Union[Undefined, List[Dict[str, Any]]] = undefined,
         customFooterDatas: Union[Undefined, List[Dict[str, Any]]] = undefined,
+        customPaginationFooters: Union[Undefined, List[Component]] = undefined,
     ) -> None:
         super().__init__(
             UIType.DataGrid,
             DataGridProps,
             DataGrid.ChildDef(column_def, master_detail, customHeaders,
-                              customFooters),
+                              customFooters, customPaginationFooters),
             False,
             allowed_events=[
                 FrontendEventType.DataGridFetchDetail.value,

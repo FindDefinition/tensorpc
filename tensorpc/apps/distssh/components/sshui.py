@@ -17,7 +17,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
                                              TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
                                              )
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
-from ..typedefs import CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
+from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
 from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
 from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
@@ -53,23 +53,23 @@ class WorkersStatusBox(mui.DataFlexBox):
         self.update_raw_props({
             "@keyframes animateOutline": {
                 "0%": {
-                    "outline-width": "1px",
-                    "outline-offset": 0,
-                    "outline-color": "rgba(0, 130, 206, 0)",
+                    "outlineWidth": "1px",
+                    "outlineOffset": 0,
+                    "outlineColor": "rgba(0, 130, 206, 0)",
                 },
                 "10%": {
-                    "outline-color": "rgba(0, 130, 206, 0.75)",
+                    "outlineColor": "rgba(0, 130, 206, 0.75)",
                 },
 
                 "50%": {
-                    "outline-width": "4px",
-                    "outline-offset": "2px",
-                    "outline-color": "rgba(0, 130, 206, 0)",
+                    "outlineWidth": "4px",
+                    "outlineOffset": "2px",
+                    "outlineColor": "rgba(0, 130, 206, 0)",
                 },
                 "100%": {
-                    "outline-width": "4px",
-                    "outline-offset": "2px",
-                    "outline-color": "rgba(102, 102, 102, 0)",
+                    "outlineWidth": "4px",
+                    "outlineOffset": "2px",
+                    "outlineColor": "rgba(102, 102, 102, 0)",
                 },
             }
         })
@@ -90,6 +90,7 @@ class CheckpointManager(mui.FlexBox):
         event_emitter_kvstore = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.backend_get_event_emitter")()
         btn = mui.Button("Load").prop(loading=False, size="small")
         btn.event_click.on_standard(self._on_ckpt_load).configure(True)
+        save_btn = mui.Button("Save", self._on_ckpt_save).prop(size="small")
         self._release_bkpt_fn = release_bkpt_fn
         column_defs = [
             # mui.DataGrid.ColumnDef("id", accessorKey="id"),
@@ -104,7 +105,11 @@ class CheckpointManager(mui.FlexBox):
         ]
         draft = master_dm.get_draft()
         btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == `0`)"),)
-        dgrid = mui.DataGrid(column_defs, []).prop(idKey="id", rowHover=True)
+        save_btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == `0`)"),)
+        footer = mui.HBox([
+            save_btn
+        ]).prop(padding="10px")
+        dgrid = mui.DataGrid(column_defs, [], customPaginationFooters=[footer]).prop(idKey="id", rowHover=True)
         self.dgrid = dgrid
         super().__init__([
             dgrid.prop(stickyHeader=True, virtualized=False, size="small", enableGlobalFilter=False,
@@ -160,8 +165,20 @@ class CheckpointManager(mui.FlexBox):
         assert isinstance(dlist, list)
         for data in dlist:
             assert isinstance(data, CheckpointItem)
+            data_dict = dataclasses.asdict(data)
+            msg = {
+                "type": CheckpointActions.LOAD_ITEM.value,
+                "data": data_dict,
+            }
             if data.id == key_encoded:
-                return await self._release_bkpt_fn(dataclasses.asdict(data))
+                return await self._release_bkpt_fn(msg)
+
+    async def _on_ckpt_save(self):
+        msg = {
+            "type": CheckpointActions.SAVE.value,
+            "data": None,
+        }
+        return await self._release_bkpt_fn(msg)
 
 def _get_terminal_menus(term: terminal.AsyncSSHTerminal):
     
@@ -239,7 +256,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
         cared_menu_acts = [MasterActions.RECONNECT_ALL_CLIENT, MasterActions.CLEAR_ALL_CKPT, MasterActions.CLEAR_ALL_TERMINALS]
         for action in MasterActions:
             if action in cared_menu_acts:
-                menu_items.append(mui.MenuItem(action.value, action.value))
+                menu_items.append(mui.MenuItem(action.value, action.value, 
+                    confirmMessage="Are You Sure?", 
+                    confirmTitle=f"Dangerous Operation ({action.value})"))
         menu_items.extend([
             mui.MenuItem("divider1", divider=True),
             mui.MenuItem(UILocalActions.PYTORCH_SPY.value, "PyTorch Dist Spy"),
@@ -371,9 +390,17 @@ class FaultToleranceUIMaster(mui.FlexBox):
         data = await self._fetch_debug_info_fn(pytorch_mode)
         if data is not None:
             data_with_str_id = {}
-            for k, v in data.items():
+            for (rank, pid), v in data.items():
                 # only check mainthread
-                data_with_str_id[f"{k[0]}-{k[1]}"] = v[0]
+                if v:
+                    data_with_str_id[f"{rank}-{pid}"] = v[0]
+                else:
+                    data_with_str_id[f"{rank}-{pid}"] = {
+                        "pid": pid,
+                        "thread_id": 0,
+                        "thread_name": "Unknown",
+                        "frames": [],
+                    }
             await self._pyspy_viewer.set_pyspy_raw_data(data_with_str_id)
 
     async def _on_has_bkpt_change(self, num_bkpt_proc):

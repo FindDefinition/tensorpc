@@ -85,14 +85,16 @@ class PyspyViewer(mui.FlexBox):
         fname = first_uid.parts[0]
         line = int(first_uid.parts[1])
         key = (fname, line)
-        assert key in self._root_data
-        groups = self._root_data[key]
-        draft = self.dm.get_draft()
-        draft.selected_group = groups
-        if groups:
-            draft.selected_process = dataclasses.asdict(groups[0])
-            if groups[0].frames:
-                draft.selected_stack = dataclasses.asdict(groups[0].frames[0])
+        # if line == -1, means get info failed, we remain it empty.
+        if line >= 0:
+            assert key in self._root_data
+            groups = self._root_data[key]
+            draft = self.dm.get_draft()
+            draft.selected_group = groups
+            if groups:
+                draft.selected_process = dataclasses.asdict(groups[0])
+                if groups[0].frames:
+                    draft.selected_stack = dataclasses.asdict(groups[0].frames[0])
 
     async def _on_selected_proc_change(self, ev: DraftChangeEvent):
         new_val = ev.new_value  
@@ -108,7 +110,7 @@ class PyspyViewer(mui.FlexBox):
                 await self.send_and_wait(self._editor.update_event(
                     value=code, path=fname
                 ))
-                await self._editor.set_line_number(line)
+                await self._editor.set_line_number(line, select_line=True)
         else:
             await self.send_and_wait(self._editor.update_event(
                 value="", path="default"
@@ -125,16 +127,28 @@ class PyspyViewer(mui.FlexBox):
         if group_by_full_trace:
             raise NotImplementedError
         else:
+            empty_key = ("unknown", -1)
+
             # group by fname-lineno of last frame
             grouped_traces: dict[tuple[str, int], list[PyspyTraceWithLabel]] = {}
             for trace in all_traces:
                 if len(trace.frames) == 0:
+                    key = empty_key
+                    if key not in grouped_traces:
+                        grouped_traces[key] = []
+                    grouped_traces[key].append(trace)
                     continue
                 last_frame = trace.frames[0]
                 key = (last_frame.filename, last_frame.line)
                 if key not in grouped_traces:
                     grouped_traces[key] = []
                 grouped_traces[key].append(trace)
+            # reorder grouped_traces to make sure unknown item at the end
+            if empty_key in grouped_traces:
+                empty_item = grouped_traces[empty_key]
+                del grouped_traces[empty_key]
+                grouped_traces[empty_key] = empty_item
+
             group_nodes: list[mui.JsonLikeNode] = []
             for (fname, line), v in grouped_traces.items():
                 fname_p = Path(fname)
@@ -142,6 +156,7 @@ class PyspyViewer(mui.FlexBox):
                     UniqueTreeIdForTree.from_parts([fname, str(line)]),
                     f"{fname_p.name}:{line}",
                     mui.JsonLikeType.Object.value,
+                    value=str(len(v))
                 ))
             self._root_data = grouped_traces
             root_node = mui.JsonLikeNode.create_dummy()
