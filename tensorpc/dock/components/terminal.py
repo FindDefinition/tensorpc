@@ -8,6 +8,7 @@ import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional, Union
 from asyncssh import SSHClientConnection
+import humanize
 from typing_extensions import Literal
 from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_INIT_SUCCESS
 from tensorpc.autossh.core import CommandEvent, CommandEventType, EofEvent, ExceptionEvent, LineEvent, LineEventType, LineRawEvent, RawEvent, SSHClient, SSHConnDesc, SSHRequest, SSHRequestType, LOGGER, ShellInfo, remove_trivial_r_lines
@@ -215,7 +216,9 @@ class Terminal(MUIComponentBase[TerminalProps]):
     async def _terminal_state_mount(self, term_id):
         if self._dont_use_frontend_state and self._buffer is not None:
             state_to_send, ts = self._buffer.load_state_backend_only()
-            await self.clear_and_write(state_to_send, ts)
+            size_hum = humanize.naturalsize(len(state_to_send))
+            SSH_LOGGER.warning("send %s (%d lines) to frontend", size_hum, len(self._buffer._raw_buffers_with_ts))
+            await self.clear_and_write(state_to_send, ts, append_buffer=False)
             return 
         if self._state_buffers is not None:
             if term_id is not None and term_id in self._state_buffers:
