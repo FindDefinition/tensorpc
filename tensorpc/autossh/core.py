@@ -1315,7 +1315,7 @@ class SSHClient:
                     asyncio.create_task(inp_queue.get(), name=f"autossh-connect_queue-inp_queue-get"), 
                     shutdown_task, loop_task,
                 ]
-                raw_ev_task = asyncio.create_task(raw_ev.wait())
+                raw_ev_task = asyncio.create_task(raw_ev.wait(), name="autossh-raw-wait")
                 if enable_raw_event:
                     wait_tasks.append(raw_ev_task)
                 fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners = await self._handle_forward_ports(conn, forward_ports, r_forward_ports)
@@ -1366,7 +1366,7 @@ class SSHClient:
                             new_ev = RawEvent(ev_buf[-1].timestamp, new_data, False, uid=self.uid)
                             await callback(new_ev)
                         raw_ev.clear()
-                        raw_ev_task = asyncio.create_task(raw_ev.wait())
+                        raw_ev_task = asyncio.create_task(raw_ev.wait(), name="autossh-raw-wait")
                         wait_tasks[-1] = raw_ev_task
                     if shutdown_task in done:
                         for task in pending:

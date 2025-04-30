@@ -422,31 +422,30 @@ class MasterDebugPanel(mui.FlexBox):
         return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
 
     async def _mount_remote_server_apps(self, meta: DebugServerProcessInfo):
-        async with self._serv_list_lock:
-            if self._relay_robj is not None:
-                # use relay
-                url_with_port = self._relay_robj.url 
-                url, port = url_with_port.split(":")
-                relay_urls = [f"localhost:{meta.port}"]
-            else:
-                url = "localhost"
-                port = meta.port
-                relay_urls = None
-            await self._remote_comp_container.set_new_layout([
+        if self._relay_robj is not None:
+            # use relay
+            url_with_port = self._relay_robj.url 
+            url, port = url_with_port.split(":")
+            relay_urls = [f"localhost:{meta.port}"]
+        else:
+            url = "localhost"
+            port = meta.port
+            relay_urls = None
+        await self._remote_comp_container.set_new_layout([
+            mui.RemoteBoxGrpc(
+                url, port,
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+                relay_urls=relay_urls).prop(flex=1)
+        ])
+        if meta.proc_type == BuiltinServiceProcType.REMOTE_COMP:
+            await self._remote_comp_tv_container.set_new_layout([
                 mui.RemoteBoxGrpc(
                     url, port,
-                    TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+                    TENSORPC_DBG_TRACE_VIEW_KEY,
                     relay_urls=relay_urls).prop(flex=1)
             ])
-            if meta.proc_type == BuiltinServiceProcType.REMOTE_COMP:
-                await self._remote_comp_tv_container.set_new_layout([
-                    mui.RemoteBoxGrpc(
-                        url, port,
-                        TENSORPC_DBG_TRACE_VIEW_KEY,
-                        relay_urls=relay_urls).prop(flex=1)
-                ])
-            else:
-                await self._remote_comp_tv_container.set_new_layout([])
+        else:
+            await self._remote_comp_tv_container.set_new_layout([])
 
 
     async def _unmount_remote_server_apps(self):
@@ -471,12 +470,13 @@ class MasterDebugPanel(mui.FlexBox):
         indexes = ev.indexes
         assert not isinstance(indexes, mui.Undefined)
         meta = self.dm.get_model().infos[indexes[0]]
-        async with self.dm.draft_update():
-            self.dm.get_draft().cur_mounted_info_uid = meta.uid
+        async with self._serv_list_lock:
+            async with self.dm.draft_update():
+                self.dm.get_draft().cur_mounted_info_uid = meta.uid
 
     async def _scan_loop(self, shutdown_ev: asyncio.Event):
-        shutdown_task = asyncio.create_task(shutdown_ev.wait())
-        sleep_task = asyncio.create_task(asyncio.sleep(self._scan_duration))
+        shutdown_task = asyncio.create_task(shutdown_ev.wait(), name="dbg-scan-shutdown-wait")
+        sleep_task = asyncio.create_task(asyncio.sleep(self._scan_duration), name="dbg-scan-sleep")
         wait_tasks = [shutdown_task, sleep_task]
         while True:
             done, pending = await asyncio.wait(
@@ -596,18 +596,18 @@ class MasterDebugPanel(mui.FlexBox):
                         info.primaryColor = "error"
                         continue
             async with self.dm.draft_update():
-                draft.infos = process_infos
+                draft.infos = self._current_proc_infos
                 found = False
                 if cur_model.cur_mounted_info_uid is not None:
                     # check infos still contains this uid
-                    for info in process_infos:
+                    for info in self._current_proc_infos:
                         if info.uid == cur_model.cur_mounted_info_uid:
                             found = True
                             break
                 if not found:
                     draft.cur_mounted_info_uid = None
             bkpt_proc_cnt = 0
-            for info in process_infos:
+            for info in self._current_proc_infos:
                 if info.is_paused:
                     bkpt_proc_cnt += 1
             await self.flow_event_emitter.emit_async(self._backend_bkpt_proc_change, 
@@ -650,32 +650,33 @@ class MasterDebugPanel(mui.FlexBox):
                                         trace_timestamp=ts)
         else:
             trace_cfg = dataclasses.replace(trace_cfg, trace_timestamp=ts)
-
-        for info in self._current_proc_infos:
-            if dist_id is not None and info.dist_info is not None:
-                if info.dist_info.run_id != dist_id:
-                    continue
-            if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
-                continue 
-            try:
-                await self._run_rpc_on_process(info, 
-                                              dbg_serv_names.DBG_LEAVE_BREAKPOINT,
-                                              trace_cfg,
-                                              rpc_timeout=1)
-            except TimeoutError:
-                traceback.print_exc()
-            except grpc.aio.AioRpcError as e:
-                if e.code() == grpc.StatusCode.UNAVAILABLE:
-                    continue
-                else:
+        async with self._serv_list_lock:
+            for info in self._current_proc_infos:
+                if dist_id is not None and info.dist_info is not None:
+                    if info.dist_info.run_id != dist_id:
+                        continue
+                if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
+                    continue 
+                try:
+                    await self._run_rpc_on_process(info, 
+                                                dbg_serv_names.DBG_LEAVE_BREAKPOINT,
+                                                trace_cfg,
+                                                rpc_timeout=1)
+                except TimeoutError:
                     traceback.print_exc()
+                except grpc.aio.AioRpcError as e:
+                    if e.code() == grpc.StatusCode.UNAVAILABLE:
+                        continue
+                    else:
+                        traceback.print_exc()
         if self._rpc_call_external is not None:
             await self._rpc_call_external(dbg_serv_names.DBG_LEAVE_BREAKPOINT, trace_cfg, rpc_timeout=1)
 
     async def force_trace_stop(self):
-        await self._run_rpc_on_processes(self._current_proc_infos,
-                                     dbg_serv_names.DBG_TRACE_STOP_IN_NEXT_BKPT,
-                                     rpc_timeout=3)
+        async with self._serv_list_lock:
+            await self._run_rpc_on_processes(self._current_proc_infos,
+                                        dbg_serv_names.DBG_TRACE_STOP_IN_NEXT_BKPT,
+                                        rpc_timeout=3)
         if self._rpc_call_external is not None:
             await self._rpc_call_external(dbg_serv_names.DBG_TRACE_STOP_IN_NEXT_BKPT, rpc_timeout=3)
 
@@ -999,35 +1000,36 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):
         if data.type == VscodeTensorpcMessageType.UpdateCursorPosition:
-            if data.selections is not None and len(
-                    data.selections) > 0 and data.currentUri.startswith(
-                        "file://"):
-                path = data.currentUri[7:]
-                sel = data.selections[0]
-                lineno = sel.start.line + 1
-                col = sel.start.character
-                end_lineno = sel.end.line + 1
-                end_col = sel.end.character
-                code_range = (lineno, col, end_lineno, end_col)
-                for info in self._current_proc_infos:
-                    if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
-                        continue 
-                    try:
-                        await self._run_rpc_on_process(info, 
-                                                        dbg_serv_names.DBG_HANDLE_CODE_SELECTION_MSG,
-                                                        data.selectedCode,
-                                                        path,
-                                                        code_range,
-                                                        rpc_timeout=5)
-                    except TimeoutError:
-                        traceback.print_exc()
+            async with self._serv_list_lock:
+                if data.selections is not None and len(
+                        data.selections) > 0 and data.currentUri.startswith(
+                            "file://"):
+                    path = data.currentUri[7:]
+                    sel = data.selections[0]
+                    lineno = sel.start.line + 1
+                    col = sel.start.character
+                    end_lineno = sel.end.line + 1
+                    end_col = sel.end.character
+                    code_range = (lineno, col, end_lineno, end_col)
+                    for info in self._current_proc_infos:
+                        if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
+                            continue 
+                        try:
+                            await self._run_rpc_on_process(info, 
+                                                            dbg_serv_names.DBG_HANDLE_CODE_SELECTION_MSG,
+                                                            data.selectedCode,
+                                                            path,
+                                                            code_range,
+                                                            rpc_timeout=5)
+                        except TimeoutError:
+                            traceback.print_exc()
 
 
     async def handle_breadcrumb_click(self, data: list[str]):
-        print("handle_breadcrumb_click", data)
         if len(data) == 1:
-            async with self.dm.draft_update():
-                self.dm.get_draft().cur_mounted_info_uid = None
+            async with self._serv_list_lock:
+                async with self.dm.draft_update():
+                    self.dm.get_draft().cur_mounted_info_uid = None
 
 if __name__ == "__main__":
     print(list_all_dbg_server_in_machine())

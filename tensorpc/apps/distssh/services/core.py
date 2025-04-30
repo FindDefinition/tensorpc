@@ -596,7 +596,7 @@ class FaultToleranceSSHServer:
         else:
             raise RuntimeError(f"Unsupported shell type: {shell_info.type}")
         shutdown_ev = prim.get_async_shutdown_event()
-        shutdown_ev_task = asyncio.create_task(shutdown_ev.wait())
+        shutdown_ev_task = asyncio.create_task(shutdown_ev.wait(), name="ft-ssh-cmdwaiter-wait")
 
         try:
             self._cmd_start_ts = time.time_ns()

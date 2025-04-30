@@ -476,6 +476,7 @@ class NodeWithSSHBase(RunnableNodeBase):
 
     @terminal_state.setter
     def terminal_state(self, val: bytes):
+        assert isinstance(val, bytes)
         self._terminal_state = val
         self._raw_event_history.clear()
 

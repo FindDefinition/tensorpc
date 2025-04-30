@@ -413,7 +413,7 @@ class AsyncSSHTerminal(Terminal):
             await self.clear()
         self._shutdown_ev.clear()
         self._init_event.clear()
-        sd_task = asyncio.create_task(self._shutdown_ev.wait())
+        sd_task = asyncio.create_task(self._shutdown_ev.wait(), name="AsyncSSHTerminal-shutdown-wait")
         cur_inp_queue = asyncio.Queue()
         size_state = TerminalResizeEvent(-1, -1)
         if self._init_size is not None:
