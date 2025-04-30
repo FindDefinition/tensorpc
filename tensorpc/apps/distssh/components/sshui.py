@@ -18,7 +18,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
                                              )
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
 from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, PyspyTraceMode, UILocalActions
-from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
 

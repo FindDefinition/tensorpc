@@ -11,7 +11,7 @@ from tensorpc.apps.cflow.coremodel import ResourceDesc
 from tensorpc.apps.cflow.model import ComputeNodeModel
 from tensorpc.apps.cflow.nodes.cnode.ctx import get_compute_flow_node_context
 from tensorpc.apps.cflow.nodes.cnode.registry import get_registry_func_modules_for_remote
-from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 from tensorpc.apps.dbg.services.relay import RelayMonitorConfig
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core.annolib import Undefined, undefined

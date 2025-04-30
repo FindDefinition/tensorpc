@@ -75,23 +75,23 @@ class Trainer(object):
         distssh_url = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
         assert distssh_url is not None 
         with tensorpc.RemoteManager(distssh_url) as robj:
-            ckpt_client = TorchDistributedCkptClient(robj, 5, 5, -1)
-            flash_ckpt_stream = torch.cuda.Stream()
+            ckpt_client = TorchDistributedCkptClient(robj, 4, 4, -1)
+            # flash_ckpt_stream = torch.cuda.Stream()
             for epoch in range(1, epochs + 1):
-                train_loss, train_acc = self.train(epoch, flash_ckpt_stream, ckpt_client)
+                train_loss, train_acc = self.train(epoch, ckpt_client)
                 test_loss, test_acc = self.evaluate()
-                ckpt_client.store_major_checkpoint("mnist", epoch, {
-                    "model": self.model.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                })
+                # ckpt_client.store_major_checkpoint("mnist", epoch, {
+                #     "model": self.model.state_dict(),
+                #     "optimizer": self.optimizer.state_dict(),
+                # })
                 print(
                     'Epoch: {}/{},'.format(epoch, epochs),
                     'train loss: {}, train acc: {},'.format(train_loss, train_acc),
                     'test loss: {}, test acc: {}.'.format(test_loss, test_acc),
                 )
-                pth_control_point()
+                print(pth_control_point())
 
-    def train(self, epoch, stream: torch.cuda.Stream, ckpt_client: TorchDistributedCkptClient):
+    def train(self, epoch, ckpt_client: TorchDistributedCkptClient):
         self.model.train()
         print(len(self.train_loader))
         train_loss = Average()
@@ -107,32 +107,32 @@ class Trainer(object):
                 self.optimizer.zero_grad()
                 loss.backward()
             # wait for minor checkpoint to be stored to remote shm
-            stream.synchronize()
+            # stream.synchronize()
             # torch.cuda.current_stream().wait_stream(stream)
             # torch.cuda.synchronize()
-            if ckpt_client.has_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt):
-                state_dict_cur = {
-                    "model": self.model.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                }
-                state_dict_cur_tensors = pytree.tree_flatten(state_dict_cur)[0]
-                state_dict_stored_before = ckpt_client.get_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt)
-                state_dict_stored_before_tensors = pytree.tree_flatten(state_dict_stored_before)[0]
-                for i in range(len(state_dict_cur_tensors)):
-                    if isinstance(state_dict_cur_tensors[i], torch.Tensor):
-                        assert torch.allclose(state_dict_cur_tensors[i].cpu(), state_dict_stored_before_tensors[i])
+            # if ckpt_client.has_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt):
+            #     state_dict_cur = {
+            #         "model": self.model.state_dict(),
+            #         "optimizer": self.optimizer.state_dict(),
+            #     }
+            #     state_dict_cur_tensors = pytree.tree_flatten(state_dict_cur)[0]
+            #     state_dict_stored_before = ckpt_client.get_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt)
+            #     state_dict_stored_before_tensors = pytree.tree_flatten(state_dict_stored_before)[0]
+            #     for i in range(len(state_dict_cur_tensors)):
+            #         if isinstance(state_dict_cur_tensors[i], torch.Tensor):
+            #             assert torch.allclose(state_dict_cur_tensors[i].cpu(), state_dict_stored_before_tensors[i])
             self.optimizer.step()
 
             train_loss.update(loss.item(), data.size(0))
             train_acc.update(output, target)
 
-            cnt += 1
-            if cnt % 20 == 0:
-                stream.wait_stream(torch.cuda.current_stream())
-                ckpt_client.store_minor_checkpoint("mnist", len(self.train_loader) * epoch + cnt, {
-                    "model": self.model.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                }, stream=stream)
+            # cnt += 1
+            # if cnt % 20 == 0:
+            #     stream.wait_stream(torch.cuda.current_stream())
+            #     ckpt_client.store_minor_checkpoint("mnist", len(self.train_loader) * epoch + cnt, {
+            #         "model": self.model.state_dict(),
+            #         "optimizer": self.optimizer.state_dict(),
+            #     }, stream=stream)
 
         return train_loss, train_acc
 
@@ -195,7 +195,11 @@ def run(args, mesh):
     model = Net()
     if distributed_is_initialized():
         model.to(device)
-        model = nn.parallel.DistributedDataParallel(model, device_mesh=mesh)
+        if args.no_cuda:
+            model = nn.parallel.DistributedDataParallel(model)
+        else:
+            model = nn.parallel.DistributedDataParallel(model, device_mesh=mesh)
+
     else:
         model = nn.DataParallel(model)
         model.to(device)
@@ -219,7 +223,7 @@ def main():
                         help='URL specifying how to initialize the package.')
     parser.add_argument('-s', '--world-size', type=int, default=1, help='Number of processes participating in the job.')
     parser.add_argument('-r', '--rank', type=int, default=0, help='Rank of the current process.')
-    parser.add_argument('--epochs', type=int, default=8)
+    parser.add_argument('--epochs', type=int, default=28)
     parser.add_argument('--no-cuda', action='store_true')
     parser.add_argument('-lr', '--learning-rate', type=float, default=1e-3)
     parser.add_argument('--root', type=str, default='build/data')
@@ -227,13 +231,23 @@ def main():
     args = parser.parse_args()
     world_size = os.environ.get('WORLD_SIZE')
     assert world_size is not None 
-    mesh = init_device_mesh("cuda", (int(world_size),))
-    args.rank = mesh.get_rank()
-    args.world_size = mesh.size()
+    if args.no_cuda:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        dist.init_process_group("gloo", rank=local_rank)
+        # mesh = init_device_mesh("cpu", (int(world_size),))
+        mesh = None
+        args.rank = local_rank
+        args.world_size = int(world_size)
+    else:
+        mesh = init_device_mesh("cuda", (int(world_size),))
+
+        args.rank = mesh.get_rank()
+        args.world_size = mesh.size()
     print(args)
 
     run(args, mesh)
-
+    if args.no_cuda:
+        dist.destroy_process_group()
 
 if __name__ == '__main__':
     main()

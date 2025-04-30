@@ -268,7 +268,7 @@ def init(proc_name: Optional[str] = None, port: int = -1):
     from tensorpc.dock.serv_names import serv_names as app_serv_names
     has_bkgd_ui = BACKGROUND_SERVER.execute_service(app_serv_names.REMOTE_COMP_HAS_LAYOUT_OBJECT, TENSORPC_DBG_FRAME_INSPECTOR_KEY)
     if not has_bkgd_ui:
-        from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
+        from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
         from tensorpc.apps.dbg.components.traceview import TraceView
         panel = BreakpointDebugPanel().prop(flex=1)
         userdata = _try_get_distributed_meta()

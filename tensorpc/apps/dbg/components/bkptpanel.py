@@ -2,25 +2,33 @@ import ast
 import asyncio
 import dataclasses
 import enum
+import os
+from pathlib import Path
 from time import sleep
 from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_WORKDIR
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import inspecttools
 from tensorpc.apps.dbg.core.frame_id import get_frame_uid
+from tensorpc.core.datamodel.draftstore import DraftSimpleFileStoreBackend
+from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import appctx
 from tensorpc.dock.components import chart, mui
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
-from tensorpc.apps.dbg.components.frameobj import FrameObjectPreview
+from tensorpc.apps.dbg.components.frame_obj_v2 import FrameObjectPreview
 from tensorpc.apps.dbg.components.perfetto_utils import zip_trace_result
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.dock.components.plus.scriptmgr import ScriptManager
+from tensorpc.dock.components.plus.scriptmgr import ScriptManager, ScriptManagerV2
 from tensorpc.dock.components.plus.styles import CodeStyles
 from tensorpc.dock.components.plus.objinspect.inspector import ObjectInspector
 from tensorpc.apps.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerSingleResult, TracerUIConfig
+from tensorpc.dock.core.appcore import AppSpecialEventType
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
-
+from tensorpc.apps.dbg.model import PyDbgModel, TracerState
+import tensorpc.core.datamodel as D
+from tensorpc.dock import marker
 
 class DebugActions(enum.Enum):
     RECORD_TO_NEXT_SAME_BKPT = "Record To Same Breakpoint"
@@ -33,6 +41,7 @@ _DEFAULT_BKPT_CNT_FOR_SAME_BKPT = 10
 class BreakpointDebugPanel(mui.FlexBox):
 
     def __init__(self):
+
         self.header = mui.Typography("").prop(variant="caption",
                                               fontFamily=CodeStyles.fontFamily)
 
@@ -78,12 +87,11 @@ class BreakpointDebugPanel(mui.FlexBox):
             self.copy_path_btn,
             self._header_more_menu,
         ])
-        self._all_frame_select = mui.Autocomplete("stack", [],
-                                                  self._select_frame)
+        self._all_frame_select = mui.Autocomplete("stack", [])
         self._all_frame_select.prop(size="small",
                                     textFieldProps=mui.TextFieldProps(
                                         muiMargin="dense",
-                                        fontFamily=CodeStyles.fontFamily),
+                                        variant="outlined"),
                                     padding="0 3px 0 3px")
         self._trace_launch_dialog = ConfigPanelDialog(
             self._on_trace_launch).prop(okLabel="Launch Record")
@@ -92,17 +100,13 @@ class BreakpointDebugPanel(mui.FlexBox):
                                  justifyContent="flex-end",
                                  paddingRight="4px",
                                  alignItems="center")
-        self.frame_script = FrameScript()
+        self.header_actions_may_disable = mui.MatchCase.binary_selection(True, self.header_actions)
+        self.frame_script_container = mui.VBox([]).prop(width="100%", height="100%", overflow="hidden")
         self._perfetto = chart.Perfetto().prop(width="100%", height="100%")
         custom_tabs = [
             mui.TabDef("",
-                       "1",
-                       ScriptManager(),
-                       icon=mui.IconType.Code,
-                       tooltip="script manager"),
-            mui.TabDef("",
                        "2",
-                       self.frame_script,
+                       self.frame_script_container,
                        icon=mui.IconType.DataArray,
                        tooltip="frame script manager"),
             mui.TabDef("",
@@ -118,16 +122,18 @@ class BreakpointDebugPanel(mui.FlexBox):
                                      overflow="hidden")
         self.tree_viewer = ObjectInspector(
             show_terminal=False,
-            default_sizes=[100, 100],
+            default_sizes=[60, 100],
             with_builtins=False,
             custom_tabs=custom_tabs,
-            custom_preview=self._frame_obj_preview)
+            custom_preview=self._frame_obj_preview,
+            horizontal=True)
         if isinstance(self.tree_viewer.tree.tree, mui.TanstackJsonLikeTree):
             self.tree_viewer.tree.tree.prop(maxLeafRowFilterDepth=0,
                                             filterNameTypeValue=True)
 
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
+        filter_input.prop(variant="outlined")
         tree = self.tree_viewer.tree.tree
         if isinstance(tree, mui.TanstackJsonLikeTree):
             filter_input.event_change.on(
@@ -137,7 +143,7 @@ class BreakpointDebugPanel(mui.FlexBox):
             filter_input.prop(flex=1),
             self._all_frame_select.prop(flex=2),
             self.header.prop(flex=4),
-            self.header_actions,
+            self.header_actions_may_disable,
         ]).prop(
             paddingLeft="4px",
             alignItems="center",
@@ -146,11 +152,62 @@ class BreakpointDebugPanel(mui.FlexBox):
         self.content_container = mui.VBox([
             self.tree_viewer.prop(flex=1),
         ]).prop(flex=1)
-        super().__init__([
-            self.header_container,
+        textfield_theme = mui.Theme(
+            components={
+                "MuiInputLabel": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        },
+                    },
+                },
+                "MuiOutlinedInput": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        }
+                    }
+                },
+                "MuiInput": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        }
+                    }
+                }
+
+            }
+        )
+        self.dm = mui.DataModel(PyDbgModel(TracerState(None, {})), [
+            mui.ThemeProvider([
+                self.header_container
+            ], textfield_theme),
             mui.Divider(),
             self.content_container,
             self._trace_launch_dialog,
+        ])
+
+        draft = self.dm.get_draft_type_only()
+        self.header_actions_may_disable.bind_fields(condition=D.not_null(not draft.bkpt.is_external, False))
+
+        self.header.bind_fields(value=D.not_null(D.literal_val("%s(%s)") % (draft.bkpt.selected_frame_item["qualname"], draft.bkpt.selected_frame_item["lineno"]), ""))
+        self._all_frame_select.bind_fields(options=D.not_null(draft.bkpt.frame_select_items, []))
+        self._all_frame_select.bind_draft_change(draft.bkpt.selected_frame_item)
+        self.dm.install_draft_change_handler(draft.bkpt.selected_frame_item, 
+            self._handle_selected_frame_change, installed_comp=self.header_actions, user_eval_vars={
+                "frame": draft.bkpt.frame
+            })
+        self.record_btn.bind_fields(
+            disabled=draft.bkpt == None,
+            muiColor=D.where(draft.bkpt == None, "success", "primary"),
+        )
+        self.copy_path_btn.bind_fields(
+            disabled=draft.bkpt == None)
+        super().__init__([
+            self.dm,
         ])
         self.prop(flexDirection="column")
         self._cur_leave_bkpt_cb: Optional[Callable[[Optional[TracerConfig]],
@@ -161,11 +218,92 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._cur_frame_state: DebugFrameState = DebugFrameState(None)
 
         self._bkgd_debug_tool_cfg: Optional[BackgroundDebugToolsConfig] = None
+    
+        self._cur_frame_script: Optional[ScriptManagerV2] = None
+
+        self._is_remote_mounted = False
+
+    @marker.mark_did_mount
+    async def _on_mount(self):
+        appctx.use_app_special_event_handler(self, AppSpecialEventType.RemoteCompMount, self._frame_script_remote_comp_mount)
+        appctx.use_app_special_event_handler(self, AppSpecialEventType.RemoteCompUnmount, self._frame_script_remote_comp_unmount)
+
+    
+    async def _frame_script_remote_comp_unmount(self, ev):
+        self._is_remote_mounted = False
+        await self.frame_script_container.set_new_layout([])
+
+    def _get_frame_script_from_frame(self, frame: FrameType, offset: int):
+        cur_frame: Optional[FrameType] = frame
+        count = offset
+        while count > 0:
+            assert cur_frame is not None
+            cur_frame = cur_frame.f_back
+            count -= 1
+        assert cur_frame is not None
+        frame_uid, frame_meta = get_frame_uid(cur_frame)
+        distssh_workdir = os.getenv(TENSORPC_ENV_DISTSSH_WORKDIR)
+        if distssh_workdir is not None:
+            distssh_workdir_framescript = Path(distssh_workdir) / "framescript"
+            fs_backend = DraftSimpleFileStoreBackend(distssh_workdir_framescript)
+            script_mgr = ScriptManagerV2(
+                init_store_backend=(fs_backend, frame_uid),
+                frame=frame,
+            )
+        else:
+            script_mgr = ScriptManagerV2(
+                enable_app_backend=False,
+                frame=frame,
+            )
+        return script_mgr
+
+    async def _frame_script_remote_comp_mount(self, ev):
+        self._is_remote_mounted = True
+        if self.dm.model.bkpt is not None:
+            frame = self.dm.model.bkpt.frame
+            assert frame is not None 
+            selected = self.dm.model.bkpt.selected_frame_item
+            offset = 0
+            if selected is not None:
+                offset = selected["offset"]
+            await self.frame_script_container.set_new_layout([
+                self._get_frame_script_from_frame(frame, offset),
+            ])
+
+    async def _handle_selected_frame_change(self, ev: DraftChangeEvent):
+        assert ev.user_eval_vars is not None 
+        if ev.new_value is not None and ev.user_eval_vars["frame"] is not None:
+            frame = ev.user_eval_vars["frame"]
+            option = ev.new_value 
+            cur_frame: Optional[FrameType] = frame
+            count = option["offset"]
+            while count > 0:
+                assert cur_frame is not None
+                cur_frame = cur_frame.f_back
+                count -= 1
+            assert cur_frame is not None
+            await self._set_frame_meta(cur_frame)
+            frame_uid, frame_meta = get_frame_uid(frame)
+            await self._frame_obj_preview.set_frame_meta(frame_uid,
+                                                        frame_meta.qualname)
+            if self._is_remote_mounted:
+                await self.frame_script_container.set_new_layout([
+                    self._get_frame_script_from_frame(cur_frame, 0),
+                ])
+        else:
+            # await self._frame_obj_preview.clear() 
+            await self._frame_obj_preview.clear_frame_variable()
+            await self._frame_obj_preview.clear_preview_layouts()
+            await self.tree_viewer.tree.set_root_object_dict({})
+            await self.frame_script_container.set_new_layout([])
+
 
     async def _copy_frame_path_lineno(self):
-        if self._cur_frame_meta is not None:
-            path_lineno = f"{self._cur_frame_meta.path}:{self._cur_frame_meta.lineno}"
-            await appctx.copy_text_to_clipboard(path_lineno)
+        if self.dm.model.bkpt is not None:
+            info = self.dm.model.bkpt.selected_frame_item
+            if info is not None:
+                path_lineno = f"{info['path']}:{info['lineno']}"
+                await appctx.copy_text_to_clipboard(path_lineno)
 
     async def _skip_further_bkpt(self, skip: Optional[bool] = None):
         await self._continue_bkpt()
@@ -186,107 +324,90 @@ class BreakpointDebugPanel(mui.FlexBox):
                             icon=mui.IconType.DoubleArrow))
 
     async def _continue_bkpt(self):
-        if self._cur_leave_bkpt_cb is not None:
-            await self._cur_leave_bkpt_cb(TracerConfig(enable=False))
-            self._cur_leave_bkpt_cb = None
-            # await self.leave_breakpoint()
+        if self.dm.model.bkpt is not None:
+            await self.dm.model.bkpt.get_launch_trace_fn()(TracerConfig(enable=False))
 
     async def _continue_bkpt_and_start_record(self):
-        if self._cur_leave_bkpt_cb is not None:
-            await self._cur_leave_bkpt_cb(TracerConfig(enable=True))
-            self._cur_leave_bkpt_cb = None
-            # await self.leave_breakpoint()
+        if self.dm.model.bkpt is not None:
+            await self.dm.model.bkpt.get_launch_trace_fn()(TracerConfig(enable=True))
 
     async def _handle_debug_more_actions(self, value: str):
-        if self._cur_leave_bkpt_cb is not None:
+        if self.dm.model.bkpt is not None:
             if value == DebugActions.RECORD_TO_NEXT_SAME_BKPT.value:
-                await self._cur_leave_bkpt_cb(
+                await self.dm.model.bkpt.get_launch_trace_fn()(
                     TracerConfig(
                         enable=True,
                         mode=RecordMode.SAME_BREAKPOINT,
                         breakpoint_count=_DEFAULT_BKPT_CNT_FOR_SAME_BKPT))
-                self._cur_leave_bkpt_cb = None
             elif value == DebugActions.RECORD_CUSTOM.value:
                 await self._trace_launch_dialog.open_config_dialog(
                     TracerUIConfig())
 
     async def _on_trace_launch(self, cfg_ev: ConfigDialogEvent[TracerUIConfig]):
         config = cfg_ev.cfg
-        if self._cur_leave_bkpt_cb is not None:
-            await self._cur_leave_bkpt_cb(
+        if self.dm.model.bkpt is not None:
+            await self.dm.model.bkpt.get_launch_trace_fn()(
                 TracerConfig(enable=True,
                              mode=config.mode,
                              breakpoint_count=config.breakpoint_count,
                              trace_name=config.trace_name,
                              max_stack_depth=config.max_stack_depth))
-            self._cur_leave_bkpt_cb = None
 
-    async def _select_frame(self, option: Dict[str, Any]):
-        if self._cur_frame_state.frame is None:
-            return
-        cur_frame = self._cur_frame_state.frame
-        count = option["count"]
-        while count > 0:
-            assert cur_frame is not None
-            cur_frame = cur_frame.f_back
-            count -= 1
-        assert cur_frame is not None
-        await self._set_frame_meta(cur_frame)
 
     async def _set_frame_meta(self, frame: FrameType):
-        frame_func_name = inspecttools.get_co_qualname_from_frame(frame)
+        # frame_func_name = inspecttools.get_co_qualname_from_frame(frame)
         local_vars_for_inspect = self._get_filtered_local_vars(frame)
         await self.tree_viewer.tree.set_root_object_dict(
             local_vars_for_inspect)
-        await self.header.write(f"{frame_func_name}({frame.f_lineno})")
-        await self.frame_script.mount_frame(
-            dataclasses.replace(self._cur_frame_state, frame=frame))
+        # await self.header.write(f"{frame_func_name}({frame.f_lineno})")
+        # await self.frame_script.mount_frame(
+        #     dataclasses.replace(self._cur_frame_state, frame=frame))
 
-    async def set_breakpoint_frame_meta(
-            self,
-            frame: FrameType,
-            leave_bkpt_cb: Callable[[Optional[TracerConfig]],
-                                    Coroutine[None, None, Any]],
-            is_record_stop: bool = False):
-        qname = inspecttools.get_co_qualname_from_frame(frame)
-        self._cur_frame_meta = DebugFrameInfo(frame.f_code.co_name, qname,
-                                              frame.f_code.co_filename,
-                                              frame.f_lineno)
-        self._cur_frame_state.frame = frame
-        self._cur_leave_bkpt_cb = leave_bkpt_cb
-        ev = self.copy_path_btn.update_event(disabled=False)
-        if is_record_stop:
-            ev += self.record_btn.update_event(disabled=False,
-                                               muiColor="primary")
-        await self.send_and_wait(ev)
-        cur_frame = frame
-        frame_select_opts = []
-        count = 0
-        while cur_frame is not None:
-            qname = inspecttools.get_co_qualname_from_frame(cur_frame)
-            frame_select_opts.append({"label": qname, "count": count})
-            count += 1
-            cur_frame = cur_frame.f_back
-        await self._all_frame_select.update_options(frame_select_opts, 0)
-        await self._set_frame_meta(frame)
-        frame_uid, frame_meta = get_frame_uid(frame)
-        await self._frame_obj_preview.set_frame_meta(frame_uid,
-                                                     frame_meta.qualname)
+    # async def set_breakpoint_frame_meta(
+    #         self,
+    #         frame: FrameType,
+    #         leave_bkpt_cb: Callable[[Optional[TracerConfig]],
+    #                                 Coroutine[None, None, Any]],
+    #         is_record_stop: bool = False):
+    #     qname = inspecttools.get_co_qualname_from_frame(frame)
+    #     self._cur_frame_meta = DebugFrameInfo(frame.f_code.co_name, qname,
+    #                                           frame.f_code.co_filename,
+    #                                           frame.f_lineno)
+    #     self._cur_frame_state.frame = frame
+    #     self._cur_leave_bkpt_cb = leave_bkpt_cb
+    #     ev = self.copy_path_btn.update_event(disabled=False)
+    #     if is_record_stop:
+    #         ev += self.record_btn.update_event(disabled=False,
+    #                                            muiColor="primary")
+    #     await self.send_and_wait(ev)
+    #     cur_frame = frame
+    #     frame_select_opts = []
+    #     count = 0
+    #     while cur_frame is not None:
+    #         qname = inspecttools.get_co_qualname_from_frame(cur_frame)
+    #         frame_select_opts.append({"label": qname, "count": count})
+    #         count += 1
+    #         cur_frame = cur_frame.f_back
+    #     await self._all_frame_select.update_options(frame_select_opts, 0)
+    #     await self._set_frame_meta(frame)
+    #     frame_uid, frame_meta = get_frame_uid(frame)
+    #     await self._frame_obj_preview.set_frame_meta(frame_uid,
+    #                                                  frame_meta.qualname)
 
-    async def leave_breakpoint(self, is_record_start: bool = False):
-        await self.header.write("")
-        await self.tree_viewer.tree.set_root_object_dict({})
-        ev = self.copy_path_btn.update_event(disabled=True)
-        if is_record_start:
-            ev += self.record_btn.update_event(disabled=True,
-                                               muiColor="success")
-        await self.send_and_wait(ev)
+    # async def leave_breakpoint(self, is_record_start: bool = False):
+    #     await self.header.write("")
+    #     await self.tree_viewer.tree.set_root_object_dict({})
+    #     ev = self.copy_path_btn.update_event(disabled=True)
+    #     if is_record_start:
+    #         ev += self.record_btn.update_event(disabled=True,
+    #                                            muiColor="success")
+    #     await self.send_and_wait(ev)
 
-        self._cur_frame_meta = None
-        self._cur_frame_state.frame = None
-        await self.frame_script.unmount_frame()
-        await self._frame_obj_preview.clear_frame_variable()
-        await self._frame_obj_preview.clear_preview_layouts()
+    #     self._cur_frame_meta = None
+    #     self._cur_frame_state.frame = None
+    #     # await self.frame_script.unmount_frame()
+    #     await self._frame_obj_preview.clear_frame_variable()
+    #     await self._frame_obj_preview.clear_preview_layouts()
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()

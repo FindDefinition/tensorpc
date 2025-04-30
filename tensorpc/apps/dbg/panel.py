@@ -1,6 +1,6 @@
 from tensorpc.dock import (marker, mui,
                            chart, plus, three, appctx)
-from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 
 class DebugPanel:
     @marker.mark_create_layout

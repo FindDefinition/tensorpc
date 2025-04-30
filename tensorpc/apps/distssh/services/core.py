@@ -13,7 +13,7 @@ import rich
 import re 
 import os 
 from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
-from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.asynctools import cancel_task

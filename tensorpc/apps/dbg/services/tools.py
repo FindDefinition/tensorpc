@@ -36,7 +36,7 @@ from tensorpc.apps.dbg.constants import (
 from tensorpc.apps.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
 from tensorpc.apps.dbg.serv_names import serv_names
 from tensorpc.dock.client import list_all_app_in_machine
-from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
+from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
 from tensorpc.apps.dbg.components.traceview import TraceView
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.core.appcore import enter_app_context, get_app_context
