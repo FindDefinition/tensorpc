@@ -538,7 +538,8 @@ class ScriptManagerV2(mui.FlexBox):
                  init_scripts: Optional[Dict[str, str]] = None,
                  init_store_backend: Optional[tuple[DraftStoreBackendBase, str]] = None,
                  frame: Optional[FrameType] = None,
-                 enable_app_backend: bool = True):
+                 enable_app_backend: bool = True,
+                 editor_path_uid: str = "scriptmgr_v2"):
         """Script manager that use draft storage
 
         """
@@ -547,7 +548,7 @@ class ScriptManagerV2(mui.FlexBox):
         self._init_graph_id = graph_id
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
-        self._editor_path_uid = "scriptmgr_v2"
+        self._editor_path_uid = editor_path_uid
         if frame is not None:
             init_model = ScriptManagerModel([
                 ScriptModel("dev", "python", _create_init_script_states(_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT)),

@@ -249,11 +249,13 @@ class BreakpointDebugPanel(mui.FlexBox):
             script_mgr = ScriptManagerV2(
                 init_store_backend=(fs_backend, frame_uid),
                 frame=frame,
+                editor_path_uid=f"{distssh_workdir}/framescript/{frame_uid}"
             )
         else:
             script_mgr = ScriptManagerV2(
                 enable_app_backend=False,
                 frame=frame,
+                editor_path_uid=frame_uid,
             )
         return script_mgr
 

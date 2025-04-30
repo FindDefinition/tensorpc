@@ -123,12 +123,15 @@ class FaultToleranceSSHServer:
                 )
                 master_ui_state.client_states.append(init_client_state)
         self._debug_panel = MasterDebugPanel(rpc_call_external=self._debug_panel_broadcast).prop(flex=1)
+        workdir_p = Path(self._cfg.workdir).resolve()
+
         self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, 
             self._terminal, self._debug_panel, prim.get_server_grpc_port(),
             self._handle_master_actions,
             self._release_all_bkpt, 
             self.master_fetch_pyspy_info,
-            enabled=self._is_master)
+            enabled=self._is_master,
+            default_path=f"{workdir_p}/cmd.sh")
 
         self._client_ui = FaultToleranceUIClient(state, self._terminal)
 

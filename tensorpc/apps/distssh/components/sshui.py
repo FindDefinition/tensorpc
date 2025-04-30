@@ -196,7 +196,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
                  master_action_fn: Callable[[MasterActions], mui.CORO_ANY],
                  release_bkpt_fn: Callable[[Any], Awaitable[None]],
                  fetch_debug_info_fn: Callable[[PyspyTraceMode], Awaitable[Optional[dict[tuple[int, int], Any]]]],
-                 enabled: bool = True):
+                 enabled: bool = True, default_path: str = "default"):
         master_state = ui_state.client_states[master_rank]
         states = ui_state.client_states
         self._master_rank = master_rank
@@ -286,7 +286,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
         # self._remote_box = mui.HBox([])
         # self._code_editor = mui.SimpleCodeEditor("echo $HOME", "bash").prop(debounce=300, height="300px", border="1px solid gray")
         self._code_editor = mui.MonacoEditor("echo $HOME", "shell",
-                                             "root").prop(debounce=300,
+                                             default_path).prop(debounce=300,
                                                           height="300px")
         self._terminal = term
         self._terminal_box = _get_terminal_menus(term)

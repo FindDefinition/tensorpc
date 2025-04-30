@@ -17,6 +17,7 @@ import asyncio
 import builtins
 import collections
 from contextlib import nullcontext
+import time
 from typing import TYPE_CHECKING, Mapping, Sequence, cast
 import copy
 import dataclasses
@@ -3112,6 +3113,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._remote_task: Optional[asyncio.Task] = None
 
         self._patch_in_remote = False
+        self._cur_ts = 0
+
+        self._fastrpc_timeout = 2
 
     @property
     def is_remote_mounted(self):
@@ -3222,6 +3226,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 if next_item_task in done:
                     try:
                         ev = next_item_task.result()
+                        self._cur_ts = time.time_ns()
                         app = get_app()
                         if isinstance(ev, RemoteCompEvent):
                             key = ev.key
@@ -3274,6 +3279,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self.disconnect(close_remote_loop=False)
             self._is_remote_mounted = False
             self._remote_task = None
+            self._cur_ts = 0
 
     async def _reconnect_to_remote_comp(self):
         _use_remote_generator: bool = True
@@ -3316,6 +3322,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 await self.health_check(1)
                 self._remote_task = asyncio.create_task(
                     self._remote_msg_handle_loop(prefixes, "", -1))
+                self._cur_ts = 0
         except BaseException as e:
             await self.send_exception(e)
             await self.disconnect()
@@ -3332,6 +3339,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         #                             2, self._key)
         # except:
         #     traceback.print_exc()
+        self._cur_ts = 0
         if close_remote_loop:
             await self._close_remote_loop()
         await self.shutdown_remote_object()
@@ -3387,22 +3395,32 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         # print(ev_data)
         assert self._flow_uid is not None, "shouldn't happen"
         prefixes = self._flow_uid.parts
-        try:
-            ev_data_dict = {
-                ev_data[0]: ev_data[1]
-            }
-            uiev = UIEvent.from_dict(ev_data_dict)
-            if not self._patch_in_remote:
-                uiev.unpatch_keys_prefix_inplace(prefixes)
-                ev_data_dict = uiev.to_dict()
-            return await self.remote_call(
-                serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, 1, self._key,
-                AppEventType.UIEvent.value, ev_data_dict, is_sync)
-        except grpc.aio.AioRpcError as e:
-            await self.send_exception(e)
-            await self.disconnect()
-        except BaseException as e:
-            await self.send_exception(e)
+        ev_data_dict = {
+            ev_data[0]: ev_data[1]
+        }
+        uiev = UIEvent.from_dict(ev_data_dict)
+        if not self._patch_in_remote:
+            uiev.unpatch_keys_prefix_inplace(prefixes)
+            ev_data_dict = uiev.to_dict()
+        while True:
+            try:
+                return await self.remote_call(
+                    serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, self._fastrpc_timeout, self._key,
+                    AppEventType.UIEvent.value, ev_data_dict, is_sync)
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                    cur_ts = time.time_ns()
+                    duration = cur_ts - self._cur_ts
+                    duration_second = duration / 1e9
+                    if duration_second < self._fastrpc_timeout:
+                        LOGGER.warning("remote comp loop is busy, retry...")
+                        continue
+                await self.send_exception(e)
+                await self.disconnect()
+                break
+            except BaseException as e:
+                await self.send_exception(e)
+                break
 
     async def collect_drag_source_data(self,
                                   ev: UIEvent):
@@ -3410,7 +3428,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         try:
             # result is returned iff is_sync is True
             res = await self.remote_call(
-                serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, 1, self._key,
+                serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, self._fastrpc_timeout, self._key,
                 AppEventType.UIEvent.value, ev.to_dict(), is_sync=True)
             return list(res.values())[0]
         except grpc.aio.AioRpcError as e:
