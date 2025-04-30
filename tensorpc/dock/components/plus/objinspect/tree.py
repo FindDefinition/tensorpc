@@ -35,7 +35,7 @@ from tensorpc.dock.jsonlike import (CommonQualNames,
                                     TreeItem)
 from tensorpc.dock.marker import mark_did_mount, mark_will_unmount
 from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
-from .analysis import ObjectTreeParser, TreeContext, enter_tree_context
+from .analysis import DEFAULT_EXPAND_METHOD, ObjectTreeParser, TreeContext, enter_tree_context
 
 _DEFAULT_OBJ_NAME = "default"
 
@@ -272,7 +272,6 @@ class BasicObjectTree(mui.FlexBox):
         self._ignored_types = ignored_types
         self._obj_meta_cache = {}
         self._auto_lazy_expand = auto_lazy_expand
-        # self._cached_lazy_expand_uids: List[str] = []
         self._cared_dnd_uids: Dict[UniqueTreeIdForTree,
                                    Callable[[UniqueTreeIdForTree, Any],
                                             mui.CORO_NONE]] = {}
@@ -445,7 +444,7 @@ class BasicObjectTree(mui.FlexBox):
                 self.tree.props.expanded.append(uid.uid_encoded)
             return self.tree.update_event(tree=new_tree, expanded=self.tree.props.expanded)
 
-    async def expand_uid(self, uid_encoded: str, lazy_expand_event: bool = True):
+    async def expand_uid(self, uid_encoded: str, lazy_expand_event: bool = True, expand_method: str = DEFAULT_EXPAND_METHOD):
         """Expand tree trace by uid. 
         WARNING: if `auto_folder_limit` > 0, don't support nested expand
 
@@ -504,10 +503,13 @@ class BasicObjectTree(mui.FlexBox):
                         else:
                             assert not isinstance(node.keys, mui.Undefined)
                             data = {k: real_obj[k] for k in node.keys.data}
-                        obj_dict = {**(await self._tree_parser.expand_object(data, start_for_list=start_for_list))}
-                        tree = await self._tree_parser.parse_obj_dict_to_nodes(
-                            obj_dict, node.id)
-                        node.children = tree
+                        # obj_dict = {**(await self._tree_parser.expand_object(data, start_for_list=start_for_list))}
+                        # tree = await self._tree_parser.parse_obj_dict_to_nodes(
+                        #     obj_dict, node.id)
+                        # node.children = tree
+                        node.children = await self._tree_parser.parse_obj_childs_to_tree_v2(
+                            data, node, start_for_list, expand_method
+                        )
                         upd = self._get_new_expanded_event(self._objinspect_root, [node.id])
                         return await self.tree.send_and_wait(upd)
                     obj, found = await self._get_obj_by_uid(uid, nodes)
@@ -526,9 +528,13 @@ class BasicObjectTree(mui.FlexBox):
                         obj_dict = {**obj_dict_desp}
                         tree = list(obj_dict_desp.values())
                     else:
-                        obj_dict = {**(await self._tree_parser.expand_object(obj))}
-                        tree = await self._tree_parser.parse_obj_dict_to_nodes(
-                            obj_dict, node.id)
+                        # obj_dict = {**(await self._tree_parser.expand_object(obj))}
+                        # tree = await self._tree_parser.parse_obj_dict_to_nodes(
+                        #     obj_dict, node.id)
+                        tree = await self._tree_parser.parse_obj_childs_to_tree_v2(
+                            obj, node, 0, expand_method
+                        )
+
                     if i == 0:
                         root_assign = (node, tree)
                     node.children = tree
@@ -692,12 +698,6 @@ class BasicObjectTree(mui.FlexBox):
                                                 self)):
                 obj_tree = await self._tree_parser.get_root_tree(
                     obj, key, expand_level, ns=self.tree.props.tree.id, validator=validator)
-                # await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
-                #                                           expand_level, validator)
-            # obj_tree = await _get_obj_tree(obj, self._checker, key,
-            #                          self.tree.props.tree.id, self._obj_meta_cache,
-            #                          self._cached_lazy_expand_uids,
-            #                          total_expand_level=expand_level)
             if key_in_root:
                 for i, node in enumerate(self.tree.props.tree.children):
                     if node.name == key:
@@ -707,8 +707,6 @@ class BasicObjectTree(mui.FlexBox):
                 self.tree.props.tree.children.append(obj_tree)
             obj_key_to_tree[key] = obj_tree
             all_updated_nodes.append(obj_tree)
-        # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-        #                                       _ROOT, self._obj_meta_cache)
         if expand_all:
             await self.tree.send_and_wait(
                 self.tree.get_tree_update_event_with_expand(self.tree.props.tree, all_updated_nodes))
@@ -984,7 +982,7 @@ class ObjectTree(BasicObjectTree):
         #     self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
         with enter_tree_context(TreeContext(self._tree_parser, self.tree,
                                             self)):
-            self.tree.props.tree = await self._tree_parser.get_root_tree(
+            self.tree.props.tree = await self._tree_parser.get_root_tree_v2(
                 self.root, _ROOT, self.default_expand_level)
         if context_menus:
             await self.tree.send_and_wait(

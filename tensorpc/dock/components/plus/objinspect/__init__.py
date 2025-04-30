@@ -7,3 +7,4 @@ from .layout import AnyFlexLayout
 from .tree import ObjectTree, TreeDragTarget, BasicObjectTree, SelectSingleEvent
 from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
 from .analysis import get_tree_context, get_tree_context_noexcept
+from . import filters

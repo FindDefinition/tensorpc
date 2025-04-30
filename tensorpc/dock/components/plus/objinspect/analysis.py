@@ -15,6 +15,7 @@ from tensorpc.dock.components import mui
 from tensorpc.dock.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler,
     ObjectLayoutCreator)
+from tensorpc.dock.components.plus.objinspect.treefilter import TreeExpandFilter, TreeExpandFilterDesc
 from tensorpc.dock.components.three import is_three_component
 from tensorpc.dock.core.component import FlowSpecialMethods
 from tensorpc.dock.jsonlike import (IconButtonData, TreeItem,
@@ -40,6 +41,25 @@ _SHOULD_EXPAND_TYPES = {
     mui.JsonLikeType.Layout.value
 }
 
+DEFAULT_EXPAND_METHOD = ""
+
+@dataclasses.dataclass
+class TreeExpandState:
+    expand_level: int = 0
+    validator: Optional[Callable[[Any], bool]] = None
+    expand_method: str = DEFAULT_EXPAND_METHOD
+    expand_filter: Optional[TreeExpandFilter] = None
+    expand_is_recursive: bool = False
+    check_obj: bool = True
+    auto_expand_count_limit: int = -1
+
+    def get_decreased_expand_level(self):
+        return dataclasses.replace(self, expand_level=self.expand_level - 1)
+
+    def should_keep(self, obj):
+        if self.expand_filter is not None:
+            return self.expand_filter.should_keep(obj, self.expand_method)
+        return True
 
 class ObjectTreeParser:
     """expandable: determine a object can be expand
@@ -53,7 +73,8 @@ class ObjectTreeParser:
             ignored_types: Optional[Set[Type]] = None,
             custom_type_expanders: Optional[Dict[Type, Callable[[Any],
                                                                 dict]]] = None,
-            custom_tree_item_handler: Optional[CustomTreeItemHandler] = None):
+            custom_tree_item_handler: Optional[CustomTreeItemHandler] = None,
+            expand_filters: Optional[list[TreeExpandFilterDesc]] = None):
         if cared_types is None:
             cared_types = set()
         if ignored_types is None:
@@ -61,15 +82,29 @@ class ObjectTreeParser:
         self._cared_types = cared_types
         self._ignored_types = ignored_types
         self._obj_meta_cache = {}
-        self._cached_lazy_expand_uids: Set[UniqueTreeIdForTree] = set()
+        self._cached_lazy_expand_uids: dict[UniqueTreeIdForTree, str] = {}
         if custom_type_expanders is None:
             custom_type_expanders = {}
-        self._custom_type_expanders = custom_type_expanders
         self.custom_tree_item_handler = custom_tree_item_handler
         self._auto_expand_count_limit = 100
 
+        self._tree_expand_filters: list[TreeExpandFilterDesc] = []
+        if expand_filters is not None:
+            self._tree_expand_filters = expand_filters
+        self._tree_expand_filter_type_cache: dict[Any, TreeExpandFilterDesc] = {}
+
+    def _cached_get_tree_expand_filter(self, obj: Any):
+        obj_type = type(obj)
+        if obj_type in self._tree_expand_filter_type_cache:
+            return self._tree_expand_filter_type_cache[obj_type]
+        for filter_desc in self._tree_expand_filters:
+            if filter_desc.filter.is_cared_type(obj):
+                self._tree_expand_filter_type_cache[obj_type] = filter_desc
+                return filter_desc
+        return None
+
     def parseable(self, obj, check_obj: bool = True):
-        if not self._check_is_valid(obj) and check_obj:
+        if check_obj and not self._check_is_valid(obj):
             return False
         if inspecttools.is_obj_builtin_or_module(obj):
             return False
@@ -136,9 +171,6 @@ class ObjectTreeParser:
             res_tmp = await self.custom_tree_item_handler.get_childs(obj)
             if res_tmp is not None:
                 return res_tmp
-        for k, v in self._custom_type_expanders.items():
-            if isinstance(obj, k):
-                return v(obj)
         user_defined_prop_keys = inspecttools.get_obj_userdefined_properties(
             obj)
         for k in dir(obj):
@@ -224,72 +256,242 @@ class ObjectTreeParser:
                                       obj_meta_cache=None):
         res_node: List[mui.JsonLikeNode] = []
         for k, v in obj_dict.items():
-            str_k = str(k)
-            node = await self.parse_obj_to_tree_node(v, str_k, obj_meta_cache)
-            if self.custom_tree_item_handler is not None:
-                node_tmp = self.custom_tree_item_handler.patch_node(v, node)
-                if node_tmp is not None:
-                    node = node_tmp
-            node.id = ns.append_part(str_k)
-            if not isinstance(k, str):
-                node.dictKey = mui.BackendOnlyProp(k)
+            new_node_id = ns.append_part(str(k))
+            node = await self._parse_obj_to_tree_node_v2(v, k, new_node_id)
             res_node.append(node)
         return res_node
+
+    async def _parse_obj_to_tree_node_v2(self, v: Any, k: Any, node_id: UniqueTreeIdForTree):
+        str_k = str(k)
+        node = await self.parse_obj_to_tree_node(v, str_k, self._obj_meta_cache)
+        if self.custom_tree_item_handler is not None:
+            node_tmp = self.custom_tree_item_handler.patch_node(v, node)
+            if node_tmp is not None:
+                node = node_tmp
+        expand_filter_desc = self._cached_get_tree_expand_filter(v)
+        if expand_filter_desc is not None:
+            menuitems = expand_filter_desc.filter.get_expand_menu_items()
+            if isinstance(node.menus, list):
+                node.menus.extend(menuitems)
+            else:
+                node.menus = menuitems
+        node.id = node_id
+        if not isinstance(k, str):
+            node.dictKey = mui.BackendOnlyProp(k)
+        return node
+
+    async def parse_obj_childs_to_tree(self, obj: Any, node_id: UniqueTreeIdForTree, start_for_list: int = 0):
+        obj_dict = await self.expand_object(obj, start_for_list=start_for_list)
+        tree_children = await self.parse_obj_dict_to_nodes(
+            obj_dict, node_id, self._obj_meta_cache)
+        return tree_children, len(obj_dict)
+
+    def _get_next_expand_state(self, obj: Any, node_id: UniqueTreeIdForTree, state: TreeExpandState):
+        expand_method = state.expand_method
+        expand_filter = state.expand_filter
+        expand_is_recursive = state.expand_is_recursive
+        if not state.expand_is_recursive:
+            # if not recursive, remove parent filter.
+            expand_method = DEFAULT_EXPAND_METHOD
+            expand_filter = None 
+        if node_id in self._cached_lazy_expand_uids:
+            expand_method = self._cached_lazy_expand_uids[node_id]
+        if expand_method != DEFAULT_EXPAND_METHOD:
+            expand_filter_desc = self._cached_get_tree_expand_filter(obj)
+            if expand_filter_desc is not None:
+                expand_filter = expand_filter_desc.filter
+                expand_is_recursive = expand_filter_desc.is_recursive
+            else:
+                expand_method = DEFAULT_EXPAND_METHOD
+        return dataclasses.replace(state, expand_method=expand_method,
+                                   expand_filter=expand_filter,
+                                   expand_is_recursive=expand_is_recursive,
+                                   expand_level=state.expand_level - 1)
+    
+    async def parse_obj_childs_to_tree_v2(self, obj: Any, node: mui.JsonLikeNode, start_for_list: int = 0, expand_method: str = DEFAULT_EXPAND_METHOD) -> list[mui.JsonLikeNode]:
+        filter_desc = self._cached_get_tree_expand_filter(obj)
+        if expand_method != DEFAULT_EXPAND_METHOD and filter_desc is not None:
+            state = TreeExpandState(
+                expand_level=1,
+                validator=None,
+                expand_method=expand_method,
+                expand_filter=filter_desc.filter,
+                expand_is_recursive=filter_desc.is_recursive,
+                check_obj=True)
+        else:
+            state = TreeExpandState(
+                expand_level=1,
+                validator=None,
+                check_obj=True)
+
+        return await self.parse_obj_childs_to_tree_v2_recursive(
+            obj, node, state, start_for_list)
+
+    async def _get_child_nodes_dict(self, obj: Any, k: Any, node_id: UniqueTreeIdForTree, state: TreeExpandState):
+        next_node = await self._parse_obj_to_tree_node_v2(obj, k, node_id)
+        next_node.children = await self.parse_obj_childs_to_tree_v2_recursive(
+            obj, next_node, state)
+        return next_node
+
+    async def parse_obj_childs_to_tree_v2_recursive(self, obj: Any, node: mui.JsonLikeNode, state: TreeExpandState, start_for_list: int = 0) -> list[mui.JsonLikeNode]:
+        if not self.parseable(obj, state.check_obj):
+            return []
+        if not self._should_expand_node(obj, node, state):
+            return []
+        res: list[mui.JsonLikeNode] = []
+        if isinstance(obj, (list, tuple, set)):
+            if isinstance(obj, set):
+                # set size is limited since it don't support nested view.
+                obj_list = list(obj)[:SET_CONTAINER_LIMIT_SIZE]
+            else:
+                obj_list = obj
+            len_obj = len(obj_list)
+            for i in range(len_obj):
+                child_obj = obj_list[i]
+                new_node_id = node.id.append_part(str(i + start_for_list))
+                next_state = self._get_next_expand_state(child_obj, new_node_id, state)
+                if not state.should_keep(child_obj):
+                    continue 
+                res.append(await self._get_child_nodes_dict(child_obj, str(i + start_for_list), new_node_id, next_state))
+            return res 
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                new_node_id = node.id.append_part(str(k))
+                next_state = self._get_next_expand_state(v, new_node_id, state)
+                if not state.should_keep(v):
+                    continue 
+                res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
+            return res 
+        elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+            for k, v in obj.get_childs():
+                new_node_id = node.id.append_part(str(k))
+                next_state = self._get_next_expand_state(v, new_node_id, state)
+                if not state.should_keep(v):
+                    continue 
+                res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
+            return res 
+        elif isinstance(obj, TreeItem):
+            # this is very special, we need to lazy access the child of a treeitem.
+            for k, v in (await obj.get_child_desps(UniqueTreeIdForTree(""))):
+                new_node_id = node.id.append_part(str(k))
+                next_state = self._get_next_expand_state(v, new_node_id, state)
+                if not state.should_keep(v):
+                    continue 
+                res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
+            return res 
+        if self.custom_tree_item_handler is not None:
+            res_tmp = await self.custom_tree_item_handler.get_childs(obj)
+            if res_tmp is not None:
+                for k, v in res_tmp:
+                    if not state.should_keep(v):
+                        continue 
+                    new_node_id = node.id.append_part(str(k))
+                    next_state = self._get_next_expand_state(v, new_node_id, state)
+                    if not state.should_keep(v):
+                        continue 
+                    res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
+                return res 
+        user_defined_prop_keys = inspecttools.get_obj_userdefined_properties(
+            obj)
+        for k in dir(obj):
+            valid, attr = self.attr_parseable(obj, k, user_defined_prop_keys,
+                                              state.check_obj)
+            if not valid:
+                continue
+            new_node_id = node.id.append_part(str(k))
+            next_state = self._get_next_expand_state(attr, new_node_id, state)
+            if not state.should_keep(attr):
+                continue 
+            res.append(await self._get_child_nodes_dict(attr, k, new_node_id, next_state))
+        return res
+
+    async def get_root_tree_v2(self,
+                            obj_root,
+                            root_name: str,
+                            expand_level: int,
+                            ns: UniqueTreeIdForTree = UniqueTreeIdForTree(""),
+                            validator: Optional[Callable[[Any], bool]] = None):
+        root_node = await self.parse_obj_to_tree_node(obj_root, root_name,
+                                                      self._obj_meta_cache)
+        if not ns.empty():
+            # root_node.id = f"{ns}{GLOBAL_SPLIT}{root_node.id}"
+            root_node.id = ns + root_node.id
+        state = TreeExpandState(
+            expand_level=expand_level,
+            validator=validator,
+            auto_expand_count_limit=self._auto_expand_count_limit)
+        children = await self.parse_obj_childs_to_tree_v2_recursive(obj_root, root_node, state)
+        root_node.children = children
+        return root_node
 
     async def parse_obj_to_tree(self,
                                 obj,
                                 node: mui.JsonLikeNode,
                                 total_expand_level: int = 0,
                                 validator: Optional[Callable[[Any], bool]] = None):
+        state = TreeExpandState(
+            expand_level=total_expand_level,
+            validator=validator)
+        return await self._parse_obj_to_tree_recursive(obj, node, state)
+
+
+    async def _parse_obj_to_tree_recursive(self,
+                                obj,
+                                node: mui.JsonLikeNode,
+                                state: TreeExpandState):
         """parse object to json like tree.
         """
-        if not self._should_expand_node(obj, node, total_expand_level, validator):
+        if not self._should_expand_node(obj, node, state):
             return
         if isinstance(obj, TreeItem):
             obj_dict = await obj.get_child_desps(node.id)
-            # for k, v in obj_dict.items():
-            #     # v.id = f"{node.id}{GLOBAL_SPLIT}{v.id}"
-            #     v.id = node.id + v.id
             tree_children = list(obj_dict.values())
+            real_length = len(obj_dict)
         else:
             obj_dict = await self.expand_object(obj)
             tree_children = await self.parse_obj_dict_to_nodes(
-                obj_dict, node.id, self._obj_meta_cache)
+                obj, node.id, self._obj_meta_cache)
+            real_length = len(obj_dict)
         node.children = tree_children
-        node.cnt = len(obj_dict)
+        node.cnt = real_length
         for (k, v), child_node in zip(obj_dict.items(), node.children):
-            # should_expand = child_node.id in self._cached_lazy_expand_uids or total_expand_level > 0
-            # if isinstance(v, TreeItem) and v.default_expand():
-            #     should_expand = True
-            # if should_expand:
             if isinstance(obj, TreeItem):
                 v = await obj.get_child(k)
-            await self.parse_obj_to_tree(v, child_node, total_expand_level - 1, validator)
+            await self._parse_obj_to_tree_recursive(v, child_node, state.get_decreased_expand_level())
 
     def _should_expand_node(self, obj, node: mui.JsonLikeNode,
-                            total_expand_level: int, validator: Optional[Callable[[Any], bool]] = None):
+                            state: TreeExpandState) -> bool:
         if node.type not in _SHOULD_EXPAND_TYPES:
             return False
-        if validator is not None:
-            if not validator(obj):
+        if state.validator is not None:
+            if not state.validator(obj):
                 return False 
-        should_expand = node.id in self._cached_lazy_expand_uids or total_expand_level > 0
+        if state.expand_filter is not None:
+            should_expand = not state.expand_filter.is_leaf(obj, state.expand_method)
+            assert state.expand_method != DEFAULT_EXPAND_METHOD
+            # when user use custom expand method, we override 
+            # the default expand behavior.
+            return should_expand
+        should_expand = node.id in self._cached_lazy_expand_uids or state.expand_level > 0
         if isinstance(obj, TreeItem) and obj.default_expand():
-            should_expand = total_expand_level > 0
+            should_expand = state.expand_level > 0
         elif isinstance(obj,
                         tuple(USER_OBJ_TREE_TYPES)) and obj.default_expand():
             should_expand = True
-        elif node.cnt > self._auto_expand_count_limit:
+        elif state.auto_expand_count_limit > 0 and node.cnt > state.auto_expand_count_limit:
             should_expand = False
         return should_expand
 
-    def update_lazy_expand_uids(self, new_uid: UniqueTreeIdForTree):
+    def update_lazy_expand_uids(self, new_uid: UniqueTreeIdForTree, expand_method: str = DEFAULT_EXPAND_METHOD):
         # if we lazy-expand a node, we should remove all its children from cached_lazy_expand_uids
-        new_lazy_expand_uids: List[UniqueTreeIdForTree] = list(
-            filter(lambda n: not n.startswith(new_uid),
-                   self._cached_lazy_expand_uids))
-        new_lazy_expand_uids.append(new_uid)
-        self._cached_lazy_expand_uids = set(new_lazy_expand_uids)
+        new_lazy_expand_uids: dict[UniqueTreeIdForTree, str] = {}
+        for k, v in self._cached_lazy_expand_uids.items():
+            if k.startswith(new_uid):
+                # remove all its children
+                continue
+            new_lazy_expand_uids[k] = v
+        new_lazy_expand_uids[new_uid] = expand_method
+        self._cached_lazy_expand_uids = new_lazy_expand_uids
 
     def get_obj_single_attr(
             self,
