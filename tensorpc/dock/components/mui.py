@@ -1620,6 +1620,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         # for fully controlled components, we need to sync the state after the
         # backend state chagne.
         sync_state_after_change = isinstance(self.props.debounce, Undefined)
+        print("sync_state_after_change", sync_state_after_change)
         return await handle_standard_event(
             self,
             ev,

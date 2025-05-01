@@ -74,11 +74,11 @@ class FlowApp:
         # print(module_name, config)
         if external_argv is not None:
             print("external_argv", external_argv)
-        if init_code:
-            print("RUN CODE", init_code)
-            # run dynamic import code here
-            # used to register user data
-            exec(init_code, {})
+        # if init_code:
+        #     print("RUN CODE", init_code)
+        #     # run dynamic import code here
+        #     # used to register user data
+        #     exec(init_code, {})
         self.module_name = module_name
         self.config = config
         self.shutdown_ev = asyncio.Event()
@@ -103,7 +103,10 @@ class FlowApp:
             self._uid = ""
         self.headless = headless
         reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
-        self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)
+        if module_name == "":
+            self.dynamic_app_cls = ReloadableDynamicClass("App", reload_mgr, init_code)
+        else:
+            self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)
         static_creator = self.dynamic_app_cls.get_object_creator_if_exists()
         if static_creator is not None:
             obj = static_creator()

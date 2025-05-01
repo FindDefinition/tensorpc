@@ -14,7 +14,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.dock.components import mui
 from tensorpc.dock.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler,
-    ObjectLayoutCreator)
+    ObjectLayoutCreator, ContextMenuType)
 from tensorpc.dock.components.plus.objinspect.treefilter import TreeExpandFilter, TreeExpandFilterDesc
 from tensorpc.dock.components.three import is_three_component
 from tensorpc.dock.core.component import FlowSpecialMethods
@@ -243,11 +243,7 @@ class ObjectTreeParser:
                 value=value,
                 typeStr=obj_type.__qualname__,
                 cnt=count,
-                drag=is_draggable,
-                iconBtns=[
-                    IconButtonData(ButtonType.Reload.value,
-                                   mui.IconType.Refresh.value, "Reload Object")
-                ])
+                drag=is_draggable)
         return node
 
     async def parse_obj_dict_to_nodes(self,
@@ -270,8 +266,17 @@ class ObjectTreeParser:
                 node = node_tmp
         expand_filter_desc = self._cached_get_tree_expand_filter(v)
         if expand_filter_desc is not None:
-            menuitems = expand_filter_desc.filter.get_expand_menu_items()
+            menuitems = expand_filter_desc.filter.get_expand_menu_items().copy()
+            for i in range(len(menuitems)):
+                menuitems[i] = dataclasses.replace(
+                    menuitems[i], userdata={
+                        "type": ContextMenuType.CustomExpand.value,
+                        "method": menuitems[i].id,
+                    }
+                )
             if isinstance(node.menus, list):
+                if menuitems:
+                    menuitems.append(mui.MenuItem(id="custom_expand_divider", divider=True))
                 node.menus.extend(menuitems)
             else:
                 node.menus = menuitems
@@ -308,22 +313,21 @@ class ObjectTreeParser:
                                    expand_is_recursive=expand_is_recursive,
                                    expand_level=state.expand_level - 1)
     
-    async def parse_obj_childs_to_tree_v2(self, obj: Any, node: mui.JsonLikeNode, start_for_list: int = 0, expand_method: str = DEFAULT_EXPAND_METHOD) -> list[mui.JsonLikeNode]:
-        filter_desc = self._cached_get_tree_expand_filter(obj)
-        if expand_method != DEFAULT_EXPAND_METHOD and filter_desc is not None:
-            state = TreeExpandState(
-                expand_level=1,
-                validator=None,
-                expand_method=expand_method,
-                expand_filter=filter_desc.filter,
-                expand_is_recursive=filter_desc.is_recursive,
-                check_obj=True)
-        else:
-            state = TreeExpandState(
+    async def parse_obj_childs_to_tree_v2(self, obj: Any, node: mui.JsonLikeNode, start_for_list: int = 0, expand_method: str = DEFAULT_EXPAND_METHOD, custom_expand_level: int = 1000) -> list[mui.JsonLikeNode]:
+        state = TreeExpandState(
                 expand_level=1,
                 validator=None,
                 check_obj=True)
-
+        if expand_method != DEFAULT_EXPAND_METHOD:
+            filter_desc = self._cached_get_tree_expand_filter(obj)
+            if filter_desc is not None:
+                state = TreeExpandState(
+                    expand_level=custom_expand_level,
+                    validator=None,
+                    expand_method=expand_method,
+                    expand_filter=filter_desc.filter,
+                    expand_is_recursive=filter_desc.is_recursive,
+                    check_obj=True)
         return await self.parse_obj_childs_to_tree_v2_recursive(
             obj, node, state, start_for_list)
 
@@ -336,7 +340,10 @@ class ObjectTreeParser:
     async def parse_obj_childs_to_tree_v2_recursive(self, obj: Any, node: mui.JsonLikeNode, state: TreeExpandState, start_for_list: int = 0) -> list[mui.JsonLikeNode]:
         if not self.parseable(obj, state.check_obj):
             return []
-        if not self._should_expand_node(obj, node, state):
+        should_expand = self._should_expand_node(obj, node, state)
+
+        if not should_expand:
+            # if state.expand_method != DEFAULT_EXPAND_METHOD:
             return []
         res: list[mui.JsonLikeNode] = []
         if isinstance(obj, (list, tuple, set)):
@@ -391,6 +398,17 @@ class ObjectTreeParser:
                         continue 
                     res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
                 return res 
+        filter_desc = self._cached_get_tree_expand_filter(obj)
+        if filter_desc is not None:
+            childs_may_none = filter_desc.filter.expand_dict(obj)
+            if childs_may_none is not None:
+                for k, v in childs_may_none.items():
+                    new_node_id = node.id.append_part(str(k))
+                    next_state = self._get_next_expand_state(v, new_node_id, state)
+                    if not state.should_keep(v):
+                        continue 
+                    res.append(await self._get_child_nodes_dict(v, k, new_node_id, next_state))
+                return res 
         user_defined_prop_keys = inspecttools.get_obj_userdefined_properties(
             obj)
         for k in dir(obj):
@@ -411,11 +429,13 @@ class ObjectTreeParser:
                             expand_level: int,
                             ns: UniqueTreeIdForTree = UniqueTreeIdForTree(""),
                             validator: Optional[Callable[[Any], bool]] = None):
-        root_node = await self.parse_obj_to_tree_node(obj_root, root_name,
-                                                      self._obj_meta_cache)
+        root_id = UniqueTreeIdForTree.from_parts([root_name])
         if not ns.empty():
             # root_node.id = f"{ns}{GLOBAL_SPLIT}{root_node.id}"
-            root_node.id = ns + root_node.id
+            root_id = ns + root_id
+
+        root_node = await self._parse_obj_to_tree_node_v2(obj_root, root_name,
+                                                      root_id)
         state = TreeExpandState(
             expand_level=expand_level,
             validator=validator,
@@ -450,7 +470,7 @@ class ObjectTreeParser:
         else:
             obj_dict = await self.expand_object(obj)
             tree_children = await self.parse_obj_dict_to_nodes(
-                obj, node.id, self._obj_meta_cache)
+                obj_dict, node.id, self._obj_meta_cache)
             real_length = len(obj_dict)
         node.children = tree_children
         node.cnt = real_length
@@ -589,6 +609,11 @@ class ObjectTreeParser:
                 childs = await self.custom_tree_item_handler.get_childs(obj)
                 if childs is not None:
                     child_obj = childs[key]
+            filter_desc = self._cached_get_tree_expand_filter(obj)
+            if filter_desc is not None:
+                childs_may_none = filter_desc.filter.expand_dict(obj)
+                if childs_may_none is not None:
+                    child_obj = childs_may_none[key]
             if isinstance(child_obj, mui.Undefined):
                 child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
                 if isinstance(obj, mui.Undefined):

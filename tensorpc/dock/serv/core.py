@@ -72,6 +72,7 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType, ComponentEvent
                                         app_event_from_data)
 from tensorpc.dock.jsonlike import JsonLikeNode, JsonLikeType, parse_obj_to_jsonlike
 from tensorpc.dock.serv_names import serv_names
+from tensorpc.dock.templates import get_all_app_templates
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
@@ -2176,6 +2177,7 @@ class Flow:
             **dock_state,
             "nodeStatus": self._get_all_node_status(final_res),
             "favoriteNodes": favorites,
+            "appTemplates": get_all_app_templates(),
         }
 
     async def delete_graph(self, graph_id: str):

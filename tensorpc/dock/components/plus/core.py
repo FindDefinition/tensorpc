@@ -208,6 +208,8 @@ class ContextMenuType(enum.Enum):
 
     CopyReadItemCode = 3
 
+    CustomExpand = 4
+
 
 class DataClassesType:
     """a placeholder that used for custom handlers.

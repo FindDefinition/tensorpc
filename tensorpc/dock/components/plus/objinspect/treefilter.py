@@ -1,6 +1,6 @@
 import abc 
 import dataclasses
-from typing import Any
+from typing import Any, Optional
 from tensorpc.dock.components import mui 
 
 class TreeExpandFilter(abc.ABC):
@@ -15,17 +15,22 @@ class TreeExpandFilter(abc.ABC):
     def is_cared_type(self, obj: Any) -> bool: ...
 
     @abc.abstractmethod
-    def is_leaf(self, obj: Any, menu_item_id: str):
+    def is_leaf(self, obj: Any, menu_item_id: str) -> bool:
         """Check if the object is a leaf node. if so, stop expanding.
         only used when recursive expand is True.
         """
         return True
 
     @abc.abstractmethod
-    def should_keep(self, obj: Any, menu_item_id: str):
+    def should_keep(self, obj: Any, menu_item_id: str) -> bool:
         """Check if the object should be kept
         """
         return True
+
+    def expand_dict(self, obj: Any) -> Optional[dict]:
+        """expand object which is cared type. if None, use default expand.
+        """
+        return None
 
 @dataclasses.dataclass
 class TreeExpandFilterDesc:

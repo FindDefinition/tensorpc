@@ -157,7 +157,7 @@ async def handle_standard_event(comp: Component,
             # for data model components, we don't need to sync state.
             if isinstance(event.keys, Undefined):
                 comp.state_change_callback(event.data, event.type)
-                sync_state = True
+                sync_state = sync_state_after_change
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:

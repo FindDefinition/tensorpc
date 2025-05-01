@@ -959,6 +959,7 @@ class DynamicClass:
         self.is_standard_module = False
         self.standard_module: Optional[types.ModuleType] = None
         self.file_path = ""
+        self.is_dynamic_code = False
         if len(module_cls) == 3:
             self.alias = module_cls[-1]
             self.cls_name = module_cls[-2]
@@ -968,6 +969,7 @@ class DynamicClass:
             if code != "":
                 # TODO we need to redesign whole dynamic load
                 # system to handle dynamic code.
+                self.is_dynamic_code = True
                 self.is_standard_module = False
                 mod_name = f"<dynamic-{uuid.uuid4().hex}>"
                 module = types.ModuleType(mod_name)
@@ -976,7 +978,6 @@ class DynamicClass:
                 codeobj = compile(code, "<dynamic>", "exec")
                 exec(codeobj, module.__dict__)
                 self.module_dict = self.standard_module.__dict__
-                self.is_standard_module = False
 
             else:
                 if self.module_path.startswith("!"):

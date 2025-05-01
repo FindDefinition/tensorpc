@@ -93,6 +93,7 @@ def mp_func_inf_record(rank):
         # tensorpc.dbg.breakpoint(name="WTF")
         model = MyModule(50, 10).to(device)
         model2 = MyModule2(50, 10).to(device)
+        model3 = torch.nn.Transformer()
         input = torch.rand(128, 50).to(device)
         mask = torch.rand((50, 50, 50), dtype=torch.float32).to(device)
         # with tensorpc.dbg.rttracer.enter_tracer("debug"):

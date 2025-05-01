@@ -1,5 +1,5 @@
 import fire
-from tensorpc.constants import TENSORPC_APPS_DISTSSH_DEFAULT_PORT
+from tensorpc.apps.distssh.constants import TENSORPC_APPS_DISTSSH_DEFAULT_PORT
 from tensorpc.serve.__main__ import serve_in_terminal
 from tensorpc.core import BuiltinServiceKeys
 

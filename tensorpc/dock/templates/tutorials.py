@@ -1,27 +1,11 @@
-import pickle
 from typing import Any, Dict, List, Union
-from typing_extensions import TypeAlias
-from tensorpc.dock.components import mui, three
-from tensorpc.dock import appctx
 from tensorpc.dock.components import plus
-from tensorpc.dock import mark_create_layout
-import sys
 from tensorpc import PACKAGE_ROOT
-from tensorpc.dock.marker import mark_did_mount
-import torch 
+from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, appctx
 
-import numpy as np 
-class MarkdownTutorialsTree:
-
+class App:
     @mark_create_layout
     def my_layout(self):
-        # appctx.set_app_z_index(200)  # required for drawer/dialog.
-        appctx.get_app().set_enable_language_server(True)
-        pyright_setting = appctx.get_app().get_language_server_settings()
-        pyright_setting.python.analysis.pythonPath = sys.executable
-        pyright_setting.python.analysis.extraPaths = [
-            str(PACKAGE_ROOT.parent),
-        ]
         tutorials_path = PACKAGE_ROOT / "examples" / "tutorials"
         tutorials: Dict[str, Any] = {}
         paths = list(tutorials_path.rglob("*.md"))
@@ -41,13 +25,7 @@ class MarkdownTutorialsTree:
                                                         height="100%",
                                                         overflow="auto")
         self.tutorials = tutorials
-        init_data = {
-            "points": np.random.uniform(-10, 10, size=[100, 3]),
-            "wtf": False,
-            "data": {'Name': ['a', 'b', None], 'Age': [10, 11, 12]},
-            "net": torch.nn.Transformer(),
-        }
-        self.panel = plus.InspectPanel(init_data, use_fast_tree=True)
+        self.panel = plus.InspectPanel({}, use_fast_tree=True)
         return self.panel.prop(width="100%", height="100%", overflow="hidden")
 
     @mark_did_mount

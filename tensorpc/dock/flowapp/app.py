@@ -1211,8 +1211,9 @@ class EditableApp(App):
         path = ""
         if not self._is_remote_component:
             dcls = self._get_app_dynamic_cls()
-            path = dcls.file_path
-            self._flowapp_change_observers[path] = obentry
+            if not dcls.is_dynamic_code:
+                path = dcls.file_path
+                self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
         registry = self.get_observed_func_registry()

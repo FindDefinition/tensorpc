@@ -132,7 +132,7 @@ class UniqueTreeIdForTree(UniqueTreeId):
     @classmethod
     def from_parts(cls,
                    parts: List[str],
-                   splitter: str = ":") -> "UniqueTreeIdForTree":
+                   splitter: str = ".") -> "UniqueTreeIdForTree":
         if len(parts) == 0:
             return cls("", len(splitter))
         return cls(
@@ -142,7 +142,7 @@ class UniqueTreeIdForTree(UniqueTreeId):
 
     def append_part(self,
                     part: str,
-                    splitter: str = ":") -> "UniqueTreeIdForTree":
+                    splitter: str = ".") -> "UniqueTreeIdForTree":
         return UniqueTreeIdForTree.from_parts(self.parts + [part], splitter)
 
     def extend_parts(self, parts: List[str], splitter: str = ".") -> "UniqueTreeIdForTree":
@@ -155,8 +155,8 @@ class UniqueTreeIdForTree(UniqueTreeId):
             self, other: Union["UniqueTreeIdForTree", UniqueTreeId,
                                str]) -> "UniqueTreeIdForTree":
         if isinstance(other, str):
-            return UniqueTreeIdForTree.from_parts(self.parts + [other], ":")
-        return UniqueTreeIdForTree.from_parts(self.parts + other.parts, ":")
+            return UniqueTreeIdForTree.from_parts(self.parts + [other], ".")
+        return UniqueTreeIdForTree.from_parts(self.parts + other.parts, ".")
 
     def copy(self) -> "UniqueTreeIdForTree":
         return UniqueTreeIdForTree(self.uid_encoded, self.splitter_length)

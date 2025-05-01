@@ -298,6 +298,25 @@ class JsonLikeNode:
         assert isinstance(self.userdata, type)
         return self.userdata
 
+    def get_all_tree_ids(self) -> List[UniqueTreeIdForTree]:
+        """get all tree ids in this node, including self.
+        """
+        res = [self.id]
+        for c in self.children:
+            res.extend(c.get_all_tree_ids())
+        return res
+
+    def get_all_tree_container_ids(self) -> List[UniqueTreeIdForTree]:
+        """get all tree ids in this node, including self.
+        """
+        if self.children:
+            res = [self.id]
+            for c in self.children:
+                res.extend(c.get_all_tree_ids())
+            return res
+        else:
+            return []
+
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
