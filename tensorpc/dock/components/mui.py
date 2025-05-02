@@ -1620,7 +1620,6 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         # for fully controlled components, we need to sync the state after the
         # backend state chagne.
         sync_state_after_change = isinstance(self.props.debounce, Undefined)
-        print("sync_state_after_change", sync_state_after_change)
         return await handle_standard_event(
             self,
             ev,
@@ -4980,7 +4979,7 @@ class DataListControlType(enum.IntEnum):
     SetData = 0
     ScrollToIndex = 1
     OperateData = 2
-
+    SetMiscData = 3
 
 @dataclasses.dataclass
 class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
@@ -5321,9 +5320,18 @@ class DataGridPropsBase:
     # use mui.MatchCase to select real component by id.
     customHeaderDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
     customFooterDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
+    externalCustomHeaderData: Union[Undefined, bool] = undefined
+    externalCustomFooterData: Union[Undefined, bool] = undefined
 
     headerMenuItems: Union[Undefined, List[MenuItem]] = undefined
     tableContainerProps: Union[Undefined, FlexBoxProps] = undefined
+
+@dataclasses.dataclass
+class DataGridDataWithMisc:
+    # when you need to specify header or footer data, you must use this instead of list.
+    dataList: List[Any] = dataclasses.field(default_factory=list)
+    headerDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
+    footerDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
@@ -5332,8 +5340,7 @@ class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
     # it may contain component.
     # WARNING when you use data proxy, id is set by us, not user,
     # it will be str(index) of your data list proxy.
-    dataList: Union[List[Any],
-                    DataGridProxy] = dataclasses.field(default_factory=list)
+    dataList: Union[List[Any], DataGridDataWithMisc] = dataclasses.field(default_factory=list)
 
     @model_validator(mode='after')
     def _validator_post_root(self) -> Self:
@@ -5376,13 +5383,10 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     def __init__(
         self,
         column_def: List[DataGridColumnDef],
-        init_data_list: Optional[Union[List[Dict[str, Any]],
-                                       DataGridProxy]] = None,
+        init_data_list: Optional[Union[List[Dict[str, Any]], DataGridDataWithMisc]] = None,
         master_detail: Union[Undefined, Component] = undefined,
         customHeaders: Union[Undefined, List[Component]] = undefined,
         customFooters: Union[Undefined, List[Component]] = undefined,
-        customHeaderDatas: Union[Undefined, List[Dict[str, Any]]] = undefined,
-        customFooterDatas: Union[Undefined, List[Dict[str, Any]]] = undefined,
         customPaginationFooters: Union[Undefined, List[Component]] = undefined,
     ) -> None:
         super().__init__(
@@ -5416,8 +5420,6 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
 
         self.event_before_mount.on_standard(self._proxy_init)
         self.event_proxy_lazy_load.on(self._data_lazy_load)
-        self.prop(customHeaderDatas=customHeaderDatas,
-                  customFooterDatas=customFooterDatas)
 
     def _proxy_init(self, event: Event):
         datalist = self.props.dataList
@@ -5474,8 +5476,12 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     async def update_datas_in_index(self, updates: List[DataUpdate]):
         assert not isinstance(self.props.dataList,
                               DataGridProxy), "can't update data in proxy mode"
+        if isinstance(self.props.dataList, DataGridDataWithMisc):
+            real_data_list = self.props.dataList.dataList
+        else:
+            real_data_list = self.props.dataList
         for du in updates:
-            self.props.dataList[du.index].update(du.update)
+            real_data_list[du.index].update(du.update)
         return await self.send_and_wait(
             self.create_comp_event({
                 "type":
@@ -5486,18 +5492,35 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                 } for x in updates],
             }))
 
+    async def update_misc_data(self, header_datas: Optional[List[Dict[str, Any]]] = None, footer_datas: Optional[List[Dict[str, Any]]] = None):
+        if header_datas is None and footer_datas is None:
+            return 
+        upd_ev: dict[str, Any] = {
+            "type": DataListControlType.SetMiscData.value,
+        }
+        if header_datas is not None:
+            upd_ev["headerDatas"] = header_datas
+        if footer_datas is not None:
+            upd_ev["footerDatas"] = footer_datas
+        return await self.send_and_wait(
+            self.create_comp_event(upd_ev))
+
     @contextlib.asynccontextmanager
     async def draft_update(self, model_cls: type[_T]) -> AsyncGenerator[_DataListUpdateContext[_T], None]:
         assert dataclasses.is_pydantic_dataclass(model_cls), "only pydantic dataclass is supported"
         assert not isinstance(self.props.dataList, DataGridProxy)
-        assert len(self.props.dataList) != 0, "data list is empty, can't use draft update"
-        # validate DataclassType
-        if dataclasses.is_dataclass(self.props.dataList[0]):
-            assert isinstance(self.props.dataList[0], model_cls)
+        if isinstance(self.props.dataList, DataGridDataWithMisc):
+            real_data_list = self.props.dataList.dataList
         else:
-            model_cls(**self.props.dataList[0])
+            real_data_list = self.props.dataList
+        assert len(real_data_list) != 0, "data list is empty, can't use draft update"
+        # validate DataclassType
+        if dataclasses.is_dataclass(real_data_list[0]):
+            assert isinstance(real_data_list[0], model_cls)
+        else:
+            model_cls(**real_data_list[0])
         draft = create_draft_type_only(model_cls)
-        ctx = _DataListUpdateContext(draft, len(self.props.dataList))
+        ctx = _DataListUpdateContext(draft, len(real_data_list))
         yield ctx
         none_index_ops: Optional[list[DraftUpdateOp]] = None
         idx_to_ops: dict[int, list[DraftUpdateOp]] = {}
@@ -5510,11 +5533,11 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                 for ind in index:
                     idx_to_ops[ind] = updates
         if none_index_ops is not None:
-            for i in range(len(self.props.dataList)):
+            for i in range(len(real_data_list)):
                 if i not in idx_to_ops:
                     idx_to_ops[i] = none_index_ops
         for ind, updates in idx_to_ops.items():
-            obj = self.props.dataList[ind]
+            obj = real_data_list[ind]
             if dataclasses.is_dataclass(obj):
                 apply_draft_update_ops(obj, updates)
             else:
@@ -5532,6 +5555,11 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         assert not isinstance(self.props.dataList,
                               DataGridProxy), "can't update data in proxy mode"
+        if isinstance(self.props.dataList, DataGridDataWithMisc):
+            real_data_list = self.props.dataList.dataList
+        else:
+            real_data_list = self.props.dataList
+        
         key = event.keys
         indexes = event.indexes
         # print(event, prop_name)
@@ -5539,7 +5567,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
             indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
         data = event.data
-        data_item = self.props.dataList[indexes[0]]
+        data_item = real_data_list[indexes[0]]
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
@@ -5575,12 +5603,17 @@ class MatrixDataGridItem:
     array: np.ndarray
     columnOffset: int = 0
 
+@dataclasses.dataclass
+class MatrixDataGridDataWithMisc:
+    # when you need to specify header or footer data, you must use this instead of list.
+    dataList: Dict[str, MatrixDataGridItem] = dataclasses.field(default_factory=dict)
+    headerDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
+    footerDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class MatrixDataGridProps(MUIFlexBoxProps, DataGridPropsBase):
     # dict of matrix with same number of rows.
-    dataList: Dict[str, MatrixDataGridItem] = dataclasses.field(
-        default_factory=dict)
+    dataList: MatrixDataGridDataWithMisc = dataclasses.field(default_factory=MatrixDataGridDataWithMisc)
     rowOffset: Union[Undefined, int] = undefined
 
 
@@ -5622,7 +5655,8 @@ class MatrixDataGrid(MUIContainerBase[MatrixDataGridProps, MUIComponentType]):
             else:
                 data_list[k] = v
         self._check_data(data_list)
-        self.props.dataList = data_list
+        self.props.dataList = MatrixDataGridDataWithMisc(dataList=data_list, 
+            headerDatas=customHeaderDatas, footerDatas=customFooterDatas)
         self.event_row_selection = self._create_event_slot(
             FrontendEventType.DataGridRowSelection)
         self.event_header_menu_item_click: EventSlot[Tuple[

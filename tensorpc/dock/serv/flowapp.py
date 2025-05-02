@@ -72,6 +72,7 @@ class FlowApp:
                  external_argv: Optional[List[str]] = None,
                  init_code: str = "") -> None:
         # print(module_name, config)
+        module_name = module_name.strip()
         if external_argv is not None:
             print("external_argv", external_argv)
         # if init_code:
@@ -80,6 +81,7 @@ class FlowApp:
         #     # used to register user data
         #     exec(init_code, {})
         self.module_name = module_name
+        self.is_dynamic_code: bool = module_name == ""
         self.config = config
         self.shutdown_ev = asyncio.Event()
         self.master_meta = MasterMeta()
@@ -103,8 +105,11 @@ class FlowApp:
             self._uid = ""
         self.headless = headless
         reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
-        if module_name == "":
-            self.dynamic_app_cls = ReloadableDynamicClass("App", reload_mgr, init_code)
+        use_app_editor = True
+        if self.is_dynamic_code:
+            module_name = "App"
+            use_app_editor = False
+            self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr, init_code)
         else:
             self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)
         static_creator = self.dynamic_app_cls.get_object_creator_if_exists()
@@ -118,15 +123,17 @@ class FlowApp:
             # external root
             external_root = obj
             self.app: App = EditableApp(external_root=external_root,
-                                        reload_manager=reload_mgr)
+                                        reload_manager=reload_mgr,
+                                        use_app_editor=use_app_editor)
         else:
             # other object, must declare a tensorpc_flow_layout
             # external_root = flex_wrapper(obj)
             self.app: App = EditableApp(external_wrapped_obj=obj,
-                                        reload_manager=reload_mgr)
+                                        reload_manager=reload_mgr,
+                                        use_app_editor=use_app_editor)
             self.app._app_force_use_layout_function()
         self.app._flow_app_comp_core.reload_mgr = reload_mgr
-        self.app_su = ServiceUnit(module_name, config)
+        self.app_su = ServiceUnit(module_name, config, code="" if not self.is_dynamic_code else init_code)
         self.app_su.init_service(obj)
         self.app._app_dynamic_cls = self.dynamic_app_cls
         self.app._app_service_unit = self.app_su

@@ -1202,8 +1202,8 @@ class ServiceUnit(DynamicClass):
     !C:\\path\\to\\module.py::Class::Alias
     """
 
-    def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
-        super().__init__(module_name)
+    def __init__(self, module_name: str, config: Dict[str, Any], code: str = "") -> None:
+        super().__init__(module_name, code)
         assert config is not None, "please use {} in yaml if config is empty"
         # self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
         #     module_name)

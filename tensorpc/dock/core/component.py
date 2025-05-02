@@ -1941,21 +1941,6 @@ class Component(Generic[T_base_props, T_child]):
     async def sync_used_events(self):
         return await self.put_app_event(self.create_update_used_events_event())
 
-    def create_update_prop_event(self, data: dict[str, Union[Any, Undefined]]):
-        data_no_und = {}
-        data_unds = []
-        for k, v in data.items():
-            k = snake_to_camel(k)
-            if isinstance(v, Undefined):
-                data_unds.append(k)
-            else:
-                data_no_und[k] = v
-        assert self._flow_uid is not None
-        ev = UIUpdateEvent(
-            {self._flow_uid.uid_encoded: (data_no_und, data_unds)})
-        # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
-
     def create_comp_event(self, data: dict[str, Any]):
         """create component control event for
         backend -> frontend direct communication

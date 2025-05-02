@@ -422,9 +422,8 @@ class NumpyArrayGrid(mui.FlexBox):
             ))
         new_footer_data = self._get_footer_data(offset[2])
         await self.send_and_wait(
-            self.dgrid.update_event(dataList=subarr,
-                                    rowOffset=offset[0],
-                                    customFooterDatas=new_footer_data))
+            self.dgrid.update_event(dataList=mui.MatrixDataGridDataWithMisc(dataList=subarr, footerDatas=new_footer_data),
+                                    rowOffset=offset[0]))
 
 
 class NumpyArrayGridTable(mui.FlexBox):

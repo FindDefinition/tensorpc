@@ -1304,12 +1304,7 @@ class DataGridApp:
         btn = mui.Button("NAME!")
         md_root = mui.Markdown("")
         btn.event_click.on(lambda: md_root.write("FOOT!"))
-
-        dgrid = mui.DataGrid(
-            column_defs,
-            rows,
-            master_detail,
-            customHeaderDatas=[
+        data_with_misc = mui.DataGridDataWithMisc(dataList=rows, headerDatas=[
                 {
                     "name": {
                         "type": "name",
@@ -1318,23 +1313,26 @@ class DataGridApp:
                         "type": "calories",
                     },
                 },
-            ],
+            ], footerDatas=[
+                {
+                    "name": {
+                        "type": "name",
+                    },
+                    "calories": {
+                        "type": "calories",
+                    },
+                },
+            ])
+        dgrid = mui.DataGrid(
+            column_defs,
+            data_with_misc,
+            master_detail,
             customHeaders=[
                 mui.MatchCase([
                     mui.MatchCase.Case("name", btn),
                     mui.MatchCase.Case(mui.undefined,
                                        mui.Typography("Other H!")),
                 ]).bind_fields(condition="type")
-            ],
-            customFooterDatas=[
-                {
-                    "name": {
-                        "type": "name",
-                    },
-                    "calories": {
-                        "type": "calories",
-                    },
-                },
             ],
             customFooters=[
                 mui.MatchCase([

@@ -11,7 +11,7 @@ export type AppTemplate = {
 """
 
 from pathlib import Path
-from . import distssh, tutorials
+from . import distssh, tutorials, debugpanel
 
 
 def get_all_app_templates():
@@ -23,6 +23,10 @@ def get_all_app_templates():
         "label": "Tutorials",
         "mod": tutorials,
         "group": "example",
+    }, {
+        "label": "Local Debug Panel",
+        "mod": debugpanel,
+        "group": "tools",
     }]
     res: list[dict] = []
     for item in all_mods:

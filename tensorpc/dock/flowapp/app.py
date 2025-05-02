@@ -19,7 +19,7 @@ Layout Instance: App itself and layout objects created on AnyFlexLayout.
 import ast
 import asyncio
 import base64
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, cast
 import contextlib
 import contextvars
 import dataclasses
@@ -838,9 +838,10 @@ class App:
             keys: Union[Undefined, List[str]] = undefined
             uid_original = uid
             if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
-                parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
-                uid = parts[0]
-                keys = parts[1:]
+                split_idx = uid.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+                keys_str = uid[split_idx + len(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT):]
+                uid = uid[:split_idx]
+                keys = UniqueTreeId(keys_str).parts
             indexes = undefined
             indexes_raw = None
             if len(data) == 3 and data[2] is not None:
@@ -1211,6 +1212,7 @@ class EditableApp(App):
         path = ""
         if not self._is_remote_component:
             dcls = self._get_app_dynamic_cls()
+            print("dcls.is_dynamic_code", dcls.is_dynamic_code)
             if not dcls.is_dynamic_code:
                 path = dcls.file_path
                 self._flowapp_change_observers[path] = obentry
@@ -1227,8 +1229,6 @@ class EditableApp(App):
                 paths = set(self._flow_observed_files)
             else:
                 paths = set(self.__get_default_observe_paths())
-            if not self._is_remote_component:
-                paths.add(str(Path(path).resolve()))
             for p in registry.get_path_to_qname().keys():
                 paths.add(str(Path(p).resolve()))
             self._init_observe_paths.update(paths)
@@ -1289,7 +1289,7 @@ class EditableApp(App):
             self._flowapp_change_observers[
                 path_resolved] = _WatchDogWatchEntry({}, None)
         obentry = self._flowapp_change_observers[path_resolved]
-        if len(obentry.obmetas) == 0 and not is_tensorpc_dynamic_path(path):
+        if len(obentry.obmetas) == 0 and not is_tensorpc_dynamic_path(path) and self._watchdog_watcher is not None:
             # no need to schedule watchdog.
             if path_resolved not in self._init_observe_paths:
                 watch = self._watchdog_observer.schedule(
@@ -1361,7 +1361,9 @@ class EditableApp(App):
                 pass
             res.add(v_file)
         if not self._is_remote_component:
-            res.add(self._get_app_dynamic_cls().file_path)
+            dcls = self._get_app_dynamic_cls()
+            if not dcls.is_dynamic_code:
+                res.add(dcls.file_path)
         return res
 
     def __get_callback_metas_in_file(self, change_file: str,
@@ -1683,8 +1685,12 @@ class EditableApp(App):
             with self._watch_lock:
                 if self._flowapp_code_mgr is None or self._loop is None:
                     return
+                if isinstance(ev.src_path, bytes):
+                    src_path = ev.src_path.decode()
+                else:
+                    src_path = cast(str, ev.src_path)
                 asyncio.run_coroutine_threadsafe(
-                    self._reload_object_with_new_code(ev.src_path), self._loop)
+                    self._reload_object_with_new_code(src_path), self._loop)
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
