@@ -21,6 +21,7 @@ def serve_in_terminal(*modules: str,
                       serv_def_file: Optional[str] = None,
                       max_threads=10,
                       serv_config_b64: str = "",
+                      serv_config_is_gzip: bool = False,
                       ssl_key_path: str = "",
                       ssl_crt_path: str = "",
                       serv_config_json: Optional[dict] = None,
@@ -32,7 +33,7 @@ def serve_in_terminal(*modules: str,
         service_def = ServiceDef(servs)
     service_def.services.extend(BUILTIN_SERVICES)
     if serv_config_b64 != "":
-        decode_config_b64_and_update(serv_config_b64, service_def.services)
+        decode_config_b64_and_update(serv_config_b64, service_def.services, serv_config_is_gzip)
     elif serv_config_json is not None:
         # used for wrapper
         update_service_def_config(serv_config_json, service_def.services)

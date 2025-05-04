@@ -326,7 +326,7 @@ class AppEventType(enum.IntEnum):
     UIUpdateEvent = 11
     UISaveStateEvent = 12
     Notify = 13
-    UIUpdatePropsEvent = 14
+    UIUpdateBasePropsEvent = 14
     UIException = 15
     FrontendUIEvent = 16
     UIUpdateUsedEvents = 17
@@ -773,7 +773,7 @@ class UISaveStateEvent:
 
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
-@ALL_APP_EVENTS.register(key=AppEventType.UIUpdatePropsEvent.value)
+@ALL_APP_EVENTS.register(key=AppEventType.UIUpdateBasePropsEvent.value)
 class UIUpdateEvent:
 
     def __init__(self,
@@ -1691,7 +1691,7 @@ class Component(Generic[T_base_props, T_child]):
             res["dmProps"] = dm_paths_new
         evs = self._get_used_events_dict()
         if evs:
-            res["props"]["usedEvents"] = evs
+            res["usedEvents"] = evs
         if self._flow_json_only:
             res["props"] = JsonOnlyData(props)
         return res
@@ -1934,9 +1934,29 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 
+    def _create_update_base_props_event(self, dm_props: Optional[Union[dict[str, Any], Undefined]] = None, 
+                used_events: Optional[Union[list[Any], Undefined]] = None):
+        data_no_und = {}
+        data_unds = []
+        if isinstance(dm_props, Undefined):
+            data_unds.append("dmProps")
+        else:
+            if dm_props is not None:
+                data_no_und["dmProps"] = dm_props
+        if isinstance(used_events, Undefined):
+            data_unds.append("usedEvents")
+        else:
+            if used_events is not None:
+                data_no_und["usedEvents"] = used_events
+        assert self._flow_uid is not None
+        ev = UIUpdateEvent(
+            {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, False)
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.UIUpdateBasePropsEvent: ev})
+
     def create_update_used_events_event(self):
         used_events = self._get_used_events_dict()
-        return self.create_update_event({"usedEvents": used_events}, True)
+        return self._create_update_base_props_event(used_events=used_events)
 
     async def sync_used_events(self):
         return await self.put_app_event(self.create_update_used_events_event())

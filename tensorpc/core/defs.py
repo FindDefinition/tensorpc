@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import gzip
 from os import stat_result
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
@@ -94,8 +95,11 @@ def update_service_def_config(serv_config: Any, servs: List[Service]):
         assert k in key_to_serv, f"{k} not exist in services"
         key_to_serv[k].config = v
 
-def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
-    serv_config_str = base64.b64decode(cfg_b64).decode("utf-8")
+def decode_config_b64_and_update(cfg_b64: str, servs: List[Service], is_gzip: bool = False):
+    if is_gzip:
+        serv_config_str = gzip.decompress(base64.b64decode(cfg_b64)).decode("utf-8")
+    else:
+        serv_config_str = base64.b64decode(cfg_b64).decode("utf-8")
     serv_config = json.loads(serv_config_str)
     return update_service_def_config(serv_config, servs)
 

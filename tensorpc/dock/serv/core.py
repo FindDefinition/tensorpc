@@ -18,6 +18,7 @@ import base64
 import bisect
 from collections.abc import MutableMapping
 import enum
+import gzip
 import itertools
 import json
 import os
@@ -1189,9 +1190,10 @@ class AppNode(CommandNode, DataStorageNodeBase):
                 "init_code": self.init_code,
             }
         }
-        cfg_encoded = base64.b64encode(
-            json.dumps(cfg).encode("utf-8")).decode("utf-8")
-        return serv_name, cfg_encoded
+        cfg_encoded_bytes = base64.b64encode(
+            json.dumps(cfg).encode("utf-8")) # .decode("utf-8")
+        cfg_encoded_compressed = gzip.compress(cfg_encoded_bytes)
+        return serv_name, cfg_encoded_compressed.decode("utf-8")
 
     async def run_command(self,
                           newenvs: Optional[Dict[str, Any]] = None,
@@ -1200,7 +1202,8 @@ class AppNode(CommandNode, DataStorageNodeBase):
         # TODO only use http port
         cmd = (f" python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "
-               f"--serv_config_b64 '{cfg_encoded}'")
+               f"--serv_config_b64 '{cfg_encoded}' "
+               f"--serv_config_is_gzip=True")
         await self.input_queue.put(cmd + "\n")
 
 

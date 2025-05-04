@@ -1,3 +1,4 @@
+import gzip
 import json
 import sys
 from tensorpc.serve.__main__ import serve_in_terminal
@@ -15,8 +16,15 @@ def main():
     module = serv_option["module"]
     if "serv_config_b64" in serv_option:
         serv_config_b64 = serv_option["serv_config_b64"]
-        serv_config = json.loads(
-            base64.b64decode(serv_config_b64).decode("utf-8"))
+        serv_config_is_gzip = False
+        if "serv_config_is_gzip" in serv_option:
+            serv_config_is_gzip = serv_option["serv_config_is_gzip"]
+        if serv_config_is_gzip:
+            serv_config = json.loads(
+                gzip.decompress(base64.b64decode(serv_config_b64)).decode("utf-8"))
+        else:
+            serv_config = json.loads(
+                base64.b64decode(serv_config_b64).decode("utf-8"))
         serv_config[module]["external_argv"] = sys.argv[2:]
         serv_config_b64 = base64.b64encode(
             json.dumps(serv_config).encode("utf-8")).decode("utf-8")
