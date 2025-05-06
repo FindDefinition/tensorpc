@@ -96,6 +96,18 @@ class FTState:
     num_bkpt_proc: int = 0
     title_msg: str = ""
 
+    def is_state_equal_non_external(self, other: "FTState") -> bool:
+        return (
+            self.label == other.label
+            and self.rank == other.rank
+            and self.ip == other.ip
+            and self.port == other.port
+            and self.is_master == other.is_master
+            and self.status == other.status
+            and self.ssh_status == other.ssh_status
+            and self.num_bkpt_proc == other.num_bkpt_proc
+        )
+
 @dataclasses.dataclass
 class MasterUIState:
     cmd_status: CmdStatus

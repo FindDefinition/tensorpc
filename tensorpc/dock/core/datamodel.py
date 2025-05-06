@@ -477,7 +477,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     async def _handle_draft_store_update(self, ops: list[DraftUpdateOp],
                                          store: DraftFileStorage):
         # external fields won't be included in backend store.
-        ops = list(filter(lambda op: not op.is_external, ops))
+        ops = list(filter(lambda op: not op.is_external and not op.is_store_external, ops))
         await store.update_model(self.get_draft(), ops)
 
     @staticmethod

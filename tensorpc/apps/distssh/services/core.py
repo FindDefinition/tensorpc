@@ -675,14 +675,17 @@ class FaultToleranceSSHServer:
             LOGGER.warning("cmd waiter finished.")
 
     async def _master_sync_cmd_status(self):
-        if self._master_ui.dm.model.cmd_status != CmdStatus.DURING_RESTART:
+        prev_status = self._master_ui.dm.model.cmd_status
+        if prev_status != CmdStatus.DURING_RESTART:
             is_all_ssh_finish = self._master_check_is_all_ssh_idle_or_err()
             if is_all_ssh_finish:
-                async with self._master_ui.dm.draft_update() as draft_master:
-                    draft_master.cmd_status = CmdStatus.IDLE
+                if prev_status != CmdStatus.IDLE:
+                    async with self._master_ui.dm.draft_update() as draft_master:
+                        draft_master.cmd_status = CmdStatus.IDLE
             else:
-                async with self._master_ui.dm.draft_update() as draft_master:
-                    draft_master.cmd_status = CmdStatus.RUNNING
+                if prev_status != CmdStatus.RUNNING:
+                    async with self._master_ui.dm.draft_update() as draft_master:
+                        draft_master.cmd_status = CmdStatus.RUNNING
 
     async def _master_start_cmd_restart_sequence(self):
         LOGGER.warning("Master try to restart cmd.")

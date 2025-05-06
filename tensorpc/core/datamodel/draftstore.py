@@ -939,7 +939,8 @@ class DraftFileStorage(Generic[T]):
                  model: T,
                  store: Union[DraftStoreBackendBase,
                               Mapping[str, DraftStoreBackendBase]],
-                 main_store_id: str = ""):
+                 main_store_id: str = "",
+                 batch_write_duration: int = -1):
         self._root_path = root_path
         if not isinstance(store, Mapping):
             store = {main_store_id: store}
@@ -952,6 +953,7 @@ class DraftFileStorage(Generic[T]):
         self._mashumaro_encoder: Optional[BasicEncoder] = None
         self._exclude_field_ids: set[int] = set()
         model_type_real = type(model)
+        self._batch_write_duration = batch_write_duration
         if dataclasses.is_dataclass(model_type_real):
             field_meta_dict = get_dataclass_field_meta_dict(model_type_real)
             for k, v in field_meta_dict.items():
@@ -1069,9 +1071,17 @@ class DraftFileStorage(Generic[T]):
             # plain dataclass don't support create from dict, so we use `mashumaro` decoder here. it's fast.
             dec, _ = self._lazy_get_mashumaro_coder()
             self._model: T = dec.decode(data)  # type: ignore
+        # write whole model to clean unused (ignored, external) fields
+        await self.write_whole_model(self._store,
+                                     self._model,
+                                     self._exclude_field_ids,
+                                     self._root_path,
+                                     main_store_id=self._main_store_id)
         return self._model
 
     async def update_model(self, root_draft: Any, ops: list[DraftUpdateOp]):
+        if not ops:
+            return 
         assert isinstance(root_draft, DraftBase)
         # convert dynamic node to static in op
         ops = ops.copy()
