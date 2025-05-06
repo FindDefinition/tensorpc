@@ -32,6 +32,7 @@ _MAX_STRING_IN_DETAIL = 10000
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchTensor)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchParameter)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TVTensor)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchDTensor)
 class TensorHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
@@ -72,15 +73,19 @@ class TensorHandler(ObjectPreviewHandler):
         self._tensor_slices: Dict[str, str] = {}
 
     def _to_numpy(self, obj):
-        if get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+        if get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor or get_qualname_of_type(type(obj)) == CommonQualNames.TorchDTensor:
             import torch 
-            if obj.is_cpu:
+            is_dtensor = get_qualname_of_type(type(obj)) == CommonQualNames.TorchDTensor
+            with torch.no_grad():
+                if is_dtensor:
+                    obj = obj.to_local()
+                if obj.is_cpu:
+                    if obj.dtype == torch.bfloat16 or obj.dtype == torch.float16:
+                        return obj.to(torch.float32).detach().numpy()
+                    return obj.detach().numpy()
                 if obj.dtype == torch.bfloat16 or obj.dtype == torch.float16:
-                    return obj.to(torch.float32).detach().numpy()
-                return obj.detach().numpy()
-            if obj.dtype == torch.bfloat16 or obj.dtype == torch.float16:
-                return obj.to(torch.float32).detach().cpu().numpy()
-            return obj.detach().cpu().numpy()
+                    return obj.to(torch.float32).detach().cpu().numpy()
+                return obj.detach().cpu().numpy()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
             return obj.data.cpu().numpy()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
@@ -147,13 +152,17 @@ class TensorHandler(ObjectPreviewHandler):
             device = "cpu"
             hasnan = np.isnan(obj).any().item()
             hasinf = np.isinf(obj).any().item()
-        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor or get_qualname_of_type(type(obj)) == CommonQualNames.TorchDTensor:
             import torch
             qualname = "torch.Tensor"
             device = obj.device.type
-            is_contig = obj.is_contiguous()
-            hasnan = torch.isnan(obj).any().item()
-            hasinf = torch.isinf(obj).any().item()
+            is_dtensor = get_qualname_of_type(type(obj)) == CommonQualNames.TorchDTensor
+            with torch.no_grad():
+                if is_dtensor:
+                    obj = obj.to_local()
+                is_contig = obj.is_contiguous()
+                hasnan = torch.isnan(obj).any().item()
+                hasinf = torch.isinf(obj).any().item()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
             import torch
             qualname = "torch.Parameter"

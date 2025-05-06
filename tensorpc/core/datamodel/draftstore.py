@@ -14,6 +14,7 @@ from collections.abc import Mapping, MutableMapping
 import enum
 from pathlib import Path, PurePath, PurePosixPath
 import shutil
+import time
 import traceback
 from typing import (Any, Generic, Optional, TypeVar, Union, get_type_hints)
 
@@ -217,31 +218,56 @@ class DraftMongoStoreBackend(DraftFileStoreBackendBase):
         coll.delete_many({"key": {"$regex": f"^{path_p.name}/"}})
 
 class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, with_bak: bool = False, verbose_fs: bool = False):
         self._root = root
+        self._with_bak = with_bak
+        self._verbose_fs = verbose_fs
     
-    def _get_abs_path(self, path: str):
-        path_p = self._root / Path(path + ".json")
+    def _get_abs_path(self, path: str, with_bak: bool = False) -> Path:
+        if with_bak:
+            path_p = self._root / Path(path + ".json.bak")
+        else:
+            path_p = self._root / Path(path + ".json")
         return path_p
 
     async def read(self, path: str) -> Optional[Any]:
+        t = time.time()
         path_p = self._get_abs_path(path)
+        path_bak_p = self._get_abs_path(path, with_bak=True)
         if not path_p.exists():
-            return None 
+            # try bak
+            path_p = path_bak_p
+            if not path_p.exists():
+                return None 
         try:
             with open(path_p, "r") as f:
-                return json.load(f)
+                res = json.load(f)
+            if self._verbose_fs:
+                print(f"[DraftStore]Read File {path_p} cost time {time.time() - t}")
+            return res 
         except:
             traceback.print_exc()
-            return None 
+            # try bak
+            try:
+                with open(path_bak_p, "r") as f:
+                    return json.load(f)
+            except:
+                return None 
 
     async def write(self, path: str, data: Any) -> None:
+        t = time.time()
         path_p = self._get_abs_path(path)
         path_p_parent = path_p.parent 
         if not path_p_parent.exists():
             path_p_parent.mkdir(parents=True, exist_ok=True, mode=0o755)
         with open(path_p, "w") as f:
             json.dump(data, f)
+        if self._with_bak:
+            path_bak_p = self._get_abs_path(path, with_bak=True)
+            with open(path_bak_p, "w") as f:
+                json.dump(data, f)
+        if self._verbose_fs:
+            print(f"[DraftStore]Write File {path_p} cost time {time.time() - t}")
 
     async def update(self, path: str, ops: list[DraftUpdateOp]) -> None:
         # for in-memory store, avoid store and frontend share same dict.
@@ -263,6 +289,11 @@ class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
     async def remove(self, path: str) -> None:
         path_p = self._get_abs_path(path)
         path_p.unlink()
+        if self._with_bak:
+            path_bak_p = self._get_abs_path(path, with_bak=True)
+            if path_bak_p.exists():
+                path_bak_p.unlink()
+
 
     async def read_all_childs(self, path: str) -> dict[str, Any]:
         res = {}
@@ -927,7 +958,7 @@ class DraftFileStorage(Generic[T]):
                 if v.annotype.annometa is not None:
                     for tt in v.annotype.annometa:
                         if isinstance(tt, DraftFieldMeta):
-                            if tt.is_external:
+                            if tt.is_external or tt.is_store_external:
                                 if v.field.default is dataclasses.MISSING and v.field.default_factory is dataclasses.MISSING:
                                     raise ValueError(f"external field {v.field.name} must have default value or factory"
                                         " because this field is managed by user, it won't be stored to draft storage.")
@@ -1050,7 +1081,7 @@ class DraftFileStorage(Generic[T]):
                 ops[i] = stabilize_getitem_path_in_op_main_path(
                     op, root_draft, self._model)
         # remove all op with external (exclude) modify target
-        ops = list(filter(lambda o: not o.is_external, ops))
+        ops = list(filter(lambda o: not o.is_external and not o.is_store_external, ops))
         if not self._has_splitted_store:
             ops = [o.to_json_update_op().to_userdata_removed() for o in ops]
             await self._store[self._main_store_id].update(self._root_path, ops)

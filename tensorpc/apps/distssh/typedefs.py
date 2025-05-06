@@ -94,11 +94,12 @@ class FTState:
     # when enabled, your distributed problem will enter breakpoint
     is_user_control_enabled: Annotated[bool, DraftFieldMeta(is_external=True)] = False
     num_bkpt_proc: int = 0
+    title_msg: str = ""
 
 @dataclasses.dataclass
 class MasterUIState:
     cmd_status: CmdStatus
-    client_states: list[FTState]
+    client_states: Annotated[list[FTState], DraftFieldMeta(is_store_external=True)] = dataclasses.field(default_factory=list)
     selected_client_state: Optional[dict[str, Any]] = None
     cmd: str = "echo $HOME"
     cmd_history: list[str] = dataclasses.field(default_factory=list)

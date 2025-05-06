@@ -25,6 +25,8 @@ from tensorpc.utils import get_service_key_by_type, rich_logging
 from tensorpc.utils.wait_tools import get_primary_ip 
 from tensorpc.core import BuiltinServiceKeys, marker, prim
 from tensorpc.core.moduleid import import_dynamic_func
+from tensorpc.autossh.core import Event as SSHEvent
+import humanize 
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
@@ -222,7 +224,7 @@ class FaultToleranceSSHServer:
             workdir = Path(self._cfg.workdir) 
             # if not workdir.exists():
             #     workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
-            fs_backend = DraftSimpleFileStoreBackend(workdir)
+            fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=True)
             self._master_ui.dm.connect_draft_store(f"_distssh_store_{self._cfg.world_size}", fs_backend)
             self._master_state_backup_path = fs_backend._get_abs_path(f"_distssh_store_backup_{self._cfg.world_size}")
         set_layout_service = prim.get_service(
@@ -772,6 +774,12 @@ class FaultToleranceSSHServer:
                 draft.client_states[self._master_rank].status = FTStatus.OK
             self._disconnect_retry_count = 0
 
+    def _get_ssh_last_ts(self):
+        cur_state = self._terminal.get_current_state()
+        if cur_state is not None:
+            return cur_state.last_ts
+        return -1
+
     async def _heartbeat_loop(self):
         shutdown_ev = prim.get_async_shutdown_event()
         shutdown_ev_task = asyncio.create_task(shutdown_ev.wait(), name="heartbeat_shutdown")
@@ -821,6 +829,11 @@ class FaultToleranceSSHServer:
                                 shutdown_ev.set()
                                 break
                         await self._master_state_check_is_ok()
+                    if self._get_ssh_last_ts() != -1:
+                        async with self._master_ui.dm.draft_update() as draft:
+                            cur_ts = time.time_ns()
+                            duration_ns = cur_ts - self._get_ssh_last_ts()
+                            draft.client_states[self._master_rank].title_msg = f"{humanize.naturaldelta(duration_ns / 1e9)} ago"
             else:
                 while True:
                     sleep_task = asyncio.create_task(
@@ -863,6 +876,12 @@ class FaultToleranceSSHServer:
                             async with self._client_ui.dm.draft_update() as draft:
                                 self._disconnect_retry_count = 0
                                 draft.status = FTStatus.OK
+                    if self._get_ssh_last_ts() != -1:
+                        async with self._client_ui.dm.draft_update() as draft:
+                            cur_ts = time.time_ns()
+                            duration_ns = cur_ts - self._get_ssh_last_ts()
+                            draft.title_msg = f"{humanize.naturaldelta(duration_ns / 1e9)} ago"
+
         except:
             LOGGER.warning("heartbeat loop exception", exc_info=True)
             raise 

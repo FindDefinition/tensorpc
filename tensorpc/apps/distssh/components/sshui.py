@@ -202,9 +202,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self._master_rank = master_rank
         self._port = port
         if master_state.is_master:
-            title = "Main Worker"
+            title = "Main Worker (%s)"
         else:
-            title = f"Worker ({master_state.rank})"
+            title = f"Worker ({master_state.rank}, %s)"
         self._release_bkpt_fn = release_bkpt_fn
         self._fetch_debug_info_fn = fetch_debug_info_fn
         start_or_cancel_btn = mui.IconButton(
@@ -372,6 +372,8 @@ class FaultToleranceUIMaster(mui.FlexBox):
             master_draft.cmd_status == CmdStatus.IDLE, True, False))
         kill_btn.bind_fields(disabled=D.where(
             master_draft.cmd_status == CmdStatus.IDLE, True, False))
+        header_str.bind_fields(value=D.literal_val(title) % master_draft.client_states[master_rank].title_msg)
+
         self._code_editor.bind_draft_change_uncontrolled(master_draft.cmd)
         # self._code_editor.bind_draft_change_uncontrolled(master_draft.cmd)
         # FIXME can't install to worker_status_box
@@ -505,7 +507,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
 class FaultToleranceUIClient(mui.FlexBox):
 
     def __init__(self, state: FTState, term: terminal.AsyncSSHTerminal):
-        title = f"Worker ({state.rank})"
+        title = f"Worker ({state.rank}, %s)"
         header_str = mui.Typography(title).prop(variant="body2",
                                                 color="primary")
         self._terminal = term
@@ -513,6 +515,9 @@ class FaultToleranceUIClient(mui.FlexBox):
         self._terminal_box.event_contextmenu_select.on(self._on_term_menu)
 
         self.dm = mui.DataModel(state, [header_str, self._terminal_box])
+        draft = self.dm.get_draft()
+        header_str.bind_fields(value=D.literal_val(title) % draft.title_msg)
+
         super().__init__([
             self.dm,
         ])

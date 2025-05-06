@@ -321,6 +321,7 @@ class _AsyncSSHTerminalState:
     current_cmd_buffer: Optional[deque[TerminalLineEvent]] = None
     current_cmd_rpc_future: Optional[asyncio.Future[TerminalCmdCompleteEvent]] = None
     shell_info: Optional[ShellInfo] = None
+    last_ts: int = -1
 
 class AsyncSSHTerminal(Terminal):
 
@@ -529,6 +530,7 @@ class AsyncSSHTerminal(Terminal):
                                 user_callback: Optional[Callable[[SSHEvent],
                                                                  Any]] = None):
         assert self._ssh_state is not None
+        self._ssh_state.last_ts = event.timestamp
         try:
             if not isinstance(event, RawEvent):
                 if isinstance(event, LineEvent):
@@ -644,7 +646,8 @@ class AsyncSSHTerminal(Terminal):
         cmd = cmd.rstrip()
         if not cmd.endswith("\n"):
             cmd += "\n"
-        assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state.current_cmd}."
+        assert self._ssh_state is not None
+        assert self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state.current_cmd}."
         assert self._ssh_state.current_cmd_rpc_future is None, "previous command is not finished yet."
         future: asyncio.Future[TerminalCmdCompleteEvent] = asyncio.get_running_loop().create_future()
         self._ssh_state.current_cmd_rpc_future = future

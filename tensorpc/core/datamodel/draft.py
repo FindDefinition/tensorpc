@@ -116,6 +116,8 @@ class JMESPathOp:
 class DraftFieldMeta:
     # external field won't be sent to frontend or store.
     is_external: bool = False
+    # external field won't be sent to store.
+    is_store_external: bool = False
 
 @dataclasses.dataclass
 class DraftUpdateOp:
@@ -136,10 +138,12 @@ class DraftUpdateOp:
     field_id: Optional[int] = None
     # when assign/modify target is external, this field will be True.
     is_external: bool = False
+    # external field won't be sent to store.
+    is_store_external: bool = False
 
     def __repr__(self) -> str:
         path_str = self.node.get_jmes_path()
-        prefix = f"JOp[{path_str}|{self.op.name}|{self.is_external}]"
+        prefix = f"JOp[{path_str}|{self.op.name}|{self.is_external}|{self.is_store_external}]"
         # jpath_str = _get_jmes_path(self.path)
         if self.op == JMESPathOpType.SetAttr:
             key, value = self.opData["items"][0]
@@ -258,6 +262,7 @@ class _DraftAnnoState:
     # prevent assign by `insert_draft_assign_op` if False.
     can_direct_assign: bool = True
     is_external: bool = False
+    is_store_external: bool = False
 
 
 def _tensorpc_draft_dispatch(
@@ -308,10 +313,18 @@ def _tensorpc_draft_anno_dispatch(
             if isinstance(annmeta, DraftFieldMeta):
                 is_external = annmeta.is_external
                 break
+    is_store_external = prev_anno_state.is_store_external
+    if not is_store_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_store_external = annmeta.is_store_external
+                break
+
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
                                          path_metas=path_metas,
-                                         is_external=is_external)
+                                         is_external=is_external,
+                                         is_store_external=is_store_external)
     if not prev_anno_state.can_assign:
         new_anno_state.can_assign = False
     else:
@@ -395,7 +408,8 @@ class DraftBase:
                              self._tensorpc_draft_attr_userdata,
                              addi_nodes if addi_nodes is not None else [],
                              annometa, field_id=field_id,
-                             is_external=self._tensorpc_draft_attr_anno_state.is_external)
+                             is_external=self._tensorpc_draft_attr_anno_state.is_external,
+                             is_store_external=self._tensorpc_draft_attr_anno_state.is_store_external)
 
     def _tensorpc_draft_dispatch(
             self,

@@ -109,8 +109,12 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
         return await self.server_core.client_stream_async(request_iterator)
 
     async def BiStreamRemoteCall(self, request_iterator, context):
-        async for res in self.server_core.bi_stream_async(request_iterator):
-            yield res
+        try:
+            async for res in self.server_core.bi_stream_async(request_iterator):
+                yield res
+        except:
+            traceback.print_exc()
+            raise
 
     async def ChunkedBiStreamRemoteCall(self, request_iterator, context):
         async for res in self.server_core.chunked_bi_stream_async(
