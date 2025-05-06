@@ -1190,9 +1190,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
                 "init_code": self.init_code,
             }
         }
-        cfg_encoded_bytes = base64.b64encode(
-            json.dumps(cfg).encode("utf-8")) # .decode("utf-8")
-        cfg_encoded_compressed = gzip.compress(cfg_encoded_bytes)
+        cfg_encoded_compressed = base64.b64encode(gzip.compress(json.dumps(cfg).encode("utf-8")))
         return serv_name, cfg_encoded_compressed.decode("utf-8")
 
     async def run_command(self,
