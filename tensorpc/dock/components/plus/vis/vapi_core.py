@@ -373,7 +373,7 @@ def enter_group_context(robj: GroupProxy):
         GROUP_CONTEXT_VAR.reset(token)
 
 
-_CARED_CONTAINERS = (three.Group, three.Fragment, three.Hud)
+_CARED_CONTAINERS = (three.Group, three.Fragment)
 
 T_container = TypeVar("T_container", bound=three.ContainerBase)
 T_container_proxy = TypeVar("T_container_proxy", bound=three.ContainerBase)
