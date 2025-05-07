@@ -224,7 +224,7 @@ class FaultToleranceSSHServer:
             workdir = Path(self._cfg.workdir) 
             # if not workdir.exists():
             #     workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
-            fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False)
+            fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False, with_bak=True)
             self._master_ui.dm.connect_draft_store(f"_distssh_store_{self._cfg.world_size}", fs_backend)
             self._master_state_backup_path = fs_backend._get_abs_path(f"_distssh_store_backup_{self._cfg.world_size}")
         set_layout_service = prim.get_service(
@@ -490,7 +490,7 @@ class FaultToleranceSSHServer:
             self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "shutdown_or_kill_cmd"), set(), just_kill),
             self.shutdown_or_kill_cmd(just_kill),
         )
-        return res[1]
+        return res[0]
 
     async def shutdown_or_kill_cmd(self, just_kill: bool = False):
         if self._cmd_task is not None:
