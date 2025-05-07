@@ -64,7 +64,7 @@ class FTSSHServerArgs:
     # when some worker or master disconnected, we assume
     # your cluster manager will restart it. so we 
     # wait for 5 min to check if the worker is really.
-    disconnect_total_retry: int = 60
+    disconnect_total_retry: int = 120
     disconnect_rpc_check_timeout: int = 2
     # cmd shutdown configs
     cmd_shutdown_timeout: int = 10
