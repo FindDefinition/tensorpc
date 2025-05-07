@@ -206,7 +206,7 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
     def __init__(self, robj: RemoteObject, serv_key: str = BuiltinServiceKeys.ShmTrOnlyKVStore.value):
         super().__init__(robj, serv_key)
 
-    def _bistream_q(self, q: queue.Queue, timeout: int = 10):
+    def _bistream_q(self, q: queue.Queue, timeout: int = 40):
         while True:
             item = q.get(timeout=timeout)
             if item is None:

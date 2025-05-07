@@ -224,7 +224,7 @@ class FaultToleranceSSHServer:
             workdir = Path(self._cfg.workdir) 
             # if not workdir.exists():
             #     workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
-            fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=True)
+            fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False)
             self._master_ui.dm.connect_draft_store(f"_distssh_store_{self._cfg.world_size}", fs_backend)
             self._master_state_backup_path = fs_backend._get_abs_path(f"_distssh_store_backup_{self._cfg.world_size}")
         set_layout_service = prim.get_service(
@@ -762,7 +762,10 @@ class FaultToleranceSSHServer:
                         else:
                             traceback.print_exc()
                             robj = None
+                        LOGGER.warning(f"Master {master_ip}:{port} disconnected with grpc code {e.code()}")
                     return robj
+            else:
+                LOGGER.warning("Can't find Master info file, please check the workdir.")
 
     async def _master_correct_status_if_restart(self):
         master_state = self._master_ui.dm.model
