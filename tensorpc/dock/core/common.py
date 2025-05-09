@@ -25,6 +25,12 @@ _STATE_CHANGE_EVENTS = set([
     FrontendEventType.TreeItemExpandChange.value,
 ])
 
+_ONEARG_KEYBOARD_EVENTS = set([
+    FrontendEventType.KeyHold.value,
+    FrontendEventType.KeyDown.value,
+    FrontendEventType.KeyUp.value,
+])
+
 _ONEARG_TREE_EVENTS = set([
     FrontendEventType.TreeItemSelectChange.value,
     FrontendEventType.TreeItemExpandChange.value,
@@ -87,7 +93,7 @@ _ONEARG_TERMINAL_EVENTS = set([
 _ONEARG_EVENTS = set(
     ALL_POINTER_EVENTS
 ) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
-_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS
+_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS | _ONEARG_KEYBOARD_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,

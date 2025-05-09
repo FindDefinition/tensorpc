@@ -18,13 +18,14 @@ import enum
 import io
 import json
 import time
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Sequence, Tuple, Type, TypeVar, Union)
 import urllib.request
 
 from pydantic import field_validator
 from tensorpc import compat
 from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
+from tensorpc.dock.components.three.event import KeyboardHoldEvent, PointerEvent, PointerMissedEvent
 from tensorpc.dock.core.appcore import Event, EventDataType
 from tensorpc.dock.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
 from tensorpc.core.datamodel.asdict import DataClassWithUndefined
@@ -35,29 +36,32 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 import numpy as np
 from typing_extensions import ParamSpec, TypeAlias, Annotated
 
+from tensorpc.dock.core.uitypes import ALL_KEY_CODES
 from tensorpc.utils.uniquename import UniqueNamePool
-from ....core.datamodel.typemetas import RangedFloat, RangedInt, Vector3Type
+from ....core.datamodel.typemetas import RangedFloat, RangedInt, Vector3Type, NumberType, ValueType
 from ...core.component import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, ContainerBaseProps, EventHandler,
-                    SimpleEventType, Fragment, FrontendEventType, NumberType,
+                    ContainerBase, ContainerBaseProps, EventHandler, MatchCase,
+                    SimpleEventType, Fragment, FrontendEventType,
                     T_base_props, T_child, T_container_props, TaskLoopEvent,
-                    UIEvent, UIRunStatus, UIType, Undefined, ValueType,
+                    UIEvent, UIRunStatus, UIType, Undefined,
                     undefined)
 from ..mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
                   MUIContainerBase, MenuItem, PointerEventsProperties, Image as
                   MUIImage)
 from ...core.common import handle_standard_event
 from tensorpc.core.datamodel import typemetas
+if TYPE_CHECKING:
+    from .uikit import Root, Fullscreen
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 
 CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
-ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
-                                   Dict[str, "ThreeComponentType"]]
-ThreeEffectType: TypeAlias = Union[List["ThreeEffectBase"],
-                                   Dict[str, "ThreeEffectBase"]]
+ThreeLayoutType: TypeAlias = Union[Sequence["ThreeComponentType"],
+                                   dict[str, "ThreeComponentType"]]
+ThreeEffectType: TypeAlias = Union[Sequence["ThreeEffectBase"],
+                                   dict[str, "ThreeEffectBase"]]
 
 P = ParamSpec('P')
 
@@ -209,7 +213,8 @@ class ThreeGeometryPropsBase(ThreeBasicProps):
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment, "DataPortal"]
+ThreeComponentType: TypeAlias = Union[ThreeComponentBase, ThreeContainerBase, Fragment, MatchCase, "DataPortal"]
+ThreeComponentTypeForCanvas: TypeAlias = Union[ThreeComponentBase, ThreeContainerBase, Fragment, MatchCase, "DataPortal", "Root", "Fullscreen"]
 
 
 def is_three_component(obj: Component):
@@ -231,6 +236,7 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     raycastLayerMask: Union[int, Undefined] = undefined
     isViewMode: Union[bool, Undefined] = undefined
     menuItems: Union[List[MenuItem], Undefined] = undefined
+    localClippingEnabled: Union[bool, Undefined] = undefined
 
 @dataclasses.dataclass
 class ThreeViewProps(MUIFlexBoxProps):
@@ -247,12 +253,11 @@ class ThreeViewProps(MUIFlexBoxProps):
     frames: Union[int, Undefined] = undefined
     menuItems: Union[List[MenuItem], Undefined] = undefined
 
-
-class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
+class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentTypeForCanvas]):
 
     def __init__(self,
-                 children: Union[List[ThreeComponentType],
-                                 Dict[str, ThreeComponentType]],
+                 children: Union[List[ThreeComponentTypeForCanvas],
+                                 Dict[str, ThreeComponentTypeForCanvas]],
                  background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
@@ -261,10 +266,13 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
                          children,
                          allowed_events=[
                              FrontendEventType.ContextMenuSelect.value,
+                             FrontendEventType.KeyHold.value,
                          ])
         self.props.threeBackgroundColor = background
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenuSelect)
+        self.event_keyboard_hold = self._create_event_slot(
+            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
 
     @property
     def prop(self):
@@ -292,9 +300,12 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
                          children,
                          allowed_events=[
                              FrontendEventType.ContextMenuSelect.value,
+                             FrontendEventType.KeyHold.value,
                          ])
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenuSelect)
+        self.event_keyboard_hold = self._create_event_slot(
+            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
 
     @property
     def prop(self):
@@ -467,18 +478,22 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                              FrontendEventType.Out.value,
                              FrontendEventType.Up.value,
                              FrontendEventType.Down.value,
+                             FrontendEventType.Move.value,
+                             FrontendEventType.Missed.value,
                              FrontendEventType.ContextMenu.value,
                              FrontendEventType.Change.value,
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
-        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
-        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
-        self.event_over = self._create_event_slot(FrontendEventType.Over)
-        self.event_out = self._create_event_slot(FrontendEventType.Out)
-        self.event_up = self._create_event_slot(FrontendEventType.Up)
-        self.event_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_enter = self._create_event_slot(FrontendEventType.Enter, lambda x: PointerEvent(**x))
+        self.event_leave = self._create_event_slot(FrontendEventType.Leave, lambda x: PointerEvent(**x))
+        self.event_over = self._create_event_slot(FrontendEventType.Over, lambda x: PointerEvent(**x))
+        self.event_out = self._create_event_slot(FrontendEventType.Out, lambda x: PointerEvent(**x))
+        self.event_up = self._create_event_slot(FrontendEventType.Up, lambda x: PointerEvent(**x))
+        self.event_down = self._create_event_slot(FrontendEventType.Down, lambda x: PointerEvent(**x))
+        self.event_move = self._create_event_slot(FrontendEventType.Move, lambda x: PointerEvent(**x))
+        self.event_missed = self._create_event_slot(FrontendEventType.Missed, lambda x: PointerMissedEvent(**x))
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
         self.event_change = self._create_event_slot(FrontendEventType.Change)
@@ -571,17 +586,21 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                              FrontendEventType.Out.value,
                              FrontendEventType.Up.value,
                              FrontendEventType.Down.value,
+                             FrontendEventType.Move.value,
+                             FrontendEventType.Missed.value,
                              FrontendEventType.ContextMenu.value,
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
-        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
-        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
-        self.event_over = self._create_event_slot(FrontendEventType.Over)
-        self.event_out = self._create_event_slot(FrontendEventType.Out)
-        self.event_up = self._create_event_slot(FrontendEventType.Up)
-        self.event_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_enter = self._create_event_slot(FrontendEventType.Enter, lambda x: PointerEvent(**x))
+        self.event_leave = self._create_event_slot(FrontendEventType.Leave, lambda x: PointerEvent(**x))
+        self.event_over = self._create_event_slot(FrontendEventType.Over, lambda x: PointerEvent(**x))
+        self.event_out = self._create_event_slot(FrontendEventType.Out, lambda x: PointerEvent(**x))
+        self.event_up = self._create_event_slot(FrontendEventType.Up, lambda x: PointerEvent(**x))
+        self.event_down = self._create_event_slot(FrontendEventType.Down, lambda x: PointerEvent(**x))
+        self.event_move = self._create_event_slot(FrontendEventType.Move, lambda x: PointerEvent(**x))
+        self.event_missed = self._create_event_slot(FrontendEventType.Missed, lambda x: PointerMissedEvent(**x))
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
 

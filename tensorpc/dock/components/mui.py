@@ -4252,7 +4252,7 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
 
 
 @dataclasses.dataclass
-class JsonViewerProps(MUIFlexBoxProps):
+class JsonViewerProps(BasicProps):
     data: Any = None
 
 

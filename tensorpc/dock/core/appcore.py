@@ -15,14 +15,17 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
 
+from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.core.tree_id import UniqueTreeIdForComp
+from tensorpc.core.datamodel.typemetas import ValueType, NumberType
 
 from tensorpc.dock.core.context import ALL_APP_CONTEXT_GETTERS
 from tensorpc.core.annolib import Undefined, BackendOnlyProp, undefined
 from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
 from tensorpc.dock.client import is_inside_app_session
+from tensorpc.dock.core.uitypes import ALL_KEY_CODES
 
 if TYPE_CHECKING:
     from ..flowapp.app import App, EditableApp
@@ -31,9 +34,7 @@ if TYPE_CHECKING:
 CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
 
-ValueType: TypeAlias = Union[int, float, str]
 EventDataType: TypeAlias = Union[int, str]
-NumberType: TypeAlias = Union[int, float]
 
 SimpleEventType: TypeAlias = Union[Tuple[EventDataType, Any], Tuple[EventDataType, Any, Optional[str]]]
 T = TypeVar("T")
@@ -103,7 +104,9 @@ class EventHandlers:
                  debounce: Optional[NumberType] = None,
                  backend_only: bool = False,
                  simple_event: bool = True,
-                 dont_send_to_backend: bool = False) -> None:
+                 dont_send_to_backend: bool = False,
+                 update_ops: Optional[list[Any]] = None,
+                 key_codes: Optional[list[str]] = None) -> None:
 
         self.handlers = handlers
         self.stop_propagation = stop_propagation
@@ -112,6 +115,10 @@ class EventHandlers:
         self.backend_only = backend_only
         self.simple_event = simple_event
         self.dont_send_to_backend = dont_send_to_backend
+        if update_ops is None:
+            update_ops = []
+        self.update_ops = update_ops
+        self.key_codes = key_codes
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -123,6 +130,12 @@ class EventHandlers:
             res["throttle"] = self.throttle
         if self.dont_send_to_backend:
             res["dontSendToBackend"] = True
+        if self.update_ops:
+            res["jmesUpdateOps"] = as_dict_no_undefined(self.update_ops)
+        if self.key_codes:
+            for code in self.key_codes:
+                assert code in ALL_KEY_CODES
+            res["keyCodes"] = self.key_codes
         return res
 
     def get_bind_event_handlers(self, event: Event):

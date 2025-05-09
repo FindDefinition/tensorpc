@@ -15,7 +15,7 @@
 import abc
 import asyncio
 import builtins
-import collections
+import collections.abc
 from contextlib import nullcontext
 import time
 from typing import TYPE_CHECKING, Mapping, Sequence, cast
@@ -49,6 +49,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError, core_schema
 from tensorpc.dock.client import AppLocalMeta, MasterMeta
+from tensorpc.dock.core.uitypes import ALL_KEY_CODES
 from tensorpc.dock.serv_names import serv_names
 
 from tensorpc.core.core_io import JsonOnlyData
@@ -258,6 +259,8 @@ class UIType(enum.IntEnum):
     ThreeLightFormer = 0x103d
     ThreeAccumulativeShadows = 0x103e
     ThreeRandomizedLight = 0x103f
+
+    ThreeBVH = 0x1041
     ThreeURILoaderContext = 0x11040
     ThreeCubeCamera = 0x11041
     ThreeContactShadows = 0x1042
@@ -288,6 +291,33 @@ class UIType(enum.IntEnum):
     ThreeEffectBloom = 0x1202
     ThreeEffectDepthOfField = 0x1203
     ThreeEffectToneMapping = 0x1204
+
+    RANGE_UIKIT_START = 0x1300
+
+    UIKitRoot = 0x1301
+    UIKitContainer = 0x1302
+    UIKitContent = 0x1303
+    UIKitFullscreen = 0x1304
+    UIKitText = 0x1305
+    UIKitInput = 0x1306
+    UIKitImage = 0x1307
+    UIKitButton = 0x1308
+    UIKitSlider = 0x1309
+    UIKitToggleButton = 0x130a
+    UIKitToggleButtonGroup = 0x130b
+    UIKitCheckbox = 0x130c
+    UIKitSwitch = 0x130d
+
+    UIKitDialog = 0x130e
+    UIKitTooltip = 0x130f
+    UIKitTabs = 0x1310
+    UIKitSeparator = 0x1311
+    UIKitProgress = 0x1312
+    UIKitIconButton = 0x1313
+    UIKitBadge = 0x1314
+
+
+    RANGE_UIKIT_END = 0x1400
 
     MASK_LEAFLET = 0x2000
     LeafletMapContainer = 0x2000
@@ -377,6 +407,13 @@ class FrontendEventType(enum.IntEnum):
     Down = 7
     ContextMenu = 8
     Move = 9
+    Missed = 10
+    Wheel = 11
+
+    KeyHold = 12
+    KeyDown = 13
+    KeyUp = 14
+
     Change = 20
     Delete = 21
     InputChange = 22
@@ -1159,6 +1196,13 @@ class DraftOpUserData:
 
 TEventData = TypeVar("TEventData")
 
+def _draft_expr_or_str_to_str(draft_expr: Any) -> str:
+    if isinstance(draft_expr, DraftBase):
+        draft_expr_str = get_draft_jmespath(draft_expr)
+    else:
+        draft_expr_str = draft_expr
+    jmespath.compile(draft_expr_str)
+    return draft_expr_str
 
 class _EventSlotBase:
 
@@ -1180,13 +1224,55 @@ class _EventSlotBase:
                   stop_propagation: Optional[bool] = None,
                   throttle: Optional[NumberType] = None,
                   debounce: Optional[NumberType] = None,
-                  dont_send_to_backend: Optional[bool] = None) -> Self:
+                  dont_send_to_backend: Optional[bool] = None,
+                  key_codes: Optional[list[str]] = None) -> Self:
         self.comp.configure_event_handlers(
             self.event_type,
             stop_propagation,
             throttle,
             debounce,
-            dont_send_to_backend=dont_send_to_backend)
+            dont_send_to_backend=dont_send_to_backend,
+            key_codes=key_codes)
+        return self
+
+    def set_frontend_draft_change(self, update_ops: list["EventFrontendUpdateOp"]) -> Self:
+        """Set draft exprs to change frontend datamodel directly.
+        """
+        self.comp.configure_event_handlers(
+            self.event_type,
+            update_ops=update_ops)
+        return self
+
+    def add_frontend_draft_change(self, target_draft: Any, attr: str, src_draft: Optional[Any] = None, target_comp: Union["Component", Undefined] = undefined) -> Self:
+        """Set draft exprs to change frontend datamodel directly.
+        """
+        target_draft_str = _draft_expr_or_str_to_str(target_draft)
+        if src_draft is not None:
+            src_draft_str = _draft_expr_or_str_to_str(src_draft)
+        else:
+            src_draft_str = undefined
+        self.comp._append_event_handler_update_op(
+            self.event_type,
+            update_op=EventFrontendUpdateOp(
+                attr=attr,
+                targetPath=target_draft_str,
+                targetComp=target_comp,
+                srcPath=src_draft_str,
+            ))
+        return self
+
+    def add_frontend_draft_set_none(self, target_draft: Any, attr: str, target_comp: Union["Component", Undefined] = undefined) -> Self:
+        """Set draft exprs to change frontend datamodel directly.
+        """
+        target_draft_str = _draft_expr_or_str_to_str(target_draft)
+        self.comp._append_event_handler_update_op(
+            self.event_type,
+            update_op=EventFrontendUpdateOp(
+                attr=attr,
+                targetPath=target_draft_str,
+                targetComp=target_comp,
+                srcPath=None,
+            ))
         return self
 
     def disable_and_stop_propagation(self) -> Self:
@@ -1318,6 +1404,12 @@ class EventSlotNoArgEmitter(_EventSlotEmitterBase):
         self.emitter.remove_listener(self.event_type, handler)
         return self
 
+@dataclasses.dataclass
+class EventFrontendUpdateOp:
+    attr: str
+    targetPath: str 
+    targetComp: Union[Undefined, "Component"] = undefined
+    srcPath: Optional[Union[Undefined, str]] = undefined
 
 T_child_structure = TypeVar("T_child_structure",
                             default=Any,
@@ -1700,8 +1792,9 @@ class Component(Generic[T_base_props, T_child]):
         evs = []
         for k, v in self._flow_event_handlers.items():
             if not isinstance(v, Undefined) and not v.backend_only:
-                if v.handlers or (v.stop_propagation
-                                  and v.dont_send_to_backend):
+                disable_and_stop = (v.stop_propagation
+                                  and v.dont_send_to_backend)
+                if v.handlers or disable_and_stop or v.update_ops:
                     d = v.to_dict()
                     d["type"] = k
                     evs.append(d)
@@ -1821,7 +1914,9 @@ class Component(Generic[T_base_props, T_child]):
                                  throttle: Optional[NumberType] = None,
                                  debounce: Optional[NumberType] = None,
                                  backend_only: Optional[bool] = False,
-                                 dont_send_to_backend: Optional[bool] = False):
+                                 dont_send_to_backend: Optional[bool] = False,
+                                 update_ops: Optional[list[EventFrontendUpdateOp]] = None,
+                                 key_codes: Optional[list[str]] = None):
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
@@ -1839,6 +1934,25 @@ class Component(Generic[T_base_props, T_child]):
             handlers.backend_only = backend_only
         if dont_send_to_backend is not None:
             handlers.dont_send_to_backend = dont_send_to_backend
+        if update_ops is not None:
+            handlers.update_ops = update_ops
+        if key_codes is not None:
+            for code in key_codes:
+                assert code in ALL_KEY_CODES
+            handlers.key_codes = key_codes
+        return
+
+    def _append_event_handler_update_op(self,
+                                 type: Union[FrontendEventType, EventDataType],
+                                 update_op: EventFrontendUpdateOp):
+        if isinstance(type, FrontendEventType):
+            type_value = type.value
+        else:
+            type_value = type
+        if type_value not in self._flow_event_handlers:
+            self._flow_event_handlers[type_value] = EventHandlers([])
+        handlers = self._flow_event_handlers[type_value]
+        handlers.update_ops.append(update_op)
         return
 
     def register_event_handler(self,
@@ -1850,7 +1964,9 @@ class Component(Generic[T_base_props, T_child]):
                                backend_only: bool = False,
                                simple_event: bool = True,
                                converter: Optional[Callable[[Any],
-                                                            Any]] = None):
+                                                            Any]] = None,
+                               dont_send_to_backend: Optional[bool] = False,
+                               update_ops: Optional[list[EventFrontendUpdateOp]] = None):
         if self._flow_allowed_events:
             if not backend_only:
                 assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}, but got {type}"
@@ -1870,7 +1986,8 @@ class Component(Generic[T_base_props, T_child]):
             assert len(
                 handlers.handlers) == 0, "DragCollect only support one handler"
         self.configure_event_handlers(type_value, stop_propagation, throttle,
-                                      debounce, backend_only)
+                                      debounce, backend_only, dont_send_to_backend,
+                                      update_ops)
         handlers.handlers.append(evh)
         # self._flow_event_handlers[type_value] = evh
         # if once:

@@ -2,6 +2,7 @@
 import abc
 import dataclasses
 import math
+import re
 from typing import Union, Optional, Tuple
 from typing_extensions import TypeAlias, Self
 import hsluv
@@ -89,6 +90,7 @@ def rgb_to_hsl(r: NumberType, g: NumberType, b: NumberType) -> Tuple[NumberType,
 class Color(abc.ABC):
     cssString: str
     perceivedBrightness: NumberType
+    rgb: tuple[NumberType, NumberType, NumberType]
 
     @abc.abstractmethod
     def lighten(self, amount: NumberType, max_val: NumberType = LIGHTNESS_MAX) -> Self:
@@ -155,7 +157,7 @@ class HSLuvColor(HSLColorBase):
             self.cssString = f"rgb({r}, {g}, {b})"
         else:
             self.cssString = f"rgba({r}, {g}, {b} / {self.alpha})"
-
+        self.rgb = (r, g, b)
 
 class HSLColor(HSLColorBase):
     def __init__(self, hsl: Union[tuple[NumberType, ...], HSL], alpha: Optional[NumberType] = None):
@@ -169,7 +171,7 @@ class HSLColor(HSLColorBase):
             self.cssString = f"rgb({r}, {g}, {b})"
         else:
             self.cssString = f"rgba({r}, {g}, {b} / {self.alpha})"
-
+        self.rgb = (r, g, b)
 
 WHITE_COLOR = HSLColor((0, 0, 100))
 BLACK_COLOR = HSLColor((0, 0, 0))
@@ -199,8 +201,12 @@ def make_color_scheme(base: Color, variant: Optional[Color] = None):
         WHITE_COLOR,
     )
 
+_REGEX = re.compile(r"( )?\d+")
 
-def perfetto_string_to_color(seed: str, use_cache: bool = True):
+def create_slice_name(name: str):
+    return _REGEX.sub("", name).strip()
+
+def perfetto_string_to_color(seed: str, use_cache: bool = False):
     if use_cache and seed in PROCEDURAL_COLOR_CACHE:
         return PROCEDURAL_COLOR_CACHE[seed]
     h = _hash(seed, 360)
@@ -211,3 +217,7 @@ def perfetto_string_to_color(seed: str, use_cache: bool = True):
     if use_cache:
         PROCEDURAL_COLOR_CACHE[seed] = colorScheme
     return colorScheme
+
+def perfetto_slice_to_color(seed: str, use_cache: bool = False):
+    seed = create_slice_name(seed)
+    return perfetto_string_to_color(seed, use_cache)

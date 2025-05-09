@@ -1137,3 +1137,46 @@ class Outlines(ThreeComponentBase[OutlinesProps]):
 #     def update_event(self):
 #         propcls = self.propcls
 #         return self._update_props_base(propcls)
+"""
+        splitStrategy?: "CENTER" | "AVERAGE" | "SAH"
+        verbose?: boolean
+        setBoundingBox?: boolean
+        maxDepth?: number
+        maxLeafTris?: number
+        indirect?: boolean
+
+
+"""
+@dataclasses.dataclass
+class BvhProps(ContainerBaseProps):
+    splitStrategy: Union[Literal["CENTER", "AVERAGE", "SAH"], Undefined] = undefined
+    verbose: Union[bool, Undefined] = undefined
+    setBoundingBox: Union[bool, Undefined] = undefined
+    maxDepth: Union[int, Undefined] = undefined
+    maxLeafTris: Union[int, Undefined] = undefined
+    indirect: Union[bool, Undefined] = undefined
+
+
+class Bvh(ThreeContainerBase[BvhProps, ThreeComponentType]):
+    def __init__(
+            self,
+            children: Optional[ThreeLayoutType] = None) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeBVH,
+                         BvhProps, {**children},
+                         allowed_events=[])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

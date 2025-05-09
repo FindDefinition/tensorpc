@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import io
 import json
+import math
 import time
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, Union
@@ -38,7 +39,8 @@ class VariableTraceCfg:
 
 def parse_viztracer_trace_events_to_raw_tree(
     trace_events: List[Dict[str, Any]],
-    modify_events_func: Optional[Callable] = None
+    modify_events_func: Optional[Callable] = None,
+    add_depth_to_event: bool = False,
 ) -> Tuple[dict, List[Dict[str, Any]], mui.JsonLikeTreeFieldMap]:
     viz_pattern = re.compile(r"(.*)\((.*):([0-9]*)\)")
     duration_events: List[Dict[str, Any]] = []
@@ -101,7 +103,7 @@ def parse_viztracer_trace_events_to_raw_tree(
     duration_events.sort(key=lambda x: x["ts"])
     if modify_events_func is not None:
         modify_events_func(duration_events)
-    min_ts = 0
+    min_ts = math.inf
     max_ts = 0
     for event in duration_events:
         min_ts = min(min_ts, event["ts"])
@@ -152,7 +154,10 @@ def parse_viztracer_trace_events_to_raw_tree(
             "children": [],
             "ts": event["ts"],
             "dur": event["dur"],
+            "depth": len(stack),
         }
+        if add_depth_to_event:
+            event["depth"] = len(stack)
         if stack:
             stack[-1]["children"].append(node)
         stack.append(node)

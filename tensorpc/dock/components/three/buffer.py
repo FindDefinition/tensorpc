@@ -194,7 +194,8 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
                  transforms: np.ndarray,
                  limit: int,
                  children: ThreeLayoutType,
-                 colors: Union[np.ndarray, Undefined] = undefined) -> None:
+                 colors: Union[np.ndarray, Undefined] = undefined,
+                 scales: Union[np.ndarray, Undefined] = undefined,) -> None:
         """
         Args:
             transforms: (n, 4, 4) or (n, 7) or (n, 3) array, 
@@ -223,6 +224,7 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
         self.props.limit = limit
         self.props.colors = colors
         self.props.transforms = transforms
+        self.props.scales = scales
 
     @property
     def prop(self):

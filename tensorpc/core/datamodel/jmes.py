@@ -2,6 +2,8 @@ from typing import Any, Union
 import jmespath 
 from jmespath import functions
 from jmespath.parser import ParsedResult
+import numpy as np
+from tensorpc.utils.perfetto_colors import create_slice_name, perfetto_string_to_color
 
 class _JMESCustomFunctions(functions.Functions):
     @functions.signature({'types': ['object']}, {'types': ['string']})
@@ -43,6 +45,37 @@ class _JMESCustomFunctions(functions.Functions):
             if pair[0] == cond:
                 return pair[1]
         return None 
+
+    @functions.signature({'types': ["string", "number"]})
+    def _func_colorFromSlice(self, obj):
+        if isinstance(obj, str):
+            return perfetto_string_to_color(create_slice_name(obj), use_cache=False).base.cssString
+        elif isinstance(obj, (int, float)):
+            return perfetto_string_to_color(str(obj), use_cache=False).base.cssString
+        return None 
+
+    @functions.signature({'types': ["string", "number"]})
+    def _func_colorFromName(self, obj):
+        if isinstance(obj, str):
+            return perfetto_string_to_color(obj, use_cache=False).base.cssString
+        elif isinstance(obj, (int, float)):
+            return perfetto_string_to_color(str(obj), use_cache=False).base.cssString
+        return None 
+
+    @functions.signature({'types': []})
+    def _func_npToList(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return None 
+
+    @functions.signature({'types': []}, {'types': ["number"]})
+    def _func_npGetSubArray(self, obj, index):
+        if isinstance(obj, np.ndarray):
+            if obj.ndim == 0:
+                return None
+            return obj[index:index+1]
+        return None 
+
 
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())

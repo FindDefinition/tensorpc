@@ -31,12 +31,18 @@ class DraftASTFuncType(enum.Enum):
     WHERE = "where"
     CREATE_ARRAY = "create_array"
     CONCAT = "concat"
+    COLOR_SLICE = "colorFromSlice"
+    COLOR_NAME = "colorFromName"
+    NUMPY_TO_LIST = "npToList"
+    NUMPY_GETSUBARRAY = "npGetSubArray"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
     DraftASTFuncType.CFORMAT.value, DraftASTFuncType.GET_ITEM_PATH.value,
     DraftASTFuncType.NOT_NULL.value, DraftASTFuncType.WHERE.value,
-    DraftASTFuncType.CREATE_ARRAY.value, DraftASTFuncType.CONCAT.value
+    DraftASTFuncType.CREATE_ARRAY.value, DraftASTFuncType.CONCAT.value,
+    DraftASTFuncType.COLOR_SLICE.value, DraftASTFuncType.COLOR_NAME.value,
+    DraftASTFuncType.NUMPY_TO_LIST.value, DraftASTFuncType.NUMPY_GETSUBARRAY.value
 }
 
 @dataclasses.dataclass

@@ -7,6 +7,11 @@ from typing_extensions import TypeAlias, get_type_hints
 from dataclasses import Field, make_dataclass, field
 import enum 
 
+ValueType: TypeAlias = Union[int, float, str]
+NumberType: TypeAlias = Union[int, float]
+Vector2Type: TypeAlias = Tuple[float, float]
+Vector3Type: TypeAlias = Tuple[float, float, float]
+
 @dataclass
 class CommonObject:
     alias: Optional[str] = None
@@ -74,7 +79,3 @@ class Vector2:
     step: Optional[float] = None
     alias: Optional[str] = None
     default: Optional[Tuple[float, float]] = None
-
-Vector2Type: TypeAlias = Tuple[float, float]
-
-Vector3Type: TypeAlias = Tuple[float, float, float]
