@@ -938,6 +938,8 @@ class LineProps(Object3dBaseProps):
                        NumberType]] = dataclasses.field(default_factory=list)
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     dashed: Union[bool, Undefined] = undefined
+    dashSize: Union[NumberType, Undefined] = undefined
+    gapSize: Union[NumberType, Undefined] = undefined
     vertexColors: Union[tuple[NumberType, NumberType, NumberType],
                         Undefined] = undefined
     lineWidth: Union[NumberType, Undefined] = undefined

@@ -74,13 +74,6 @@ class WorkersStatusBox(mui.DataFlexBox):
             }
         })
 
-class FastPerformanceMonitor(mui.FlexBox):
-
-    def __init__(self):
-        self._slider = mui.BlenderSlider()
-        self._lines = mui.DataFlexBox()
-        super().__init__(self._box_template, init_data_list)
-        self.prop(flexFlow="column nowrap", overflow="hidden")
 
 @dataclasses.dataclass
 class CheckpointItem:
@@ -341,13 +334,6 @@ class FaultToleranceUIMaster(mui.FlexBox):
                                                         height="100%",
                                                         overflow="hidden"),
                     tooltip="Checkpoint Manager"),
-            # mui.TabDef("Performance",
-            #         "Performance",
-            #         mui.VBox([FastPerformanceMonitor()]).prop(width="100%",
-            #                                             height="100%",
-            #                                             overflow="hidden"),
-            #         tooltip="Step Performance"),
-
         ]
         self._debug_view_tabs = mui.Tabs(debug_view_tab_defs, init_value="Checkpoint").prop(
             panelProps=mui.FlexBoxProps(flex=1, padding=0, overflow="hidden"),

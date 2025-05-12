@@ -68,20 +68,23 @@ class EventHandler:
         self.converter = converter
 
     def run_event(self, event: Event) -> CORO_ANY:
+        ev_data = event.data
+        if self.converter is not None:
+            ev_data = self.converter(event.data)
         if self.simple_event:
-            if self.converter is not None:
-                return self.cb(self.converter(event.data))
-            return self.cb(event.data)
+            return self.cb(ev_data)
         else:
-            return self.cb(event)
+            return self.cb(dataclasses.replace(event, data=ev_data))
 
     async def run_event_async(self, event: Event):
+        ev_data = event.data
+        if self.converter is not None:
+            ev_data = self.converter(event.data)
+
         if self.simple_event:
-            if self.converter is not None:
-                coro = self.cb(self.converter(event.data))
-            coro = self.cb(event.data)
+            coro = self.cb(ev_data)
         else:
-            coro = self.cb(event)
+            coro = self.cb(dataclasses.replace(event, data=ev_data))
         if inspect.iscoroutine(coro):
             res = await coro
         else:
@@ -92,7 +95,10 @@ class EventHandler:
         if self.simple_event:
             return self.cb()
         else:
-            return self.cb(event)
+            ev_data = event.data
+            if self.converter is not None:
+                ev_data = self.converter(event.data)
+            return self.cb(dataclasses.replace(event, data=ev_data))
 
 
 class EventHandlers:

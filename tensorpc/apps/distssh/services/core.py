@@ -476,6 +476,10 @@ class FaultToleranceSSHServer:
             self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(cmd, exit_ev)), exit_ev)
         return res
 
+    async def set_perf_data(self, step: int, data: list[list[dict]], metadata: list[Any], scale: Optional[float] = None):
+        if self._is_master:
+            await self._debug_panel.perf_monitor.append_perf_data(step, data, metadata, scale)
+
     async def cancel_cmd(self):
         if self._cmd_task is not None:
             await self._terminal.send_ctrl_c()

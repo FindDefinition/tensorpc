@@ -172,7 +172,7 @@ class ToneMapppingMode(enum.IntEnum):
     UNCHARTED2 = 5
 
 @dataclasses.dataclass
-class ThreeMaterialPropsBase(ThreeBasicProps):
+class ThreeMaterialPropsBaseProps:
     # deprecated, only works in MeshBasicMaterialV1 and MeshStandardMaterialV1
     # materialType: int = 0
     transparent: Union[bool, Undefined] = undefined
@@ -184,6 +184,10 @@ class ThreeMaterialPropsBase(ThreeBasicProps):
     visible: Union[bool, Undefined] = undefined
     side: Union[SideType, Undefined] = undefined
 
+
+@dataclasses.dataclass
+class ThreeMaterialPropsBase(ThreeMaterialPropsBaseProps, ThreeBasicProps):
+    pass
 
 class ThreeComponentBase(Component[T_base_props, "ThreeComponentType"]):
     pass
@@ -200,6 +204,8 @@ class ThreeEffectBase(Component[T_base_props, "ThreeComponentType"]):
 class ThreeMaterialBase(ThreeComponentBase[T_base_props]):
     pass
 
+class ThreeMaterialContainerBase(ThreeContainerBase[T_container_props, T_child]):
+    pass
 
 class ThreeGeometryBase(ThreeComponentBase[T_base_props]):
     pass
@@ -220,128 +226,6 @@ ThreeComponentTypeForCanvas: TypeAlias = Union[ThreeComponentBase, ThreeContaine
 def is_three_component(obj: Component):
     return isinstance(obj, (ThreeComponentBase, ThreeContainerBase, Fragment,
                             Canvas, ThreeEffectBase))
-
-@dataclasses.dataclass
-class ThreeCanvasProps(MUIFlexBoxProps):
-    threeBackgroundColor: Union[str, Undefined] = undefined
-    allowKeyboardEvent: Union[bool, Undefined] = undefined
-    tabIndex: Union[int, Undefined] = undefined
-    shadows: Union[bool, Undefined] = undefined
-    enablePerf: Union[bool, Undefined] = undefined
-    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
-                                'bottom-left'], Undefined] = undefined
-    flat: Union[bool, Undefined] = undefined
-    linear: Union[bool, Undefined] = undefined
-    dpr: Union[Tuple[int, int], Undefined] = undefined
-    raycastLayerMask: Union[int, Undefined] = undefined
-    isViewMode: Union[bool, Undefined] = undefined
-    menuItems: Union[List[MenuItem], Undefined] = undefined
-    localClippingEnabled: Union[bool, Undefined] = undefined
-
-@dataclasses.dataclass
-class ThreeViewProps(MUIFlexBoxProps):
-    threeBackgroundColor: Union[str, Undefined] = undefined
-    allowKeyboardEvent: Union[bool, Undefined] = undefined
-    tabIndex: Union[int, Undefined] = undefined
-    enablePerf: Union[bool, Undefined] = undefined
-    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
-                                'bottom-left'], Undefined] = undefined
-    elementId: Union[str, Undefined] = undefined
-    className: Union[str, Undefined] = undefined
-    visible: Union[bool, Undefined] = undefined
-    index: Union[int, Undefined] = undefined
-    frames: Union[int, Undefined] = undefined
-    menuItems: Union[List[MenuItem], Undefined] = undefined
-
-class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentTypeForCanvas]):
-
-    def __init__(self,
-                 children: Union[List[ThreeComponentTypeForCanvas],
-                                 Dict[str, ThreeComponentTypeForCanvas]],
-                 background: Union[str, Undefined] = undefined) -> None:
-        if isinstance(children, Sequence):
-            children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas,
-                         ThreeCanvasProps,
-                         children,
-                         allowed_events=[
-                             FrontendEventType.ContextMenuSelect.value,
-                             FrontendEventType.KeyHold.value,
-                         ])
-        self.props.threeBackgroundColor = background
-        self.event_context_menu = self._create_event_slot(
-            FrontendEventType.ContextMenuSelect)
-        self.event_keyboard_hold = self._create_event_slot(
-            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    async def handle_event(self, ev: Event, is_sync: bool = False):
-        return await handle_standard_event(self, ev, is_sync)
-
-class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
-
-    def __init__(
-        self, children: Union[List[ThreeComponentType],
-                              Dict[str, ThreeComponentType]]
-    ) -> None:
-        if isinstance(children, Sequence):
-            children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeView,
-                         ThreeViewProps,
-                         children,
-                         allowed_events=[
-                             FrontendEventType.ContextMenuSelect.value,
-                             FrontendEventType.KeyHold.value,
-                         ])
-        self.event_context_menu = self._create_event_slot(
-            FrontendEventType.ContextMenuSelect)
-        self.event_keyboard_hold = self._create_event_slot(
-            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    async def handle_event(self, ev: Event, is_sync: bool = False):
-        return await handle_standard_event(self, ev, is_sync)
-
-
-class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
-
-    def __init__(self,
-                 children: Union[List[MUIComponentType],
-                                 Dict[str, MUIComponentType]],
-                 background: Union[str, Undefined] = undefined) -> None:
-        if isinstance(children, Sequence):
-            children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
-        self.props.threeBackgroundColor = background
-        self.props.isViewMode = True
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
 
 
 @dataclasses.dataclass
@@ -483,9 +367,9 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                              FrontendEventType.ContextMenu.value,
                              FrontendEventType.Change.value,
                          ] + list(allowed_events))
-        self.event_double_click = self._create_event_slot(
-            FrontendEventType.DoubleClick)
-        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot_noarg(
+            FrontendEventType.DoubleClick, lambda x: PointerEvent(**x))
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click, lambda x: PointerEvent(**x))
         self.event_enter = self._create_event_slot(FrontendEventType.Enter, lambda x: PointerEvent(**x))
         self.event_leave = self._create_event_slot(FrontendEventType.Leave, lambda x: PointerEvent(**x))
         self.event_over = self._create_event_slot(FrontendEventType.Over, lambda x: PointerEvent(**x))
@@ -590,9 +474,9 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                              FrontendEventType.Missed.value,
                              FrontendEventType.ContextMenu.value,
                          ] + list(allowed_events))
-        self.event_double_click = self._create_event_slot(
-            FrontendEventType.DoubleClick)
-        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot_noarg(
+            FrontendEventType.DoubleClick, lambda x: PointerEvent(**x))
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click, lambda x: PointerEvent(**x))
         self.event_enter = self._create_event_slot(FrontendEventType.Enter, lambda x: PointerEvent(**x))
         self.event_leave = self._create_event_slot(FrontendEventType.Leave, lambda x: PointerEvent(**x))
         self.event_over = self._create_event_slot(FrontendEventType.Over, lambda x: PointerEvent(**x))
@@ -606,6 +490,137 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
+
+@dataclasses.dataclass
+class PerspectiveCameraProps(Object3dContainerBaseProps):
+    makeDefault: Union[bool, Undefined] = undefined
+    fov: Union[float, Undefined] = undefined
+    aspect: Union[float, Undefined] = undefined
+    near: Union[float, Undefined] = undefined
+    far: Union[float, Undefined] = undefined
+
+@dataclasses.dataclass
+class ThreeCanvasProps(MUIFlexBoxProps):
+    threeBackgroundColor: Union[str, Undefined] = undefined
+    allowKeyboardEvent: Union[bool, Undefined] = undefined
+    tabIndex: Union[int, Undefined] = undefined
+    shadows: Union[bool, Undefined] = undefined
+    enablePerf: Union[bool, Undefined] = undefined
+    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
+                                'bottom-left'], Undefined] = undefined
+    flat: Union[bool, Undefined] = undefined
+    linear: Union[bool, Undefined] = undefined
+    dpr: Union[Tuple[int, int], Undefined] = undefined
+    raycastLayerMask: Union[int, Undefined] = undefined
+    isViewMode: Union[bool, Undefined] = undefined
+    menuItems: Union[List[MenuItem], Undefined] = undefined
+    localClippingEnabled: Union[bool, Undefined] = undefined
+    cameraProps: Union[PerspectiveCameraProps, Undefined] = undefined
+
+@dataclasses.dataclass
+class ThreeViewProps(MUIFlexBoxProps):
+    threeBackgroundColor: Union[str, Undefined] = undefined
+    allowKeyboardEvent: Union[bool, Undefined] = undefined
+    tabIndex: Union[int, Undefined] = undefined
+    enablePerf: Union[bool, Undefined] = undefined
+    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
+                                'bottom-left'], Undefined] = undefined
+    elementId: Union[str, Undefined] = undefined
+    className: Union[str, Undefined] = undefined
+    visible: Union[bool, Undefined] = undefined
+    index: Union[int, Undefined] = undefined
+    frames: Union[int, Undefined] = undefined
+    menuItems: Union[List[MenuItem], Undefined] = undefined
+
+class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentTypeForCanvas]):
+
+    def __init__(self,
+                 children: Union[List[ThreeComponentTypeForCanvas],
+                                 Dict[str, ThreeComponentTypeForCanvas]],
+                 background: Union[str, Undefined] = undefined) -> None:
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeCanvas,
+                         ThreeCanvasProps,
+                         children,
+                         allowed_events=[
+                             FrontendEventType.ContextMenuSelect.value,
+                             FrontendEventType.KeyHold.value,
+                         ])
+        self.props.threeBackgroundColor = background
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
+        self.event_keyboard_hold = self._create_event_slot(
+            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
+
+class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
+
+    def __init__(
+        self, children: Union[List[ThreeComponentType],
+                              Dict[str, ThreeComponentType]]
+    ) -> None:
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeView,
+                         ThreeViewProps,
+                         children,
+                         allowed_events=[
+                             FrontendEventType.ContextMenuSelect.value,
+                             FrontendEventType.KeyHold.value,
+                         ])
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
+        self.event_keyboard_hold = self._create_event_slot(
+            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
+
+
+class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
+
+    def __init__(self,
+                 children: Union[List[MUIComponentType],
+                                 Dict[str, MUIComponentType]],
+                 background: Union[str, Undefined] = undefined) -> None:
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
+        self.props.threeBackgroundColor = background
+        self.props.isViewMode = True
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 
 @dataclasses.dataclass
@@ -684,8 +699,6 @@ class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
-                                 ThreeGeometryPropsBase, ThreeGeometryBase]
 
 # @dataclasses.dataclass
 # class MeshUserData:

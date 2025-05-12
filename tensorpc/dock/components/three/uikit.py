@@ -138,6 +138,9 @@ class UIKitContainerCoreProps(UIKitFlexCoreProps):
     borderBottomLeftRadius: Union[NumberType, Undefined] = undefined
     borderBottomRightRadius: Union[NumberType, Undefined] = undefined
     borderBend: Union[NumberType, Undefined] = undefined
+    borderWidth: Union[NumberType, Undefined] = undefined
+    scrollbarWidth: Union[NumberType, Undefined] = undefined
+    scrollbarColor: Union[ValueType, Undefined] = undefined
 
     scrollbarPanelMaterialClass: Union[str, Undefined] = undefined
     scrollbarBackgroundOpacity: Union[NumberType, Undefined] = undefined
@@ -273,6 +276,11 @@ class FullscreenProps(RootProps):
 class ContainerProps(UIKitContainerCoreProps, UIKitContainerBaseProps):
     pass
 
+@dataclasses.dataclass
+class ContentProps(ContainerProps):
+    depthAlign: Union[Literal["back", "center", "front"], Undefined] = undefined
+    keepAspectRatio: Union[bool, Undefined] = undefined
+
 
 class Root(UIKitContainerWithEventBase[RootProps, UIKitComponentType]):
     # TODO can/should group accept event?
@@ -334,7 +342,7 @@ class Fullscreen(UIKitContainerWithEventBase[FullscreenProps, UIKitComponentType
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-class Content(UIKitContainerWithEventBase[ContainerProps, ThreeComponentType]):
+class Content(UIKitContainerWithEventBase[ContentProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(
         self, children: Union[dict[str, ThreeComponentType],
@@ -344,7 +352,7 @@ class Content(UIKitContainerWithEventBase[ContainerProps, ThreeComponentType]):
             children = {str(i): v for i, v in enumerate(children)}
         for v in children.values():
             assert not isinstance(v, UIKitComponentBase), "component inside Content must be regular three component."
-        super().__init__(UIType.UIKitContent, ContainerProps, children)
+        super().__init__(UIType.UIKitContent, ContentProps, children)
 
     @property
     def prop(self):

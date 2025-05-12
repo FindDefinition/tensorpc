@@ -16,16 +16,7 @@ from tensorpc.dock.core.appcore import Event, EventDataType
 from tensorpc.dock.core.common import handle_standard_event
 from tensorpc.core.datamodel.typemetas import RangedFloat, RangedInt
 
-from .base import Object3dContainerBaseProps, NumberType, ThreeBasicProps, ThreeComponentBase, Object3dContainerBase, Vector3Type, ThreeComponentType, Object3dBase
-
-
-
-@dataclasses.dataclass
-class PerspectiveCameraProps(Object3dContainerBaseProps):
-    fov: Union[float, Undefined] = undefined
-    aspect: Union[float, Undefined] = undefined
-    near: Union[float, Undefined] = undefined
-    far: Union[float, Undefined] = undefined
+from .base import PerspectiveCameraProps, Object3dContainerBaseProps, NumberType, ThreeBasicProps, ThreeComponentBase, Object3dContainerBase, Vector3Type, ThreeComponentType, Object3dBase
 
 
 class PerspectiveCamera(Object3dContainerBase[PerspectiveCameraProps,
@@ -55,7 +46,7 @@ class PerspectiveCamera(Object3dContainerBase[PerspectiveCameraProps,
         self.props.far = far
         self.props.position = position
         self.props.up = up
-        self.make_default = make_default
+        self.props.makeDefault = make_default
 
     @property
     def prop(self):
@@ -70,6 +61,7 @@ class PerspectiveCamera(Object3dContainerBase[PerspectiveCameraProps,
 
 @dataclasses.dataclass
 class OrthographicCameraProps(Object3dContainerBaseProps):
+    makeDefault: Union[bool, Undefined] = undefined
     zoom: Union[float, Undefined] = undefined
     near: Union[float, Undefined] = undefined
     far: Union[float, Undefined] = undefined
@@ -101,7 +93,7 @@ class OrthographicCamera(Object3dContainerBase[OrthographicCameraProps,
         self.props.far = far
         self.props.position = position
         self.props.up = up
-        self.make_default = make_default
+        self.props.makeDefault = make_default
 
     @property
     def prop(self):

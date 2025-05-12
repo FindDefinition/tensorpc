@@ -977,7 +977,7 @@ class DraftFileStorage(Generic[T]):
         return self._mashumaro_decoder, self._mashumaro_encoder
 
     @staticmethod
-    async def write_whole_model(store: Mapping[str, DraftStoreBackendBase],
+    async def _write_whole_model(store: Mapping[str, DraftStoreBackendBase],
                                 model: T,
                                 exclude_field_ids: set[int],
                                 path: str,
@@ -1047,12 +1047,19 @@ class DraftFileStorage(Generic[T]):
     def has_splitted_store(self):
         return self._has_splitted_store
 
+    async def write_whole_model(self, new_model: T):
+        assert type(new_model) == type(self._model)
+        self._model = new_model
+        await self._write_whole_model(self._store, new_model, self._exclude_field_ids,
+                                      self._root_path,
+                                      main_store_id=self._main_store_id)
+
     async def fetch_model(self) -> T:
         data = await self._store[self._main_store_id].read(self._root_path)
         if data is None:
             # not exist, create new
             if self._has_splitted_store:
-                await self.write_whole_model(self._store,
+                await self._write_whole_model(self._store,
                                              self._model,
                                              self._exclude_field_ids,
                                              self._root_path,
@@ -1072,7 +1079,7 @@ class DraftFileStorage(Generic[T]):
             dec, _ = self._lazy_get_mashumaro_coder()
             self._model: T = dec.decode(data)  # type: ignore
         # write whole model to clean unused (ignored, external) fields
-        await self.write_whole_model(self._store,
+        await self._write_whole_model(self._store,
                                      self._model,
                                      self._exclude_field_ids,
                                      self._root_path,

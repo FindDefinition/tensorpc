@@ -354,6 +354,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                                         capture_draft=False)
         return ops
 
+    async def write_whole_model(self, new_model: _T):
+        assert type(new_model) == type(self._model)
+        self._model = new_model
+        if self._store is not None:
+            await self._store.write_whole_model(new_model)
+        await self.sync_model()
+
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
         # convert dynamic node to static in op to avoid where op.
         ops = await self._update_with_jmes_ops_backend(ops)

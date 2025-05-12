@@ -41,6 +41,7 @@ def parse_viztracer_trace_events_to_raw_tree(
     trace_events: List[Dict[str, Any]],
     modify_events_func: Optional[Callable] = None,
     add_depth_to_event: bool = False,
+    parse_viztracer_name: bool = True,
 ) -> Tuple[dict, List[Dict[str, Any]], mui.JsonLikeTreeFieldMap]:
     viz_pattern = re.compile(r"(.*)\((.*):([0-9]*)\)")
     duration_events: List[Dict[str, Any]] = []
@@ -62,23 +63,35 @@ def parse_viztracer_trace_events_to_raw_tree(
         if max_tid == event["tid"]:
             if ph == "X":
                 # only care about main thread and duration events
-                try:
-                    m = viz_pattern.match(event["name"])
-                    if m is not None:
-                        func_qname = m.group(1).strip()
-                        file_name = m.group(2)
-                        lineno = int(m.group(3))
-                        duration_events.append({
-                            "id": cnt,
-                            "name": func_qname,
-                            "fname": file_name,
-                            "lineno": lineno,
-                            "ts": event["ts"],
-                            "dur": event["dur"],
-                        })
-                        cnt += 1
-                except Exception:
-                    continue
+                if parse_viztracer_name:
+                    try:
+                        m = viz_pattern.match(event["name"])
+                        if m is not None:
+                            func_qname = m.group(1).strip()
+                            file_name = m.group(2)
+                            lineno = int(m.group(3))
+                            duration_events.append({
+                                "id": cnt,
+                                "name": func_qname,
+                                "fname": file_name,
+                                "lineno": lineno,
+                                "ts": event["ts"],
+                                "dur": event["dur"],
+                            })
+                            cnt += 1
+                    except Exception:
+                        continue
+                else:
+                    data = {
+                        "id": cnt,
+                        "name": event["name"],
+                        "fname": "unknown",
+                        "lineno": -1,
+                        "ts": event["ts"],
+                        "dur": event["dur"],
+                    }
+                    duration_events.append(data)
+                    cnt += 1
             if ph == "i" or ph == "I":
                 if "args" in event:
                     args = event["args"]

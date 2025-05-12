@@ -6,7 +6,7 @@ import re
 from typing import Union, Optional, Tuple
 from typing_extensions import TypeAlias, Self
 import hsluv
-
+import numpy as np 
 
 LIGHTNESS_MIN = 0
 LIGHTNESS_MAX = 100
@@ -18,9 +18,13 @@ SATURATION_MAX = 100
 def _hash(s: str, max: int) -> int:
     hash = 0x811c9dc5 & 0xfffffff
     for i in range(len(s)):
+        # print("HASH-0", i, hash, ord(s[i]), )
         hash ^= ord(s[i])
-        hash = (hash * 16777619) & 0xffffffff
-    return abs(hash) % max
+        # print("HASH-1",hash)
+        hash = int(np.array(int(float(hash) * float(16777619)) & 0xffffffff, dtype=np.uint64).astype(np.int32))
+        # hash = to_js_safe_int(hash * 16777619) & 0xffffffff
+    return int(abs(hash) % max)
+
 
 NumberType: TypeAlias = Union[int, float]
 
@@ -211,6 +215,7 @@ def perfetto_string_to_color(seed: str, use_cache: bool = False):
         return PROCEDURAL_COLOR_CACHE[seed]
     h = _hash(seed, 360)
     saturation = 80
+    # print("HUE", h, seed)
     base = HSLuvColor((h, saturation, _hash(seed + "x", 40) + 40))
     variant = HSLuvColor((h, saturation, 30))
     colorScheme = make_color_scheme(base, variant)
@@ -221,3 +226,18 @@ def perfetto_string_to_color(seed: str, use_cache: bool = False):
 def perfetto_slice_to_color(seed: str, use_cache: bool = False):
     seed = create_slice_name(seed)
     return perfetto_string_to_color(seed, use_cache)
+
+def _main():
+    print(perfetto_string_to_color("data").base)
+    # print(perfetto_slice_to_color("fwdbwd"))
+    # print(perfetto_slice_to_color("optim"))
+    a = 1628185618
+    b = 16777619
+    a_double = np.double(a)
+    b_double = np.double(b)
+    mul_res = int(a_double * b_double)
+    mul_res_u64 = np.int64(mul_res)
+    print(mul_res_u64 & np.int64(0xffffffff))
+
+if __name__ == "__main__":
+    _main()

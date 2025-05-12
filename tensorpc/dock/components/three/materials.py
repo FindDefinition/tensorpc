@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import enum
 from typing_extensions import Annotated
 from typing import (Any, Union)
@@ -5,10 +6,10 @@ from typing import (Any, Union)
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel import typemetas
-from tensorpc.dock.core.component import (UIType)
+from tensorpc.dock.core.component import (UIType, ContainerBaseProps)
 from tensorpc.dock.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
 import numpy as np 
-from .base import ThreeMaterialBase, ThreeMaterialPropsBase, NumberType, ThreeBasicProps, ThreeComponentBase
+from .base import ThreeComponentType, ThreeMaterialBase, ThreeMaterialContainerBase, ThreeMaterialPropsBaseProps, ThreeMaterialPropsBase, NumberType, ThreeBasicProps, ThreeComponentBase
 from pydantic import field_validator
 
 @dataclasses.dataclass
@@ -103,6 +104,16 @@ class MeshTransmissionMaterialProps(MeshPhysicalMaterialProps):
 class MeshDiscardMaterialProps(ThreeBasicProps):
     pass
 
+@dataclasses.dataclass
+class MeshPortalMaterialProps(ThreeMaterialPropsBaseProps, ContainerBaseProps):
+    blend: Union[NumberType, Undefined] = undefined
+    blur: Union[NumberType, Undefined] = undefined
+    resolution: Union[NumberType, Undefined] = undefined
+    worldUnits: Union[bool, Undefined] = undefined
+    eventPriority: Union[NumberType, Undefined] = undefined
+    renderPriority: Union[NumberType, Undefined] = undefined
+    events: Union[bool, Undefined] = undefined
+    
 
 class MeshBasicMaterial(ThreeComponentBase[MeshBasicMaterialProps]):
 
@@ -450,3 +461,23 @@ class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
     async def update_uniform_values(self, uniform_values: dict[str, Any]):
         await self.send_and_wait(
             self.update_uniform_values_event(uniform_values))
+
+class MeshPortalMaterial(ThreeMaterialContainerBase[MeshPortalMaterialProps, ThreeComponentType]):
+
+    def __init__(
+        self, children: Union[dict[str, ThreeComponentType],
+                              list[ThreeComponentType]]
+    ) -> None:
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeMeshPortalMaterial, MeshPortalMaterialProps, children)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)

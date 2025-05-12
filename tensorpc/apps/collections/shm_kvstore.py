@@ -198,6 +198,7 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
             segments.close_in_remote()
         return self.get_item_tree_spec(key)
 
+
 class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
     """Shm KVStore client for tensor only. 
 
@@ -287,11 +288,24 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
         res = core_io.put_arrays_to_data(variables, treespec, _JSON_INDEX_KEY)
         return res 
 
-    def load_tensor_tree(self, key: str, arr_tree: Any, strict=True):
+    def _path_to_str(self, path: tuple[Any, ...]):
+        from torch.utils import _pytree as pytree
+        path_str = []
+        for p in path:
+            if isinstance(p, pytree.MappingKey):
+                path_str.append(f"{p.key}")
+            elif isinstance(p, pytree.SequenceKey):
+                path_str.append(f"{p.idx}")
+            else:
+                raise ValueError(f"Unknown path type {type(p)}")
+        return ".".join(path_str)
+
+    def load_tensor_tree(self, key: str, arr_tree: Any, strict=True, is_rank0: bool = True):
         import torch
         from torch.utils import _pytree as pytree
         variables: list[Any] = []
         stored_index_need_load_to_tensor = {}
+        stored_index_need_load_to_path = {}
         tensorpc_treespec = self.get_item_tree_spec(key)
 
         if strict:
@@ -303,7 +317,11 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
             path_with_var, _ = pytree.tree_flatten_with_path(tensorpc_treespec, is_leaf=lambda x: isinstance(x, dict) and _JSON_INDEX_KEY in x)
             path_with_var_to_load, _ = pytree.tree_flatten_with_path(arr_tree, is_leaf=lambda x: isinstance(x, torch.Tensor))
             path_with_var_dict = dict(path_with_var)
-            loaded_paths = set(path_with_var_dict.keys())
+            saved_tensor_paths: set[Any] = set()
+            unexpected_paths: set[Any] = set()
+            for path, info in path_with_var_dict.items():
+                if isinstance(info, dict) and _JSON_INDEX_KEY in info:
+                    saved_tensor_paths.add(path)
             path_with_var_to_load_dict = dict(path_with_var_to_load)
             tensor_count = 0
             for path, ten in path_with_var_to_load_dict.items():
@@ -314,17 +332,27 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
             store_arr_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_item_arr_desc", key)
             for path, ten in path_with_var_to_load_dict.items():
                 if isinstance(ten, torch.Tensor):
-                    index = path_with_var_dict[path][_JSON_INDEX_KEY]
-                    store_arr_descs_need_load.append(store_arr_descs[index])
-                    ten, info = _get_tensor_info_from_tensor(ten)
-                    load_arr_descs.append(info)
-                    stored_index_need_load_to_tensor[index] = ten
-                    loaded_paths.remove(path)
+                    if path in path_with_var_dict:
+                        index = path_with_var_dict[path][_JSON_INDEX_KEY]
+                        store_arr_descs_need_load.append(store_arr_descs[index])
+                        ten, info = _get_tensor_info_from_tensor(ten)
+                        load_arr_descs.append(info)
+                        stored_index_need_load_to_tensor[index] = ten
+                        stored_index_need_load_to_path[index] = path
+                        saved_tensor_paths.remove(path)
+                    else:
+                        unexpected_paths.add(path)
             _validate_load_tensor_tree(load_arr_descs, store_arr_descs_need_load)
-            # if loaded_paths:
-            #     print("------ Missing Keys ------")
-            #     for path in loaded_paths:
-            #         print(path)
+            if is_rank0:
+                if saved_tensor_paths:
+                    print("------ Missing Keys ------")
+                    for path in saved_tensor_paths:
+                        print(self._path_to_str(path))
+                if unexpected_paths:
+                    print("------ Unexpected Keys ------")
+                    for path in unexpected_paths:
+                        print(self._path_to_str(path))
+
         q = queue.Queue()
         q.put(0)
         with torch.no_grad():

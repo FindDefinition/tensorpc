@@ -2901,6 +2901,9 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
             self.props.value, int)
         return self.props.value
 
+    def is_integer(self) -> bool:
+        return self.props.isInteger == True
+
     def validate_props(self, props: Dict[str, Any]):
         if "value" in props:
             value = props["value"]
@@ -2916,14 +2919,25 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
     async def update_ranges(self,
                             begin: NumberType,
                             end: NumberType,
-                            step: Optional[NumberType] = None):
+                            step: Optional[NumberType] = None,
+                            value: Optional[NumberType] = None):
         if step is None:
             step = self.props.ranges[2]
         self.props.ranges = (begin, end, step)
-        assert end >= begin and step <= end - begin
+        if self.is_integer():
+            assert isinstance(begin, int)
+            assert isinstance(end, int)
+            if step is not None:
+                assert isinstance(step, int)
+            if value is not None:
+                assert isinstance(value, int)
+        assert end >= begin, f"{begin}, {end}, {step}"
         # clip value
-        if not self.props.infSlider:
-            self.props.value = max(begin, min(end, self.props.value))
+        if not isinstance(self.props.value, Undefined):
+            if value is not None:
+                self.props.value = value
+            if not self.props.infSlider:
+                self.props.value = max(begin, min(end , self.props.value))
         await self.put_app_event(
             self.create_update_event({
                 "ranges": (begin, end, step),

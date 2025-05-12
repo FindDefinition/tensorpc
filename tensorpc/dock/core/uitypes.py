@@ -81,8 +81,9 @@ class IconType(enum.IntEnum):
     QueryStats = 70
     BarChart = 71
     Adb = 72
-    # CloudDownload = 73
-    # CloudUpload = 74
+    CloudDownload = 73
+    CloudUpload = 74
+    Insights = 75
 
 @dataclasses.dataclass
 class MenuItem:

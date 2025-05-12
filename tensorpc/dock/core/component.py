@@ -282,6 +282,7 @@ class UIType(enum.IntEnum):
     ThreeMeshDiscardMaterial = 0x105b
 
     ThreeMeshShaderMaterial = 0x105c
+    ThreeMeshPortalMaterial = 0x105d
 
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
@@ -1204,11 +1205,12 @@ def _draft_expr_or_str_to_str(draft_expr: Any) -> str:
     jmespath.compile(draft_expr_str)
     return draft_expr_str
 
-class _EventSlotBase:
+class _EventSlotBase(Generic[TEventData]):
 
-    def __init__(self, event_type: EventDataType, comp: "Component"):
+    def __init__(self, event_type: EventDataType, comp: "Component", converter: Optional[Callable[[Any], TEventData]] = None):
         self.event_type = event_type
         self.comp = comp
+        self.converter = converter
 
     def on_standard(self, handler: Callable[[Event], Any]) -> Self:
         """standard event means the handler must be a function with one argument of Event.
@@ -1217,7 +1219,8 @@ class _EventSlotBase:
         """
         self.comp.register_event_handler(self.event_type,
                                          handler,
-                                         simple_event=False)
+                                         simple_event=False,
+                                         converter=self.converter)
         return self
 
     def configure(self,
@@ -1243,7 +1246,7 @@ class _EventSlotBase:
             update_ops=update_ops)
         return self
 
-    def add_frontend_draft_change(self, target_draft: Any, attr: str, src_draft: Optional[Any] = None, target_comp: Union["Component", Undefined] = undefined) -> Self:
+    def add_frontend_draft_change(self, target_draft: Any, attr: Union[str, int], src_draft: Optional[Any] = None, target_comp: Union["Component", Undefined] = undefined) -> Self:
         """Set draft exprs to change frontend datamodel directly.
         """
         target_draft_str = _draft_expr_or_str_to_str(target_draft)
@@ -1261,7 +1264,7 @@ class _EventSlotBase:
             ))
         return self
 
-    def add_frontend_draft_set_none(self, target_draft: Any, attr: str, target_comp: Union["Component", Undefined] = undefined) -> Self:
+    def add_frontend_draft_set_none(self, target_draft: Any, attr: Union[str, int], target_comp: Union["Component", Undefined] = undefined) -> Self:
         """Set draft exprs to change frontend datamodel directly.
         """
         target_draft_str = _draft_expr_or_str_to_str(target_draft)
@@ -1286,15 +1289,7 @@ class _EventSlotBase:
         return self
 
 
-class EventSlot(_EventSlotBase, Generic[TEventData]):
-
-    def __init__(self,
-                 event_type: EventDataType,
-                 comp: "Component",
-                 converter: Optional[Callable[[Any], TEventData]] = None):
-        self.event_type = event_type
-        self.comp = comp
-        self.converter = converter
+class EventSlot(_EventSlotBase[TEventData]):
 
     def on(self, handler: Callable[[TEventData], Any]):
         """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
@@ -1313,17 +1308,14 @@ class EventSlot(_EventSlotBase, Generic[TEventData]):
 
 class EventSlotZeroArg(_EventSlotBase):
 
-    def __init__(self, event_type: EventDataType, comp: "Component"):
-        self.event_type = event_type
-        self.comp = comp
-
     def on(self, handler: Callable[[], Any]):
         """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
         such as click.
         """
         self.comp.register_event_handler(self.event_type,
                                          handler,
-                                         simple_event=True)
+                                         simple_event=True,
+                                         converter=self.converter)
         return self
 
     def off(self, handler: Callable[[], Any]):
@@ -1406,7 +1398,7 @@ class EventSlotNoArgEmitter(_EventSlotEmitterBase):
 
 @dataclasses.dataclass
 class EventFrontendUpdateOp:
-    attr: str
+    attr: Union[str, int]
     targetPath: str 
     targetComp: Union[Undefined, "Component"] = undefined
     srcPath: Optional[Union[Undefined, str]] = undefined
@@ -1556,12 +1548,14 @@ class Component(Generic[T_base_props, T_child]):
         return EventSlot(event_type_value, self, converter)
 
     def _create_event_slot_noarg(self, event_type: Union[FrontendEventType,
-                                                         EventDataType]):
+                                                         EventDataType],
+                                converter: Optional[Callable[[Any],
+                                                        TEventData]] = None):
         if isinstance(event_type, FrontendEventType):
             event_type_value = event_type.value
         else:
             event_type_value = event_type
-        return EventSlotZeroArg(event_type_value, self)
+        return EventSlotZeroArg(event_type_value, self, converter)
 
     def _create_emitter_event_slot(
             self,

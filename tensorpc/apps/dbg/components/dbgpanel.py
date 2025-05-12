@@ -16,6 +16,7 @@ import psutil
 import rich
 import yaml
 
+from tensorpc.apps.dbg.components.perfmonitor import PerfMonitor
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import BuiltinServiceProcType
@@ -305,6 +306,7 @@ class MasterDebugPanel(mui.FlexBox):
             mui.Divider(),
             self._dist_perfetto,
         ]).prop(width="100%", height="100%", overflow="hidden")
+        self.perf_monitor = PerfMonitor()
         tab_defs = [
             mui.TabDef("",
                        "remote_breakpoint_view",
@@ -320,6 +322,12 @@ class MasterDebugPanel(mui.FlexBox):
                        self._dist_perfetto_container,
                        icon=mui.IconType.Timeline,
                        tooltip="Distributed Perfetto Viewer"),
+            mui.TabDef("",
+                       "perfmonitor",
+                        self.perf_monitor.prop(width="100%", height="100%", overflow="hidden"),
+                       icon=mui.IconType.Insights,
+                       tooltip="Performance Monitor"),
+
         ]
 
         self._tabs = mui.Tabs(tab_defs, init_value="remote_breakpoint_view").prop(panelProps=mui.FlexBoxProps(

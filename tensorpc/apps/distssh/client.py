@@ -1,5 +1,8 @@
+import contextlib
+import json
 from pathlib import Path
-from typing import Any, Optional
+import time
+from typing import Any, Optional, Union
 from tensorpc.apps.collections.shm_kvstore import ShmKVStoreTensorClient, ShmTrOnlyKVStoreTensorClient
 
 from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
@@ -116,7 +119,9 @@ class TorchDistributedCkptClient(ShmTrOnlyKVStoreTensorClient):
         if not self.has_train_checkpoint(key, step):
             raise ValueError(f"train checkpoint {key}-{step} not found.")
         store_key = self._encode_train_key(key, step)[0]
-        return self.load_tensor_tree(store_key, state_dict,  strict=strict)
+        rank = _get_rank_may_distributed()
+
+        return self.load_tensor_tree(store_key, state_dict,  strict=strict, is_rank0=rank == 0)
 
     def get_all_train_checkpoint_metas(self,  key: str):
         rank = _get_rank_may_distributed()
@@ -184,3 +189,91 @@ def is_inside_distssh():
     Check if the current process is inside distssh.
     """
     return _DISTSSH_URL is not None
+
+
+def allgather_set_perf_monitor_data(step: int, data: list[dict], scale: Optional[float] = None, metadata: Any = None):
+    url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+    if url_with_port is None:
+        return False
+    import torch.distributed as dist
+    if not dist.is_initialized():
+        raise RuntimeError(
+            "You must use pth_control_point inside a pytorch distributed process group."
+        )
+    global_rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    obj_list = [(data, metadata)] * world_size
+    dist.all_gather_object(obj_list, (data, metadata))
+    data_list = [x[0] for x in obj_list]
+    metadata_list = [x[1] for x in obj_list]
+    if global_rank == 0:
+        try:
+            simple_remote_call(
+                url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
+                metadata_list, scale
+            )
+        except:
+            traceback.print_exc()
+            return 
+
+
+class PerfMonitorClient:
+    def __init__(self):
+        self._buffer = []
+
+        self._base_ts = 0
+        self._cur_ts = time.time_ns()
+
+    def _check_valid_name(self, name: str):
+        # name must be unique in buffer
+        return 
+        # for item in self._buffer:
+        #     if item["name"] == name:
+        #         raise ValueError(f"PerfMonitorClient: {name} already exists.")
+
+    def record(self, name: str, enable: bool = True):
+        if not enable:
+            return 
+        self._check_valid_name(name)
+        cur_ts = time.time_ns() - self._base_ts
+        res = {
+            "name": name,
+            "pid": 0,
+            "tid": 0,
+            "ph": "X",
+            "ts": self._cur_ts,
+            "dur": cur_ts - self._cur_ts,
+        }
+        cur_ts = time.time_ns() - self._base_ts
+        self._buffer.append(res)
+        self._cur_ts = cur_ts
+        return 
+
+    def extend_external_events(self, events: list[dict]):
+        for event in events:
+            self._check_valid_name(event["name"])
+            self._buffer.append(event)
+        self._cur_ts = time.time_ns()
+        # self._base_ts = time.time_ns()
+        self._base_ts = 0
+        return
+
+    @contextlib.contextmanager
+    def duration(self, name: str):
+        self._check_valid_name(name)
+        self._cur_ts = time.time_ns() - self._base_ts
+        try:
+            yield 
+        finally:
+            self.record(name)
+
+    def flush_allgather(self, step: int, enable: bool = True, metadata: Any = None, scale: Optional[float] = None):
+        if enable:
+            if metadata is not None:
+                json.dumps(metadata) # validate metadata (must be a json serializable object)
+            allgather_set_perf_monitor_data(step, self._buffer, scale, metadata)
+        self._buffer = []
+        self._cur_ts = time.time_ns()
+        # self._base_ts = time.time_ns()
+        self._base_ts = 0
+        return

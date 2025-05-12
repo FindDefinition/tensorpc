@@ -10,6 +10,14 @@ class Ray:
     direction: Vector3Type 
 
 @dataclasses.dataclass
+class Face:
+    a: NumberType
+    b: NumberType
+    c: NumberType
+    normal: Vector3Type
+    materialIndex: int 
+
+@dataclasses.dataclass
 class PointerMissedEvent:
     offset: Vector2Type
 
@@ -24,7 +32,7 @@ class PointerEvent:
     distanceToRay: Union[Undefined, NumberType] = undefined
     point: Union[Undefined, Vector3Type] = undefined
     index: Union[Undefined, int] = undefined
-    face: Union[Undefined, str] = undefined
+    face: Union[Face, Undefined] = undefined
     faceIndex: Union[Undefined, int] = undefined
     uv: Union[Undefined, Vector2Type] = undefined
     instanceId: Union[Undefined, int] = undefined
