@@ -95,7 +95,7 @@ class _JMESCustomFunctions(functions.Functions):
     @functions.signature({'types': []}, {'types': ["number"], 'variadic': True})
     def _func_ndarray_getitem(self, obj, *index):
         if isinstance(obj, np.ndarray):
-            return obj[*index]
+            return obj[index]
         return None 
 
     @functions.signature({'types': ["number"]}, {'types': ["number"]})

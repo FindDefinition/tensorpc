@@ -1,4 +1,7 @@
 # Changelog
+# [0.18.1] - 2025-05-12
+### Fixed 
+- fix unexpected python 3.11+ grammar
 
 # [0.18.0] - 2025-05-12
 ### Added
