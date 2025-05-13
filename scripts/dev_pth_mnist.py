@@ -1,6 +1,7 @@
 from __future__ import division, print_function
 
 import argparse
+import json
 import os
 
 import torch
@@ -29,13 +30,12 @@ import time as pytime
 
 class PerfContext:
     def __init__(self) -> None:
-        import torch 
         self._ns_stack: List[str] = []
         self._measures: Dict[Tuple[str, ...], List[Tuple[torch.cuda.Event,
-                                                         torch.cuda.Event]]] = {}
+                                                         torch.cuda.Event, Any]]] = {}
         self._print_pair: List[Tuple[str, float]] = []
         self.perf_result: Dict[Tuple[str, ...], List[float]] = {}
-        self.perf_result_timestamps: Dict[Tuple[str, ...], List[tuple[int, int]]] = {}
+        self.perf_result_timestamp_metadatas: Dict[Tuple[str, ...], List[tuple[int, int, Any]]] = {}
 
         self._enable_controlled_by_root: Optional[bool] = None
         self.perf_result_root: float = 0.0
@@ -58,13 +58,14 @@ class PerfContext:
         if with_cpu_timestamp:
             ts_base = self._first_cpu_timestamp
         for keys, data in self.perf_result.items():
+            assert len(keys) > 0
             if ignore_root and len(keys) == 1:
                 continue
-            assert len(keys) > 0
             key = ".".join(keys)
             for i, time in enumerate(data):
-                start_ts = self.perf_result_timestamps[keys][i][0]
-                end_ts = self.perf_result_timestamps[keys][i][1]
+                start_ts = self.perf_result_timestamp_metadatas[keys][i][0]
+                end_ts = self.perf_result_timestamp_metadatas[keys][i][1]
+                metadata = self.perf_result_timestamp_metadatas[keys][i][2]
                 event = {
                     "name": key,
                     "ph": "X",
@@ -72,6 +73,7 @@ class PerfContext:
                     "dur": end_ts - start_ts,
                     "pid": pid,
                     "tid": tid,
+                    "args": metadata
                 }
                 events.append(event)
         return events
@@ -94,14 +96,13 @@ def __enter_perf_conetxt(perf_ctx: PerfContext):
 @contextlib.contextmanager
 def perf_context(name: str,
                  *,
-                 stream: Optional[Any] = None,
+                 stream: Optional[torch.cuda.Stream] = None,
                  enable: bool = True,
                  print_result: bool = True,
                  control_child_enable: bool = False,
                  child_only: bool = False,
-                 sync_start_event: bool = False):
-    import torch 
-
+                 sync_start_event: bool = False,
+                 metadata: Any = None):
     ctx = PERF_CONTEXT.get()
     enter_null = contextlib.nullcontext()
     is_root = False
@@ -125,6 +126,9 @@ def perf_context(name: str,
         return
     ctx._ns_stack.append(name)
     root_time = 1
+    if metadata is not None:
+        # metadata must be json-parseable
+        json.dumps(metadata)
     try:
         with enter_null:
             ev_start = cast(torch.cuda.Event, torch.cuda.Event(enable_timing=True))
@@ -142,27 +146,29 @@ def perf_context(name: str,
             key = tuple(ctx._ns_stack)
             if key not in ctx._measures:
                 ctx._measures[key] = []
-            ctx._measures[tuple(ctx._ns_stack)].append((ev_start, ev_stop))
-
+            ctx._measures[tuple(ctx._ns_stack)].append((ev_start, ev_stop, metadata))
     finally:
         ctx._ns_stack.pop()
     if is_root:
         all_times: Dict[Tuple[str, ...], List[float]] = {}
-        all_timestamps: Dict[Tuple[str, ...], List[tuple[int, int]]] = {}
+        all_timestamps: Dict[Tuple[str, ...], List[tuple[int, int, Any]]] = {}
         assert ctx._first_event is not None 
         for key, data in ctx._measures.items():
             for pair in data:
                 pair[0].synchronize()
                 pair[1].synchronize()
             times = [x[0].elapsed_time(x[1]) for x in data]
-            timestamps = [(int(ctx._first_event.elapsed_time(x[0]) * 1e6), int(ctx._first_event.elapsed_time(x[1]) * 1e6)) for x in data]
+            timestamps = [(int(ctx._first_event.elapsed_time(x[0]) * 1e6), int(ctx._first_event.elapsed_time(x[1]) * 1e6), x[2]) for x in data]
+            for pair_ts in timestamps:
+                assert pair_ts[0] <= pair_ts[1], f"pair_ts: {pair_ts}"
             all_times[key] = times
             all_timestamps[key] = timestamps
             if key == root_key:
                 root_time = times[0]
         ctx.perf_result = all_times
         ctx.perf_result_root = root_time
-        ctx.perf_result_timestamps = all_timestamps
+        ctx.perf_result_timestamp_metadatas = all_timestamps
+
         ctx._measures.clear()
         if print_result:
             for key, data in all_times.items():
@@ -259,7 +265,7 @@ class Trainer(object):
                     data = data.to(self.device)
                     target = target.to(self.device)
                 with tensorpc.dbg.manual_trace_scope("fwdbwd"):
-                    with perf_context("fwd"):
+                    with perf_context("fwd", metadata="helloworld"):
 
                         output = self.model(data)
                     with perf_context("loss"):

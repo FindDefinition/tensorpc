@@ -331,15 +331,16 @@ class MasterDebugPanel(mui.FlexBox):
         ]
 
         self._tabs = mui.Tabs(tab_defs, init_value="remote_breakpoint_view").prop(panelProps=mui.FlexBoxProps(
-                                  width="100%", padding=0),
+                                  width="100%", padding=0,),
                                                   orientation="vertical",
                                                   borderRight=1,
                                                   flex=1,
                                                   borderColor='divider',
+                                                  # overflow="hidden",
                                                   tooltipPlacement="right")
         self._tabs.event_change.on(self._on_tab_change)
         dm = mui.DataModel(MasterDebugPanelSimpleModel([], None), [
-            mui.ThemeProvider([mui.HBox([self._tabs]).prop(flex=1)],
+            mui.ThemeProvider([mui.HBox([self._tabs]).prop(flex=1, overflow="hidden")],
                               get_tight_icon_tab_theme()),
             self._trace_launch_dialog,
         ])

@@ -27,6 +27,8 @@ class PerfFieldInfo:
     rate: float
     left_line: list[list[float]] 
     right_line: list[list[float]] 
+    cnt: int = 0
+    cluster_name: str = ""
 
 
 @dataclasses.dataclass
@@ -38,6 +40,7 @@ class VisInfo:
     info_idxes: np.ndarray
     rank_ids: np.ndarray
     durations: np.ndarray
+    name_cnt_to_polygons: dict[str, list[list[float]]]
 
 @dataclasses.dataclass
 class VisModel(VisInfo):
@@ -48,10 +51,12 @@ class VisModel(VisInfo):
 
     hoverInfoId: Optional[int] = None
     clickInstanceId: Optional[int] = None
+    clickClusterName: Optional[str] = None
 
     step: int = -1
     whole_scales: list[float] = dataclasses.field(default_factory=lambda: [1.0, 1.0, 1.0])
     meta_datas: Annotated[list[Any], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
+    all_events: Annotated[list[dict], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
 
 def _get_polygons_from_pos_and_scales(trs: np.ndarray, scales: np.ndarray) -> np.ndarray:
     """
@@ -74,6 +79,29 @@ def _get_polygons_from_pos_and_scales(trs: np.ndarray, scales: np.ndarray) -> np
         ])
     return np.array(polygons)
 
+def _get_segments_from_pos_and_scales(trs: np.ndarray, scales: np.ndarray) -> np.ndarray:
+    """
+    Get the polygons from the positions and scales.
+    :param trs: The positions of the boxes.
+    :param scales: The scales of the boxes.
+    :return: The polygons of the boxes.
+    """
+    polygons = []
+    for i in range(len(trs)):
+        x, y, z = trs[i]
+        sx, sy, sz = scales[i]
+        polygons.append([
+            [x - sx / 2, y - sy / 2, z + 0.01],
+            [x + sx / 2, y - sy / 2, z + 0.01],
+            [x + sx / 2, y - sy / 2, z + 0.01],
+            [x + sx / 2, y + sy / 2, z + 0.01],
+            [x + sx / 2, y + sy / 2, z + 0.01],
+            [x - sx / 2, y + sy / 2, z + 0.01],
+            [x - sx / 2, y + sy / 2, z + 0.01],
+            # close the polygon
+            [x - sx / 2, y - sy / 2, z + 0.01],
+        ])
+    return np.array(polygons)
 
 def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: float, 
         min_ts: int, depth_padding: float, height: float) -> VisInfo:
@@ -91,7 +119,12 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
     info_idxes = []
     durations = []
     max_y_bound = 0
+    name_cnt_to_trs: dict[str, Any] = {}
+    name_cnt_to_scales: dict[str, Any] = {}
+
     for event in duration_events:
+        ev_cnt = event["cnt"]
+        name_with_cnt = f"{event['name']}::{ev_cnt}"
         x = (event["ts"] - min_ts + event["dur"] / 2) * dur_scale
         y = depth_padding + (event["depth"] - 0.5) * (height + depth_padding) - 1.5 * depth_padding
         cur_y_bound = y + height
@@ -102,6 +135,19 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
         colors.append([*perfetto_slice_to_color(event["name"]).base.rgb])
         scales.append([event["dur"] * dur_scale, height, 1])
         durations.append(event["dur"] / 1e9)
+        if name_with_cnt not in name_cnt_to_trs:
+            name_cnt_to_trs[name_with_cnt] = []
+            name_cnt_to_scales[name_with_cnt] = []
+        name_cnt_to_trs[name_with_cnt].append(trs[-1])
+        name_cnt_to_scales[name_with_cnt].append(scales[-1])
+    name_cnt_to_polygons = {}
+    for cluster_name, trs_namecnt in name_cnt_to_trs.items():
+        scales_namecnt = name_cnt_to_scales[cluster_name]
+        trs_namecnt = np.array(trs_namecnt, dtype=np.float32)
+        scales_namecnt = np.array(scales_namecnt, dtype=np.float32)
+        polygons = _get_segments_from_pos_and_scales(trs_namecnt, scales_namecnt)
+        name_cnt_to_polygons[cluster_name] = polygons.reshape(-1, 3).tolist()
+
     return VisInfo(
         trs=np.array(trs, dtype=np.float32),
         colors=np.array(colors, dtype=np.float32) / 255,
@@ -110,6 +156,7 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
         info_idxes=np.array(info_idxes, dtype=np.int32),
         rank_ids=np.array([event["rank"] for event in duration_events], dtype=np.int32),
         durations=np.array(durations, dtype=np.float32),
+        name_cnt_to_polygons=name_cnt_to_polygons,
     )
 
 class PerfMonitor(mui.FlexBox):
@@ -128,6 +175,9 @@ class PerfMonitor(mui.FlexBox):
         line_end_cond = mui.MatchCase.binary_selection(True, line_end)
         line_select = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="blue", lineWidth=2)
         line_select_cond = mui.MatchCase.binary_selection(True, line_select)
+
+        line_select_samename = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="green", lineWidth=1, opacity=0.7, segments=True)
+        line_select_samename_cond = mui.MatchCase.binary_selection(True, line_select_samename)
 
         # canvas = three.Canvas([
         #     # three.OrbitControl().prop(makeDefault=True),
@@ -167,6 +217,10 @@ class PerfMonitor(mui.FlexBox):
                 three.Group([
                     line_select_cond
                 ]).prop(position=(0, 0, 0.015)),
+                three.Group([
+                    line_select_samename_cond
+                ]).prop(position=(0, 0, 0.014)),
+
             ]).prop(position=(-17, 17, 1))
         ]).prop(enablePerf=False, allowKeyboardEvent=True, localClippingEnabled=True)
         canvas.prop(cameraProps=three.PerspectiveCameraProps(position=(0, 0, 25)))
@@ -205,6 +259,10 @@ class PerfMonitor(mui.FlexBox):
         label.bind_fields(condition="$.hoverData != `null`")
         line.bind_fields(points="ndarray_getitem($.polygons, not_null($.hoverData.instanceId, `0`))", scale="$.whole_scales")
         line_cond.bind_fields(condition="$.hoverData != `null`")
+
+        line_select_samename.bind_fields(points="getitem(name_cnt_to_polygons, $.clickClusterName)", scale="$.whole_scales")
+        line_select_samename_cond.bind_fields(condition="$.clickClusterName != `null`")
+
 
         line_select.bind_fields(points="ndarray_getitem($.polygons, not_null($.clickInstanceId, `0`))", scale="$.whole_scales")
         line_select_cond.bind_fields(condition="$.clickInstanceId != `null`")
@@ -262,7 +320,9 @@ class PerfMonitor(mui.FlexBox):
         polygons_empty = np.zeros((0, 5, 3), dtype=np.float32)
         indexes_empty = np.zeros((0,), dtype=np.int32)
         durs_empty = np.zeros((0,), dtype=np.float32)
-        return VisModel(trs_empty, colors_empty, scales_empty, polygons_empty, indexes_empty, indexes_empty, durs_empty, 0, [])
+        name_cnt_to_polygons_empty = {}
+        return VisModel(trs_empty, colors_empty, scales_empty, polygons_empty, indexes_empty, 
+            indexes_empty, durs_empty, name_cnt_to_polygons_empty, 0, [])
 
     async def _on_menu_select(self, value: str):
         if value == "reset":
@@ -285,25 +345,36 @@ class PerfMonitor(mui.FlexBox):
             draft.durations = vis_model.durations
             draft.total_duration = vis_model.total_duration
             draft.meta_datas = vis_model.meta_datas
+            draft.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
         await self._header.write("")
         await self._detail_viewer.write(None)
 
     async def _on_click(self, ev: mui.Event):
         instance_id = ev.data.instanceId 
+        info_idx = int(self.dm.model.info_idxes[instance_id]) 
+        info = self.dm.model.infos[info_idx]
         self.dm.get_draft().clickInstanceId = instance_id 
+        self.dm.get_draft().clickClusterName = info.cluster_name 
+
 
     async def _update_detail(self, instance_id: Optional[int]):
         if instance_id is not None and instance_id < self.dm.model.info_idxes.shape[0]:
             info_idx = int(self.dm.model.info_idxes[instance_id]) 
             rank = int(self.dm.model.rank_ids[instance_id])
             info = self.dm.model.infos[info_idx]
+            raw_event = self.dm.model.all_events[instance_id]
             res = {
                 "name": info.name, 
                 "rank": rank,
                 "duration": round(float(self.dm.model.durations[instance_id]), 4),
                 "all_duration": round(info.duration, 4),
                 "rate": round(info.rate, 4),
+                "start_ts": str(raw_event["ts"]),
+                "end_ts": str(raw_event["ts"] + raw_event["dur"]),
+                "cnt": raw_event["cnt"],
             }
+            if "args" in raw_event:
+                res["args"] = raw_event["args"]
             if rank < len(self.dm.model.meta_datas):
                 metadata = self.dm.model.meta_datas[rank]
                 if metadata is not None:
@@ -325,14 +396,27 @@ class PerfMonitor(mui.FlexBox):
         # calc insert loc by bisect 
         vis_model.meta_datas = meta_datas
         vis_model.step = step
+        # remove all data with step >= provided step
+        loc = bisect.bisect_left(self.history, vis_model.step, key=lambda v: v.step)
+        self.history = self.history[:loc]
+        # insert new data
+        self.history.append(vis_model)
+        prev_index = self.history_slider.int()
 
-        bisect.insort(self.history, vis_model, key=lambda v: v.step)
-        # self.history[step] = vis_model
-        await self._sync_history_select()
+        if prev_index < loc - 1:
+            await self.history_slider.update_ranges(0, len(self.history) - 1, value=prev_index)
+        else:
+            await self._sync_history_select()
+
+        # bisect.insort(self.history, vis_model, key=lambda v: v.step)
+        # await self._sync_history_select()
 
     async def _sync_history_select(self):
-        await self.history_slider.update_ranges(0, len(self.history) - 1, value=len(self.history) - 1)
-        await self._select_vis_model(len(self.history) - 1)
+        if not self.history:
+            await self.history_slider.update_ranges(0, 0, 1, value=0)
+        else:
+            await self.history_slider.update_ranges(0, len(self.history) - 1, value=len(self.history) - 1)
+            await self._select_vis_model(len(self.history) - 1)
 
     async def _select_vis_model(self, val: mui.ValueType):
         index = int(val)
@@ -351,20 +435,23 @@ class PerfMonitor(mui.FlexBox):
             draft.durations = vis_model.durations
             draft.total_duration = vis_model.total_duration
             draft.meta_datas = vis_model.meta_datas
+            draft.all_events = vis_model.all_events
+            draft.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
+
             prev_click_instance_id = self.dm.model.clickInstanceId
             if prev_click_instance_id is not None and prev_click_instance_id < vis_model.info_idxes.shape[0]:
                 await self._update_detail(prev_click_instance_id)
             else:
                 draft.clickInstanceId = None
+                draft.clickClusterName = None
 
     def perf_data_to_vis_model(self, data_list_all_rank: list[list[dict]], max_length: float = 35, depth_padding: float = 0.02, 
             height: float = 0.5, user_scale: Optional[float] = None, max_depth: int = 3):
         data_list_all_rank = copy.deepcopy(data_list_all_rank)
-        # import rich 
-        # rich.print(data_list_all_rank)
         # data list: chrome trace duration events
         # use name as field
-        name_to_events: dict[str, list[dict]] = {}
+        use_sync_event_count_name = True
+        name_to_events: dict[tuple[str, int], list[dict]] = {}
         min_ts_all = math.inf
         max_ts_all = 0
         depth_accum = 1
@@ -372,19 +459,28 @@ class PerfMonitor(mui.FlexBox):
             _, data_list, _ = parse_viztracer_trace_events_to_raw_tree(data_list, add_depth_to_event=True, parse_viztracer_name=False)
             # remove event with depth > 1
             data_list = [ev for ev in data_list if ev["depth"] <= max_depth]
-            max_depth = max(max_depth, max(ev["depth"] for ev in data_list))
+            max_depth_cur = max(ev["depth"] for ev in data_list)
             data_list_all_rank[rank] = data_list
+            name_count_local: dict[str, int] = {}
             for ev in data_list:
                 # set rank as depth
                 ev["depth"] = depth_accum + ev["depth"]
                 min_ts_all = min(min_ts_all, ev["ts"])
                 max_ts_all = max(max_ts_all, ev["ts"] + ev["dur"])
                 name = ev["name"]
-                if name not in name_to_events:
-                    name_to_events[name] = []
+                if name not in name_count_local:
+                    name_count_local[name] = 0
+                name_count_local[name] += 1
+                if use_sync_event_count_name:
+                    cnt = name_count_local[name]
+                else:
+                    cnt = -1 
+                if (name, cnt) not in name_to_events:
+                    name_to_events[(name, cnt)] = []
                 ev["rank"] = rank
-                name_to_events[name].append(ev)
-            depth_accum += max_depth
+                ev["cnt"] = cnt
+                name_to_events[(name, cnt)].append(ev)
+            depth_accum += max_depth_cur
         for rank, data_list in enumerate(data_list_all_rank):
             for ev in data_list:
                 ev["ts"] -= min_ts_all
@@ -396,7 +492,7 @@ class PerfMonitor(mui.FlexBox):
         dur_scale = max_length * time_scale
 
         field_infos: list[PerfFieldInfo] = []
-        for name, events in name_to_events.items():
+        for (name, cnt), events in name_to_events.items():
             min_ts = math.inf
             max_ts = 0
             total_dur = 0
@@ -415,8 +511,7 @@ class PerfMonitor(mui.FlexBox):
                 [max_ts * dur_scale, 5000, 0.02],
             ]
             duration_second = (max_ts - min_ts) / 1e9
-            name_slice = f"{name}"
-            field_infos.append(PerfFieldInfo(name_slice, min_ts, max_ts, duration_second, rate, left_line_points, right_line_points))
+            field_infos.append(PerfFieldInfo(name, min_ts, max_ts, duration_second, rate, left_line_points, right_line_points, cnt, f"{name}::{cnt}"))
         all_events = sum(data_list_all_rank, [])
         vis_info = _get_vis_data_from_duration_events(all_events, dur_scale, 0, depth_padding, height)
         vis_model = VisModel(
@@ -429,5 +524,7 @@ class PerfMonitor(mui.FlexBox):
             rank_ids=vis_info.rank_ids,
             durations=vis_info.durations,
             infos=field_infos,
+            all_events=all_events,
+            name_cnt_to_polygons=vis_info.name_cnt_to_polygons,
         )
         return vis_model 

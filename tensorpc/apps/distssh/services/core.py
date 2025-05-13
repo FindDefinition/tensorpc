@@ -600,6 +600,7 @@ class FaultToleranceSSHServer:
         elif shell_info.type == "bash":
             shell_file_path = Path(self._cfg.workdir) / "sync" / f"_distssh-rank-cmd-{self.state.rank}.sh"
             with shell_file_path.open("w") as f:
+                f.write("unset HISTFILE\n")
                 f.write(cmd)
             cmd = f" bash -i {shell_file_path.absolute()}"
         else:

@@ -943,6 +943,7 @@ class LineProps(Object3dBaseProps):
     vertexColors: Union[tuple[NumberType, NumberType, NumberType],
                         Undefined] = undefined
     lineWidth: Union[NumberType, Undefined] = undefined
+    segments: Union[bool, Undefined] = undefined
     transparent: Union[bool, Undefined] = undefined
     opacity: Annotated[Union[NumberType, Undefined],
                        typemetas.CommonObject(default=1.0)] = undefined

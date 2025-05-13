@@ -70,14 +70,17 @@ def parse_viztracer_trace_events_to_raw_tree(
                             func_qname = m.group(1).strip()
                             file_name = m.group(2)
                             lineno = int(m.group(3))
-                            duration_events.append({
+                            data = {
                                 "id": cnt,
                                 "name": func_qname,
                                 "fname": file_name,
                                 "lineno": lineno,
                                 "ts": event["ts"],
                                 "dur": event["dur"],
-                            })
+                            }
+                            duration_events.append(data)
+                            if "args" in event:
+                                data["args"] = event["args"]
                             cnt += 1
                     except Exception:
                         continue
@@ -90,6 +93,9 @@ def parse_viztracer_trace_events_to_raw_tree(
                         "ts": event["ts"],
                         "dur": event["dur"],
                     }
+                    if "args" in event:
+                        data["args"] = event["args"]
+
                     duration_events.append(data)
                     cnt += 1
             if ph == "i" or ph == "I":
