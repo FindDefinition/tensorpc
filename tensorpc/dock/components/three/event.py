@@ -1,3 +1,4 @@
+from types import NoneType
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import Undefined, undefined
 from typing import Any, Union, Optional
@@ -32,7 +33,7 @@ class PointerEvent:
     distanceToRay: Union[Undefined, NumberType] = undefined
     point: Union[Undefined, Vector3Type] = undefined
     index: Union[Undefined, int] = undefined
-    face: Union[Face, Undefined] = undefined
+    face: Optional[Union[Face, Undefined]] = undefined
     faceIndex: Union[Undefined, int] = undefined
     uv: Union[Undefined, Vector2Type] = undefined
     instanceId: Union[Undefined, int] = undefined

@@ -932,10 +932,10 @@ class Text(Object3dWithEventBase[TextProps]):
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class LineProps(Object3dBaseProps):
-    points: list[tuple[NumberType, NumberType,
-                       NumberType]] = dataclasses.field(default_factory=list)
+    points: Union[list[tuple[NumberType, NumberType,
+                       NumberType]], np.ndarray] = dataclasses.field(default_factory=list)
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     dashed: Union[bool, Undefined] = undefined
     dashSize: Union[NumberType, Undefined] = undefined
@@ -958,8 +958,8 @@ class Line(Object3dWithEventBase[LineProps]):
         super().__init__(UIType.ThreeLine, LineProps)
         if isinstance(points, np.ndarray):
             assert points.ndim == 2 and points.shape[
-                1] == 3, "must be [N, 3] arrayu"
-            self.props.points = points.tolist()
+                1] == 3 and points.dtype == np.float32, "must be [N, 3] array"
+            self.props.points = points
         else:
             self.props.points = points
 

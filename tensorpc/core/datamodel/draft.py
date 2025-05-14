@@ -296,6 +296,20 @@ def _tensorpc_draft_dispatch(
     else:
         return DraftImmutableScalar(new_obj, userdata, node, new_anno_state)
 
+def _extract_field_meta(anno_type: AnnotatedType, anno_state: _DraftAnnoState):
+    is_external = anno_state.is_external
+    if not is_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_external = annmeta.is_external
+                break
+    is_store_external = anno_state.is_store_external
+    if not is_store_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_store_external = annmeta.is_store_external
+                break
+    return is_external, is_store_external
 
 def _tensorpc_draft_anno_dispatch(
         anno_type: AnnotatedType, node: DraftASTNode, userdata: Any,
@@ -307,18 +321,7 @@ def _tensorpc_draft_anno_dispatch(
     path_metas = prev_anno_state.path_metas.copy()
     if anno_type is not None and anno_type.annometa is not None:
         path_metas = path_metas + [anno_type.annometa]
-    is_external = prev_anno_state.is_external
-    if not is_external and anno_type.annometa is not None:
-        for annmeta in anno_type.annometa:
-            if isinstance(annmeta, DraftFieldMeta):
-                is_external = annmeta.is_external
-                break
-    is_store_external = prev_anno_state.is_store_external
-    if not is_store_external and anno_type.annometa is not None:
-        for annmeta in anno_type.annometa:
-            if isinstance(annmeta, DraftFieldMeta):
-                is_store_external = annmeta.is_store_external
-                break
+    is_external, is_store_external = _extract_field_meta(anno_type, prev_anno_state)
 
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
@@ -397,19 +400,25 @@ class DraftBase:
             opdata: Any,
             drop_last: bool = False,
             addi_nodes: Optional[list[DraftASTNode]] = None,
-            field_id: Optional[int] = None) -> DraftUpdateOp:
+            field_id: Optional[int] = None,
+            field_anno_type: Optional[AnnotatedType] = None) -> DraftUpdateOp:
         node = self._tensorpc_draft_attr_cur_node
         if drop_last:
             node = node.children[0]
         annometa = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
             annometa = self._tensorpc_draft_attr_anno_state.anno_type.annometa
+        is_external = self._tensorpc_draft_attr_anno_state.is_external
+        is_store_external = self._tensorpc_draft_attr_anno_state.is_store_external
+        if field_anno_type is not None:
+            annometa = field_anno_type.annometa
+            is_external, is_store_external = _extract_field_meta(field_anno_type, self._tensorpc_draft_attr_anno_state)
         return DraftUpdateOp(op_type, opdata, node,
                              self._tensorpc_draft_attr_userdata,
                              addi_nodes if addi_nodes is not None else [],
                              annometa, field_id=field_id,
-                             is_external=self._tensorpc_draft_attr_anno_state.is_external,
-                             is_store_external=self._tensorpc_draft_attr_anno_state.is_store_external)
+                             is_external=is_external,
+                             is_store_external=is_store_external)
 
     def _tensorpc_draft_dispatch(
             self,
@@ -557,12 +566,15 @@ class DraftObject(DraftBase):
         # TODO do validate here
         assert not isinstance(value, Undefined), "currently we don't support assign Undefined to dataclass field."
         field_id = None
+        field_anno_type = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
+            field_anno_type = self._tensorpc_draft_attr_obj_fields_dict[name][1]
             field_id = id(self._tensorpc_draft_attr_obj_fields_dict[name][0])
         ctx.add_op(
             self._tensorpc_draft_get_update_op(JMESPathOpType.SetAttr,
                                                {"items": [(name, value)]},
-                                               field_id=field_id))
+                                               field_id=field_id,
+                                               field_anno_type=field_anno_type))
 
 
 def _assert_not_draft(*value: Any):

@@ -79,22 +79,26 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
             raise
         return rpc_message_pb2.SimpleReply(data=json.dumps(meta.to_json()))
 
-    async def RemoteJsonCall(self, request, context):
+    async def RemoteJsonCall(self, request, context: grpc.aio.ServicerContext):
         res = await self.server_core.remote_json_call_async(request)
         return res
 
     async def RemoteCall(self, request, context):
-        res = await self.server_core.remote_call_async(request)
+        rpc_done_ev = asyncio.Event()
+        context.add_done_callback(lambda _ : rpc_done_ev.set())
+        res = await self.server_core.remote_call_async(request, rpc_done_ev)
         return res
 
     async def RemoteGenerator(self, request, context):
         async for res in self.server_core.remote_generator_async(request):
             yield res
 
-    async def ChunkedRemoteCall(self, request_iterator, context):
+    async def ChunkedRemoteCall(self, request_iterator, context: grpc.aio.ServicerContext):
+        rpc_done_ev = asyncio.Event()
+        context.add_done_callback(lambda _ : rpc_done_ev.set())
         try:
             async for res in self.server_core.chunked_remote_call_async(
-                    request_iterator):
+                    request_iterator, rpc_done_ev):
                 yield res
         except:
             traceback.print_exc()

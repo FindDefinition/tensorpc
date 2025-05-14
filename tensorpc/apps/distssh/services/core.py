@@ -22,6 +22,7 @@ from tensorpc.dock import terminal
 import dataclasses
 import uuid
 from tensorpc.utils import get_service_key_by_type, rich_logging
+from tensorpc.utils.json_utils import json_load_from_bytes
 from tensorpc.utils.wait_tools import get_primary_ip 
 from tensorpc.core import BuiltinServiceKeys, marker, prim
 from tensorpc.core.moduleid import import_dynamic_func
@@ -476,9 +477,16 @@ class FaultToleranceSSHServer:
             self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(cmd, exit_ev)), exit_ev)
         return res
 
-    async def set_perf_data(self, step: int, data: list[list[dict]], metadata: list[Any], scale: Optional[float] = None):
+    async def _set_perf_data(self, rpc_done_ev: Optional[asyncio.Event], step: int, data: Union[list[list[dict]], bytes], metadata: list[Any], scale: Optional[float] = None):
+        if rpc_done_ev is not None:
+            await rpc_done_ev.wait()
+        if isinstance(data, bytes):
+            data = json_load_from_bytes(data)
+        return await self._debug_panel.perf_monitor.append_perf_data(step, data, metadata, scale)
+
+    def set_perf_data(self, step: int, data: Union[list[list[dict]], bytes], metadata: list[Any], scale: Optional[float] = None):
         if self._is_master:
-            await self._debug_panel.perf_monitor.append_perf_data(step, data, metadata, scale)
+            asyncio.create_task(self._set_perf_data(prim.get_async_rpc_done_event(), step, data, metadata, scale))
 
     async def cancel_cmd(self):
         if self._cmd_task is not None:

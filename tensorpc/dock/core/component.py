@@ -3231,7 +3231,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._patch_in_remote = False
         self._cur_ts = 0
 
-        self._fastrpc_timeout = 2
+        self._fastrpc_timeout = 5
 
     @property
     def is_remote_mounted(self):
@@ -3563,11 +3563,10 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         prefixes = self._flow_uid.parts
         if comp_uid is not None:
             comp_uid = unpatch_uid(comp_uid, prefixes)
-        print("WTF", file_key, comp_uid, prefixes)
-        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key, comp_uid)
+        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, self._fastrpc_timeout, self._key, file_key, comp_uid)
 
     async def send_remote_comp_event(self, key: str, event: RemoteCompEvent):
-        return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, 1, self._key, key, event)
+        return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, self._fastrpc_timeout, self._key, key, event)
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):

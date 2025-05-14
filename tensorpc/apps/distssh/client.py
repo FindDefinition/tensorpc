@@ -1,13 +1,14 @@
 import contextlib
 import json
 from pathlib import Path
+import sys
 import time
 from typing import Any, Optional, Union
 from tensorpc.apps.collections.shm_kvstore import ShmKVStoreTensorClient, ShmTrOnlyKVStoreTensorClient
 
 from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
 from tensorpc.apps.distssh.typedefs import CheckpointMetadata, CheckpointType
-from tensorpc.core.client import RemoteObject
+from tensorpc.core.client import RemoteObject, simple_chunk_call
 from tensorpc import simple_remote_call
 import os 
 from tensorpc.core import BuiltinServiceKeys
@@ -190,7 +191,6 @@ def is_inside_distssh():
     """
     return _DISTSSH_URL is not None
 
-
 def allgather_set_perf_monitor_data(step: int, data: list[dict], scale: Optional[float] = None, metadata: Any = None):
     url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
     if url_with_port is None:
@@ -208,7 +208,7 @@ def allgather_set_perf_monitor_data(step: int, data: list[dict], scale: Optional
     metadata_list = [x[1] for x in obj_list]
     if global_rank == 0:
         try:
-            simple_remote_call(
+            simple_chunk_call(
                 url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
                 metadata_list, scale
             )

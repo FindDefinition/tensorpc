@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from typing import Optional
 
 from tensorpc.core import serviceunit
 from tensorpc.core.server_core import (get_server_context,
@@ -26,6 +27,9 @@ def get_shutdown_event() -> threading.Event:
 
 def get_async_shutdown_event() -> asyncio.Event:
     return get_server_exposed_props().async_shutdown_event
+
+def get_async_rpc_done_event() -> Optional[asyncio.Event]:
+    return get_server_context().rpc_end_event
 
 def check_is_service_available(service: str):
     su = get_service_units()

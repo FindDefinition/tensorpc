@@ -4,10 +4,10 @@ import copy
 from typing import Annotated, Any, Generic, TypeVar, cast, get_origin
 
 from deepdiff.diff import DeepDiff
-
+import rich 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
+    DraftFieldMeta, DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
@@ -264,6 +264,20 @@ def test_python_code():
     code = DraftASTCompiler(node).compile_draft_ast_to_py_lines()
     print("\n".join(code))
 
+@dataclasses.dataclass
+class ModelWithExternal:
+    a: int
+    b: Annotated[int, DraftFieldMeta(is_external=True)]
+
+def test_external_field():
+    model = ModelWithExternal(1, 2)
+    draft = create_draft_type_only(type(model))
+
+    with capture_draft_update() as ctx:
+        draft.a = 2
+        draft.b = 1
+
+    rich.print(ctx._ops)
 
 if __name__ == "__main__":
     # test_draft(False)
@@ -277,5 +291,7 @@ if __name__ == "__main__":
 
     # test_generic_model()
 
-    test_python_code()
+    # test_python_code()
+
+    test_external_field()
 

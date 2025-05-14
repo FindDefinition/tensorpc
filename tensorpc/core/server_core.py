@@ -65,7 +65,9 @@ class ServerContext(object):
                  exposed_props: _ExposedServerProps,
                  service_key=None,
                  json_call=False,
-                 is_loopback_call: bool = False):
+                 is_loopback_call: bool = False,
+                 rpc_end_event: Optional[asyncio.Event] = None):
+        self.rpc_end_event = rpc_end_event
         self.exposed_props = exposed_props
         self.service_key = service_key
         self.json_call = json_call
@@ -190,8 +192,8 @@ class ServiceCore(object):
         return self.service_units.get_all_service_metas_json()
 
     @contextlib.contextmanager
-    def enter_exec_context(self, service_key=None, json_call=False, is_loopback_call: bool = False):
-        ctx = ServerContext(self._exposed_props, service_key, json_call, is_loopback_call)
+    def enter_exec_context(self, service_key=None, json_call=False, is_loopback_call: bool = False, rpc_end_event: Optional[asyncio.Event] = None):
+        ctx = ServerContext(self._exposed_props, service_key, json_call, is_loopback_call, rpc_end_event)
         assert SERVER_RPC_CONTEXT_VAR is not None
         token = SERVER_RPC_CONTEXT_VAR.set(ctx)
         try:
@@ -238,12 +240,13 @@ class ServiceCore(object):
             args,
             kwargs,
             service_type=serviceunit.ServiceType.Normal,
-            json_call=False):
+            json_call=False,
+            rpc_end_event: Optional[asyncio.Event] = None):
         is_exception = False
         try:
             # no lock here, user must use 'get_exec_lock' to get global lock
             # or create lock by themselves.
-            with self.enter_exec_context(service_key, json_call) as ctx:
+            with self.enter_exec_context(service_key, json_call, rpc_end_event=rpc_end_event) as ctx:
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(
@@ -393,11 +396,11 @@ class ProtobufServiceCore(ServiceCore):
         del res_func
         return res
 
-    async def remote_call_async(self, request: rpc_msg_pb2.RemoteCallRequest):
+    async def remote_call_async(self, request: rpc_msg_pb2.RemoteCallRequest, rpc_end_event: Optional[asyncio.Event] = None):
         self._reset_timeout()
         args, kwargs = self._process_data(request.arrays, request.flags)
         res_func, is_exc = await self.execute_async_service(
-            request.service_key, args, kwargs)
+            request.service_key, args, kwargs, rpc_end_event=rpc_end_event)
         if is_exc:
             return rpc_msg_pb2.RemoteCallReply(exception=res_func)
         res = rpc_msg_pb2.RemoteCallReply(arrays=core_io.data_to_pb(
@@ -702,13 +705,13 @@ class ProtobufServiceCore(ServiceCore):
                                                       flags=flags)
 
     async def chunked_remote_call_async(
-            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream], done_event: Optional[asyncio.Event] = None):
         self._reset_timeout()
         from_stream = core_io.FromBufferStream()
         async for req, (args, kwargs) in from_stream.generator_async(request_iter):
             func_key = req.func_key
             res, is_exc = await self.execute_async_service(
-                func_key, args, kwargs)
+                func_key, args, kwargs, rpc_end_event=done_event)
             if is_exc:
                 # exception
                 yield rpc_msg_pb2.RemoteCallStream(

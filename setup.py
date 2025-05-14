@@ -53,6 +53,7 @@ REQUIRED = [
     "jmespath-community",
     "hsluv",
     "fsspec",
+    "orjson",
 ]
 
 # What packages are optional?
