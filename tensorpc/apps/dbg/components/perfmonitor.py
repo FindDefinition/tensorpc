@@ -261,6 +261,7 @@ class PerfMonitor(mui.FlexBox):
         self._header = header
         self._detail_viewer = mui.JsonViewer()
         self._update_lock = asyncio.Lock()
+        self.max_num_history = 1000
         dm.init_add_layout([
             mui.VBox([
                 mui.HBox([
@@ -386,9 +387,14 @@ class PerfMonitor(mui.FlexBox):
             self.history = self.history[:loc]
             # insert new data
             self.history.append(vis_model)
-            prev_index = self.history_slider.int()
+            max_num_history = self.max_num_history
+            dropped_cnt = 0
+            if len(self.history) > max_num_history:
+                dropped_cnt = len(self.history) - max_num_history
+                self.history = self.history[-max_num_history:]
+            prev_index = self.history_slider.int() - dropped_cnt
 
-            if prev_index < loc - 1:
+            if prev_index + dropped_cnt < loc - 1 and prev_index >= 0:
                 await self.history_slider.update_ranges(0, len(self.history) - 1, value=prev_index)
             else:
                 await self._sync_history_select()
