@@ -18,7 +18,7 @@ import numpy as np
 import tensorpc.core.datamodel as D
 
 from tensorpc.utils.perfetto_colors import perfetto_slice_to_color 
-from tensorpc.apps.dbg.components.perfutils import build_depth_from_trace_events, parse_viztracer_trace_events_to_raw_tree
+from tensorpc.apps.dbg.components.perfutils import build_depth_from_trace_events
 
 @dataclasses.dataclass
 class PerfFieldInfo:
@@ -39,10 +39,12 @@ class VisInfo:
     trs: np.ndarray
     colors: np.ndarray
     scales: np.ndarray
-    polygons: np.ndarray
     info_idxes: np.ndarray
     rank_ids: np.ndarray
     durations: np.ndarray
+
+    # width: float 
+    # height: float 
 
 @dataclasses.dataclass
 class VisModel(VisInfo):
@@ -54,34 +56,13 @@ class VisModel(VisInfo):
     hoverInfoId: Optional[int] = None
     clickInstanceId: Optional[int] = None
     clickClusterPoints: Optional[Any] = None
+    clickClusterAABBSizes: Optional[Any] = None
 
     step: int = -1
     whole_scales: list[float] = dataclasses.field(default_factory=lambda: [1.0, 1.0, 1.0])
     meta_datas: Annotated[list[Any], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
     all_events: Annotated[list[dict], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
-    name_cnt_to_polygons: Annotated[dict[str, np.ndarray], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
-
-def _get_polygons_from_pos_and_scales(trs: np.ndarray, scales: np.ndarray, is_segments: bool = False) -> np.ndarray:
-    """
-    Get the polygons from the positions and scales.
-    :param trs: The positions of the boxes.
-    :param scales: The scales of the boxes.
-    :return: The polygons of the boxes.
-    """
-    x = trs[:, 0]
-    y = trs[:, 1]
-    z = trs[:, 2]
-    sx, sy, sz = scales[:, 0], scales[:, 1], scales[:, 2]
-    p0 = np.stack([x - sx / 2, y - sy / 2, z + 0.01], axis=1)
-    p1 = np.stack([x + sx / 2, y - sy / 2, z + 0.01], axis=1)
-    p2 = np.stack([x + sx / 2, y + sy / 2, z + 0.01], axis=1)
-    p3 = np.stack([x - sx / 2, y + sy / 2, z + 0.01], axis=1)
-    if is_segments:
-        polygons = np.stack([p0, p1, p1, p2, p2, p3, p3, p0], axis=1)
-    else:
-        polygons = np.stack([p0, p1, p2, p3, p0], axis=1)
-    return polygons
-    
+    name_cnt_to_polygons: Annotated[dict[str, tuple[np.ndarray, np.ndarray]], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
 
 def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: float, 
         min_ts: int, depth_padding: float, height: float) -> tuple[VisInfo, Any]:
@@ -126,15 +107,13 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
         indexes_arr = np.array(indexes, dtype=np.int32)
         scales_namecnt = scales_arr[indexes_arr]
         trs_namecnt = trs_arr[indexes_arr]
-        polygons = _get_polygons_from_pos_and_scales(trs_namecnt, scales_namecnt, is_segments=True)
-        name_cnt_to_polygons[cluster_name] = polygons.reshape(-1, 3)
+        name_cnt_to_polygons[cluster_name] = (trs_namecnt, scales_namecnt)
     # print("1.3", time.time() - t)
 
     return VisInfo(
         trs=trs_arr,
-        colors=np.array(colors, dtype=np.float32) / 255,
+        colors=np.array(colors, dtype=np.uint8),
         scales=scales_arr,
-        polygons=_get_polygons_from_pos_and_scales(trs_arr, scales_arr),
         info_idxes=info_idxes_arr,
         rank_ids=np.array([event["rank"] for event in duration_events], dtype=np.int32),
         durations=np.array(event_dur / 1e9, dtype=np.float32),
@@ -147,49 +126,23 @@ class PerfMonitor(mui.FlexBox):
             three.PlaneGeometry(),
             three.MeshBasicMaterial(),
         ]).prop(raycaster="2d_aabb")
-        line = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="red", lineWidth=2)
+        line = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="red", lineWidth=2, variant="aabb")
         line_cond = mui.MatchCase.binary_selection(True, line)
 
         line_start = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="gray", lineWidth=1, dashed=True, dashSize=0.5, gapSize=0.5)
         line_start_cond = mui.MatchCase.binary_selection(True, line_start)
         line_end = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="gray", lineWidth=1, dashed=True, dashSize=0.5, gapSize=0.5)
         line_end_cond = mui.MatchCase.binary_selection(True, line_end)
-        line_select = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="blue", lineWidth=2)
+        line_select = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="blue", lineWidth=2, variant="aabb")
         line_select_cond = mui.MatchCase.binary_selection(True, line_select)
 
-        line_select_samename = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="green", lineWidth=1, opacity=0.7, segments=True)
+        line_select_samename = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="green", lineWidth=1, opacity=0.7, segments=True, variant="aabb")
         line_select_samename_cond = mui.MatchCase.binary_selection(True, line_select_samename)
 
-        # canvas = three.Canvas([
-        #     # three.OrbitControl().prop(makeDefault=True),
-        #     # three.AxesHelper(10),
-        #     three.uikit.Fullscreen([
-        #         three.uikit.Container([
-        #             three.uikit.Content([
-        #                 boxmesh,
-        #                 line_cond,
-        #                 line_start_cond,
-        #                 line_end_cond,
-        #                 # boxmesh_container,
-        #             ]).prop(width="98%", keepAspectRatio=True) # .prop(flexGrow=1, margin=32)
-        #         ]).prop(flexGrow=1, flexShrink=1, flexBasis=0, overflow="scroll", scrollbarWidth=4, scrollbarColor="red"),
-        #     ]).prop(sizeX=8, sizeY=4, flexDirection="row", )
-        # ]).prop(allowKeyboardEvent=False, localClippingEnabled=True)
         self._cam_ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(left="none"))
         canvas = three.Canvas([
-            # cam,
             self._cam_ctrl,
             three.InfiniteGridHelper(5, 50, "gray"),
-            # three.AxesHelper(10),
-            # three.AmbientLight(intensity=3.14),
-            # three.PointLight().prop(position=(13, 3, 5),
-            #                         castShadow=True,
-            #                         color=0xffffff,
-            #                         intensity=500),
-            # three.Mesh([
-            #     three.PlaneGeometry(1000, 1000),
-            #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-            # ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
             three.Group([
                 boxmesh,
                 line_cond,
@@ -201,7 +154,6 @@ class PerfMonitor(mui.FlexBox):
                 three.Group([
                     line_select_samename_cond
                 ]).prop(position=(0, 0, 0.014)),
-
             ]).prop(position=(-17, 17, 1))
         ]).prop(enablePerf=False, allowKeyboardEvent=True, localClippingEnabled=True)
         canvas.prop(cameraProps=three.PerspectiveCameraProps(position=(0, 0, 25)))
@@ -215,13 +167,11 @@ class PerfMonitor(mui.FlexBox):
         dm = mui.DataModel(empty_model, [])
         draft = dm.get_draft()
         dm.install_draft_change_handler(draft.clickInstanceId, self._on_click_instance_id_change)
-        boxmesh.event_move.configure(dont_send_to_backend=True)
         boxmesh.event_move.add_frontend_draft_change(draft, "hoverData", r"{offset: offset, instanceId: instanceId, dur: ndarray_getitem(__TARGET__.durations, not_null(instanceId, `0`)), info: getitem(__TARGET__.infos, ndarray_getitem(__TARGET__.info_idxes, not_null(instanceId, `0`))) }")
-        boxmesh.event_leave.configure(dont_send_to_backend=True)
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "hoverData")
         boxmesh.event_click.on_standard(self._on_click)
 
-        canvas.event_keyboard_hold.configure(dont_send_to_backend=True, key_codes=["KeyW", "KeyS"])
+        canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS"])
 
         canvas.event_keyboard_hold.add_frontend_draft_change(draft.whole_scales, 0, f"clamp(__PREV_VALUE__ + "
             "matchcase_varg(code, 'KeyW', deltaTime * `0.01`, 'KeyS', -deltaTime * `0.01`), "
@@ -238,14 +188,16 @@ class PerfMonitor(mui.FlexBox):
         label_box.bind_fields(top="not_null($.hoverData.offset[1], `0`) + `5`", left="not_null($.hoverData.offset[0], `0`) + `5`")
         label = mui.MatchCase.binary_selection(True, label_box)
         label.bind_fields(condition="$.hoverData != `null`")
-        line.bind_fields(points="ndarray_getitem($.polygons, not_null($.hoverData.instanceId, `0`))", scale="$.whole_scales")
+        line.bind_fields(points="array(ndarray_getitem($.trs, not_null($.hoverData.instanceId, `0`)))", 
+                         aabbSizes="ndarray_getitem($.scales, not_null($.hoverData.instanceId, `0`))", scale="$.whole_scales")
         line_cond.bind_fields(condition="$.hoverData != `null`")
 
-        line_select_samename.bind_fields(points="clickClusterPoints", scale="$.whole_scales")
+        line_select_samename.bind_fields(points="clickClusterPoints", aabbSizes="clickClusterAABBSizes", scale="$.whole_scales")
         line_select_samename_cond.bind_fields(condition="$.clickClusterPoints != `null`")
 
 
-        line_select.bind_fields(points="ndarray_getitem($.polygons, not_null($.clickInstanceId, `0`))", scale="$.whole_scales")
+        line_select.bind_fields(points="array(ndarray_getitem($.trs, not_null(clickInstanceId, `0`)))", 
+                         aabbSizes="ndarray_getitem($.scales, not_null(clickInstanceId, `0`))", scale="$.whole_scales")
         line_select_cond.bind_fields(condition="$.clickInstanceId != `null`")
 
         line_start.bind_fields(points="hoverData.info.left_line", scale="$.whole_scales")
@@ -300,10 +252,9 @@ class PerfMonitor(mui.FlexBox):
         trs_empty = np.zeros((0, 3), dtype=np.float32)
         colors_empty = np.zeros((0, 3), dtype=np.float32)
         scales_empty = np.zeros((0, 3), dtype=np.float32)
-        polygons_empty = np.zeros((0, 5, 3), dtype=np.float32)
         indexes_empty = np.zeros((0,), dtype=np.int32)
         durs_empty = np.zeros((0,), dtype=np.float32)
-        return VisModel(trs_empty, colors_empty, scales_empty, polygons_empty, indexes_empty, 
+        return VisModel(trs_empty, colors_empty, scales_empty, indexes_empty, 
             indexes_empty, durs_empty, 0, [])
 
     async def _on_menu_select(self, value: str):
@@ -321,13 +272,14 @@ class PerfMonitor(mui.FlexBox):
             draft.colors = vis_model.colors 
             draft.scales = vis_model.scales 
             draft.infos = vis_model.infos 
-            draft.polygons = vis_model.polygons
             draft.info_idxes = vis_model.info_idxes 
             draft.rank_ids = vis_model.rank_ids 
             draft.durations = vis_model.durations
             draft.total_duration = vis_model.total_duration
             draft.meta_datas = vis_model.meta_datas
             draft.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
+            draft.clickClusterPoints = None 
+            draft.clickClusterAABBSizes = None
         await self._header.write("")
         await self._detail_viewer.write(None)
 
@@ -336,7 +288,8 @@ class PerfMonitor(mui.FlexBox):
         info_idx = int(self.dm.model.info_idxes[instance_id]) 
         info = self.dm.model.infos[info_idx]
         self.dm.get_draft().clickInstanceId = instance_id 
-        self.dm.get_draft().clickClusterPoints = self.dm.model.name_cnt_to_polygons[info.cluster_name]
+        self.dm.get_draft().clickClusterPoints = self.dm.model.name_cnt_to_polygons[info.cluster_name][0]
+        self.dm.get_draft().clickClusterAABBSizes = self.dm.model.name_cnt_to_polygons[info.cluster_name][1]
 
 
     async def _update_detail(self, instance_id: Optional[int]):
@@ -372,10 +325,10 @@ class PerfMonitor(mui.FlexBox):
         else:
             await self._detail_viewer.write(None)
 
-    async def append_perf_data(self, step: int, data_list_all_rank: list[list[dict]], meta_datas: list[Any], scale: Optional[float] = None):
+    async def append_perf_data(self, step: int, data_list_all_rank: list[list[dict]], meta_datas: list[Any], scale: Optional[float] = None, max_depth: int = 3):
         async with self._update_lock:
             t = time.time()
-            vis_model = await asyncio.get_running_loop().run_in_executor(None, partial(self.perf_data_to_vis_model, user_scale=scale), data_list_all_rank)
+            vis_model = await asyncio.get_running_loop().run_in_executor(None, partial(self.perf_data_to_vis_model, user_scale=scale, max_depth=max_depth), data_list_all_rank)
             # vis_model = self.perf_data_to_vis_model(data_list_all_rank, user_scale=scale)
             print("perf_data_to_vis_model time", time.time() - t)
             # insert step sorted
@@ -420,7 +373,6 @@ class PerfMonitor(mui.FlexBox):
             draft.colors = vis_model.colors 
             draft.scales = vis_model.scales 
             draft.infos = vis_model.infos 
-            draft.polygons = vis_model.polygons
             draft.info_idxes = vis_model.info_idxes 
             draft.rank_ids = vis_model.rank_ids 
             draft.durations = vis_model.durations
@@ -436,10 +388,12 @@ class PerfMonitor(mui.FlexBox):
                 await self._update_detail(prev_click_instance_id)
                 info_idx = int(self.dm.model.info_idxes[prev_click_instance_id]) 
                 info = self.dm.model.infos[info_idx]
-                self.dm.get_draft().clickClusterPoints = vis_model.name_cnt_to_polygons[info.cluster_name]
+                self.dm.get_draft().clickClusterPoints = vis_model.name_cnt_to_polygons[info.cluster_name][0]
+                self.dm.get_draft().clickClusterAABBSizes = vis_model.name_cnt_to_polygons[info.cluster_name][1]
             else:
                 draft.clickInstanceId = None
                 draft.clickClusterPoints = None
+                draft.clickClusterAABBSizes = None
 
     def perf_data_to_vis_model(self, data_list_all_rank: list[list[dict]], max_length: float = 35, depth_padding: float = 0.02, 
             height: float = 0.5, user_scale: Optional[float] = None, max_depth: int = 3):
@@ -521,7 +475,6 @@ class PerfMonitor(mui.FlexBox):
             trs=vis_info.trs,
             colors=vis_info.colors,
             scales=vis_info.scales,
-            polygons=vis_info.polygons,
             info_idxes=vis_info.info_idxes,
             rank_ids=vis_info.rank_ids,
             durations=vis_info.durations,
