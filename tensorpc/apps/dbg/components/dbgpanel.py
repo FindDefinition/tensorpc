@@ -349,7 +349,7 @@ class MasterDebugPanel(mui.FlexBox):
         self.dm.install_draft_change_handler(draft.infos, self._handle_infos_change)
         self.dm.install_draft_change_handler(draft.cur_mounted_info_uid, self._handle_cur_mounted_info_change)
         self.dm.debug_print_draft_change(draft.cur_mounted_info_uid)
-        self.path_breadcrumb.bind_fields(value=D.where(draft.cur_mounted_info_uid != None, D.create_array("root", draft.cur_mounted_info_uid), ["root"]))
+        self.path_breadcrumb.bind_fields(value=D.where(draft.cur_mounted_info_uid != None, D.array("root", draft.cur_mounted_info_uid), ["root"]))
         self.path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
         self._remote_lst_container.bind_fields(condition=draft.cur_mounted_info_uid == None)
 

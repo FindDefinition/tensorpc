@@ -266,6 +266,9 @@ class AnnotatedType:
     def is_any_type(self) -> bool:
         return self.origin_type is Any
 
+    def is_tuple_type(self) -> bool:
+        return self.origin_type is tuple or self.origin_type is Tuple
+
     def is_union_type(self) -> bool:
         return origin_is_union(self.origin_type)
 

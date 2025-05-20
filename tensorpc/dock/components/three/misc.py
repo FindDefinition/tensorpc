@@ -947,7 +947,9 @@ class LineProps(Object3dBaseProps):
     transparent: Union[bool, Undefined] = undefined
     opacity: Annotated[Union[NumberType, Undefined],
                        typemetas.CommonObject(default=1.0)] = undefined
-
+    variant: Union[Literal["default", "aabb"], Undefined] = undefined
+    aabbSizes: Union[list[tuple[NumberType, NumberType,
+                       NumberType]], np.ndarray, Undefined] = undefined
 
 class Line(Object3dWithEventBase[LineProps]):
 
@@ -1121,35 +1123,6 @@ class Outlines(ThreeComponentBase[OutlinesProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-# @dataclasses.dataclass
-# class HudProps(ThreeFlexProps):
-#     renderPriority: Union[int, Undefined] = undefined
-
-
-# class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
-#     # TODO can/should group accept event?
-#     def __init__(self, children: dict[str, ThreeComponentType]) -> None:
-#         super().__init__(UIType.ThreeHud, HudProps, children)
-
-#     @property
-#     def prop(self):
-#         propcls = self.propcls
-#         return self._prop_base(propcls, self)
-
-#     @property
-#     def update_event(self):
-#         propcls = self.propcls
-#         return self._update_props_base(propcls)
-"""
-        splitStrategy?: "CENTER" | "AVERAGE" | "SAH"
-        verbose?: boolean
-        setBoundingBox?: boolean
-        maxDepth?: number
-        maxLeafTris?: number
-        indirect?: boolean
-
-
-"""
 @dataclasses.dataclass
 class BvhProps(ContainerBaseProps):
     splitStrategy: Union[Literal["CENTER", "AVERAGE", "SAH"], Undefined] = undefined

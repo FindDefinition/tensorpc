@@ -1142,7 +1142,7 @@ class SSHClient:
         bash_file_path = determine_hook_path_by_shell_info(shell_type)
         if InWindows:
             # remove CRLF
-            with open(bash_file_path, "r") as f:
+            with open(bash_file_path, "r", encoding="utf-8") as f:
                 content = f.readlines()
             await conn.run(f'cat > ~/.tensorpc_hooks-bash{bash_file_path.suffix}',
                             input="\n".join(content))

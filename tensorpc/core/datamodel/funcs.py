@@ -68,8 +68,8 @@ def not_null(*args: Any):
 def where(cond: Any, x: Any, y: Any, return_type: Optional[Any] = None):
     return _simple_expr_func_with_any_res("where", cond, x, y, return_type=return_type)
 
-def create_array(*args: Any):
-    return cast(list[Any], _simple_expr_func_with_any_res("create_array", *args, return_type=list[Any]))
+def array(*args: Any):
+    return cast(list[Any], _simple_expr_func_with_any_res("array", *args, return_type=list[Any]))
 
 def _logical_op(a: Any, b: Any, op: Literal["&&", "||"]) -> bool:
     assert isinstance(a, DraftBase) and isinstance(b, DraftBase), "logical_and should be used with Draft objects"

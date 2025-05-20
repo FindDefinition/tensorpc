@@ -35,9 +35,7 @@ class App:
         dm = mui.DataModel(DataModel(None, np.random.uniform(0, 1, size=[100])), [])
         draft = dm.get_draft()
         jv = mui.JsonViewer()
-        boxmesh.event_move.configure(dont_send_to_backend=True)
         boxmesh.event_move.add_frontend_draft_change(draft, "data")
-        boxmesh.event_leave.configure(dont_send_to_backend=True)
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "data")
         label_box = mui.VBox([
             mui.JsonViewer().bind_fields(data="$.data.pointer"),

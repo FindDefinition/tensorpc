@@ -69,8 +69,8 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.FlowPaneContextMenu.value,
     FrontendEventType.FlowNodeLogicChange.value, 
     FrontendEventType.FlowVisChange.value, 
-
-    
+    FrontendEventType.HudGroupLayoutChange.value, 
+    FrontendEventType.MeshPoseChange.value, 
 
 ])
 

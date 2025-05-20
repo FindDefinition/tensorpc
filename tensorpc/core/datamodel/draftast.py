@@ -29,7 +29,7 @@ class DraftASTFuncType(enum.Enum):
     GET_ITEM_PATH = "getitem_path"
     NOT_NULL = "not_null"
     WHERE = "where"
-    CREATE_ARRAY = "create_array"
+    CREATE_ARRAY = "array"
     CONCAT = "concat"
     COLOR_SLICE = "colorFromSlice"
     COLOR_NAME = "colorFromName"
@@ -239,7 +239,7 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
             y = evaluate_draft_ast(
                 node.children[2], obj)
             return x if cond else y
-        elif node.value == "create_array":
+        elif node.value == "array":
             return [evaluate_draft_ast(child, obj) for child in node.children]
         elif node.value == "concat":
             return sum([evaluate_draft_ast(child, obj) for child in node.children], [])
@@ -332,7 +332,7 @@ class DraftASTCompiler:
                 x = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
                 y = self._compile_draft_ast_to_py_expr(node.children[2], first_pass)
                 res =  f"({x} if {cond} else {y})"
-            elif node.value == "create_array":
+            elif node.value == "array":
                 res =  f"[{','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}]"
             elif node.value == "concat":
                 res =  f"sum({','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}, [])"
@@ -485,7 +485,7 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
             y = evaluate_draft_ast(
                 node.children[2], obj)
             return x if cond else y, []
-        elif node.value == "create_array":
+        elif node.value == "array":
             return [evaluate_draft_ast(child, obj) for child in node.children], []
         elif node.value == "concat":
             return sum([evaluate_draft_ast(child, obj) for child in node.children], []), []
@@ -575,7 +575,7 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
             y = evaluate_draft_ast_json(
                 node.children[2], obj)
             return x if cond else y
-        elif node.value == "create_array":
+        elif node.value == "array":
             return [evaluate_draft_ast(child, obj) for child in node.children]
         elif node.value == "concat":
             return sum([evaluate_draft_ast_json(child, obj) for child in node.children], [])

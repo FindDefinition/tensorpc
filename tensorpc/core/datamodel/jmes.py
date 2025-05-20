@@ -110,6 +110,11 @@ class _JMESCustomFunctions(functions.Functions):
     def _func_clamp(self, x, a, b):
         return max(a, min(x, b))
 
+    @functions.signature({'types': [], 'variadic': True})
+    def _func_console_log(self, x):
+        print(*x)
+        return x[0]
+
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 

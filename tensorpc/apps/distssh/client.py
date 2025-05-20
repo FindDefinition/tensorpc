@@ -191,31 +191,6 @@ def is_inside_distssh():
     """
     return _DISTSSH_URL is not None
 
-def allgather_set_perf_monitor_data(step: int, data: list[dict], scale: Optional[float] = None, metadata: Any = None):
-    url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
-    if url_with_port is None:
-        return False
-    import torch.distributed as dist
-    if not dist.is_initialized():
-        raise RuntimeError(
-            "You must use pth_control_point inside a pytorch distributed process group."
-        )
-    global_rank = dist.get_rank()
-    world_size = dist.get_world_size()
-    obj_list = [(data, metadata)] * world_size
-    dist.all_gather_object(obj_list, (data, metadata))
-    data_list = [x[0] for x in obj_list]
-    metadata_list = [x[1] for x in obj_list]
-    if global_rank == 0:
-        try:
-            simple_chunk_call(
-                url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
-                metadata_list, scale
-            )
-        except:
-            traceback.print_exc()
-            return 
-
 
 class PerfMonitorClient:
     def __init__(self):
@@ -271,9 +246,34 @@ class PerfMonitorClient:
         if enable:
             if metadata is not None:
                 json.dumps(metadata) # validate metadata (must be a json serializable object)
-            allgather_set_perf_monitor_data(step, self._buffer, scale, metadata)
+            self.allgather_set_perf_monitor_data(step, self._buffer, scale, metadata)
         self._buffer = []
         self._cur_ts = time.time_ns()
         # self._base_ts = time.time_ns()
         self._base_ts = 0
         return
+
+    def allgather_set_perf_monitor_data(self, step: int, data: list[dict], scale: Optional[float] = None, metadata: Any = None):
+        url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+        if url_with_port is None:
+            return False
+        import torch.distributed as dist
+        if not dist.is_initialized():
+            raise RuntimeError(
+                "You must use pth_control_point inside a pytorch distributed process group."
+            )
+        global_rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        obj_list = [(data, metadata)] * world_size
+        dist.all_gather_object(obj_list, (data, metadata))
+        data_list = [x[0] for x in obj_list]
+        metadata_list = [x[1] for x in obj_list]
+        if global_rank == 0:
+            try:
+                simple_chunk_call(
+                    url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
+                    metadata_list, scale
+                )
+            except:
+                traceback.print_exc()
+                return 

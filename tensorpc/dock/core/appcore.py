@@ -110,7 +110,6 @@ class EventHandlers:
                  debounce: Optional[NumberType] = None,
                  backend_only: bool = False,
                  simple_event: bool = True,
-                 dont_send_to_backend: bool = False,
                  update_ops: Optional[list[Any]] = None,
                  key_codes: Optional[list[str]] = None) -> None:
 
@@ -120,7 +119,6 @@ class EventHandlers:
         self.throttle = throttle
         self.backend_only = backend_only
         self.simple_event = simple_event
-        self.dont_send_to_backend = dont_send_to_backend
         if update_ops is None:
             update_ops = []
         self.update_ops = update_ops
@@ -134,8 +132,10 @@ class EventHandlers:
             res["debounce"] = self.debounce
         if self.throttle is not None:
             res["throttle"] = self.throttle
-        if self.dont_send_to_backend:
+        if len(self.handlers) == 0:
             res["dontSendToBackend"] = True
+        else:
+            res["dontSendToBackend"] = False
         if self.update_ops:
             res["jmesUpdateOps"] = as_dict_no_undefined(self.update_ops)
         if self.key_codes:

@@ -227,8 +227,8 @@ class ComputeFlow(mui.FlexBox):
 
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
-        flow_with_editor.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_editor})")
-        global_container.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_detail})")
+        flow_with_editor.bind_fields(visibles=f"array(`true`, {flow_draft.show_editor})")
+        global_container.bind_fields(visibles=f"array(`true`, {flow_draft.show_detail})")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
         node_settings.bind_draft_change_uncontrolled(flow_draft.selected_node.vExecId)
         self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))

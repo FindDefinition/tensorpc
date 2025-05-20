@@ -12,34 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import base64
 import enum
-import io
-import json
-import time
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Sequence, Tuple, Type, TypeVar, Union)
-import urllib.request
-
-from pydantic import field_validator
-from tensorpc import compat
-from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
-from tensorpc.dock.components.three.event import KeyboardHoldEvent, PointerEvent, PointerMissedEvent
+from tensorpc.dock.components.three.event import HudLayoutChangeEvent, KeyboardHoldEvent, PointerEvent, PointerMissedEvent, PoseChangeEvent, ViewportChangeEvent
 from tensorpc.dock.core.appcore import Event, EventDataType
-from tensorpc.dock.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
-from tensorpc.core.datamodel.asdict import DataClassWithUndefined
 from typing_extensions import Literal
-from tensorpc.dock.core import colors
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 import numpy as np
 from typing_extensions import ParamSpec, TypeAlias, Annotated
 
-from tensorpc.dock.core.uitypes import ALL_KEY_CODES
-from tensorpc.utils.uniquename import UniqueNamePool
 from ....core.datamodel.typemetas import RangedFloat, RangedInt, Vector3Type, NumberType, ValueType
-from ...core.component import (AppEvent, AppEventType, BasicProps, Component,
+from ...core.component import (BasicProps, Component,
                     ContainerBase, ContainerBaseProps, EventHandler, MatchCase,
                     SimpleEventType, Fragment, FrontendEventType,
                     T_base_props, T_child, T_container_props, TaskLoopEvent,
@@ -365,7 +350,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                              FrontendEventType.Move.value,
                              FrontendEventType.Missed.value,
                              FrontendEventType.ContextMenu.value,
-                             FrontendEventType.Change.value,
+                             FrontendEventType.Wheel.value,
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot_noarg(
             FrontendEventType.DoubleClick, lambda x: PointerEvent(**x))
@@ -378,9 +363,10 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         self.event_down = self._create_event_slot(FrontendEventType.Down, lambda x: PointerEvent(**x))
         self.event_move = self._create_event_slot(FrontendEventType.Move, lambda x: PointerEvent(**x))
         self.event_missed = self._create_event_slot(FrontendEventType.Missed, lambda x: PointerMissedEvent(**x))
+        self.event_wheel = self._create_event_slot(FrontendEventType.Wheel, lambda x: PointerEvent(**x))
+
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
@@ -473,6 +459,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                              FrontendEventType.Move.value,
                              FrontendEventType.Missed.value,
                              FrontendEventType.ContextMenu.value,
+                             FrontendEventType.Wheel.value,
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot_noarg(
             FrontendEventType.DoubleClick, lambda x: PointerEvent(**x))
@@ -487,6 +474,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
         self.event_missed = self._create_event_slot(FrontendEventType.Missed, lambda x: PointerMissedEvent(**x))
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
+        self.event_wheel = self._create_event_slot(FrontendEventType.Wheel, lambda x: PointerEvent(**x))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
@@ -546,12 +534,15 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentTypeForCanvas]):
                          allowed_events=[
                              FrontendEventType.ContextMenuSelect.value,
                              FrontendEventType.KeyHold.value,
+                             FrontendEventType.CanvasViewportChange.value,
                          ])
         self.props.threeBackgroundColor = background
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenuSelect)
         self.event_keyboard_hold = self._create_event_slot(
             FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
+        self.event_viewport_change = self._create_event_slot(
+            FrontendEventType.CanvasViewportChange, lambda x: ViewportChangeEvent(**x))
 
     @property
     def prop(self):
@@ -678,7 +669,6 @@ class GroupProps(Object3dContainerBaseProps):
     variant: Union[Literal["default", "faceToCamera", "relativeToCamera"],
                    Undefined] = undefined
 
-
 class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(
@@ -699,6 +689,68 @@ class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class HudGroupProps(Object3dContainerBaseProps):
+    userData: Union[Any, Undefined] = undefined
+    # auto (keep aspect ratio, width) by default.
+    alignContent: Union[Literal["auto", "width", "height", "stretch"], bool, Undefined] = undefined
+    # fully controlled content width/height in three unit.
+    # we won't measure the content size because
+    # it's impossible to trigger re-measure when child
+    # size changed.
+    childWidth: Union[NumberType, Undefined] = undefined
+    childHeight: Union[NumberType, Undefined] = undefined
+    childWidthScale: Union[NumberType, Undefined] = undefined
+    childHeightScale: Union[NumberType, Undefined] = undefined
+
+    # uv sign. default: 1, -1
+    xSign: Union[NumberType, Undefined] = undefined
+    ySign: Union[NumberType, Undefined] = undefined
+    # pixel or percent, not threejs units
+    top: Union[ValueType, Undefined] = undefined
+    left: Union[ValueType, Undefined] = undefined
+    right: Union[ValueType, Undefined] = undefined
+    bottom: Union[ValueType, Undefined] = undefined
+    padding: Union[ValueType, Undefined] = undefined
+    width: Union[ValueType, Undefined] = undefined
+    height: Union[ValueType, Undefined] = undefined
+    borderColor: Union[ValueType, Undefined] = undefined
+    borderRadius: Union[NumberType, Undefined] = undefined
+    borderWidth: Union[NumberType, Undefined] = undefined
+    # fully controlled scroll values (unified, 0-1), used to implement 
+    # scroll bar via DataModel.
+    scrollValueX: Union[NumberType, Undefined] = undefined
+    scrollValueY: Union[NumberType, Undefined] = undefined
+    alwaysPortal: Union[bool, Undefined] = undefined
+
+class HudGroup(O3dContainerWithEventBase[HudGroupProps, ThreeComponentType]):
+    """Group that used in HUD (must be child of camera)
+    support pixel or percent position (top/left/right/bottom), width/height and padding.
+
+    don't support flex layout, only absolute layout. all elements inside this group
+    should located in z = 0 plane.
+    """
+    def __init__(
+        self, children: Union[Dict[str, ThreeComponentType],
+                              List[ThreeComponentType]]
+    ) -> None:
+        if isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeHudGroup, HudGroupProps, children, allowed_events=[
+            FrontendEventType.HudGroupLayoutChange.value,
+        ])
+        self.event_hud_layout_change = self._create_event_slot(
+            FrontendEventType.HudGroupLayoutChange, lambda x: HudLayoutChangeEvent(**x))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 # @dataclasses.dataclass
 # class MeshUserData:
@@ -753,9 +805,9 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
                          PrimitiveMeshProps,
                          children,
                          allowed_events=[
-                             FrontendEventType.Change.value,
+                             FrontendEventType.MeshPoseChange.value,
                          ])
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        self.event_pose_change = self._create_event_slot(FrontendEventType.MeshPoseChange, lambda x: PoseChangeEvent(**x))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self,

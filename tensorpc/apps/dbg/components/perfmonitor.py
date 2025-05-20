@@ -16,7 +16,9 @@ from typing import Any, Optional
 from typing_extensions import Annotated
 import numpy as np
 import tensorpc.core.datamodel as D
+from tensorpc.core.datamodel.pfl.pfl_std import Math, MathUtil
 
+from tensorpc.dock.components.three.event import HudLayoutChangeEvent, KeyboardHoldEvent, PointerEvent, ViewportChangeEvent
 from tensorpc.utils.perfetto_colors import perfetto_slice_to_color 
 from tensorpc.apps.dbg.components.perfutils import build_depth_from_trace_events
 
@@ -42,9 +44,17 @@ class VisInfo:
     info_idxes: np.ndarray
     rank_ids: np.ndarray
     durations: np.ndarray
+    width: float 
+    height: float 
+    minWidth: float
 
-    # width: float 
-    # height: float 
+@dataclasses.dataclass
+class SimpleLayout:
+    scrollFactorX: three.NumberType = 1.0
+    scrollFactorY: three.NumberType = 1.0
+    innerSizeX: three.NumberType = 1.0
+    innerSizeY: three.NumberType = 1.0
+
 
 @dataclasses.dataclass
 class VisModel(VisInfo):
@@ -57,12 +67,78 @@ class VisModel(VisInfo):
     clickInstanceId: Optional[int] = None
     clickClusterPoints: Optional[Any] = None
     clickClusterAABBSizes: Optional[Any] = None
-
+    viewport: Optional[ViewportChangeEvent] = None
+    scaleYGlobal: float = 1.0
     step: int = -1
-    whole_scales: list[float] = dataclasses.field(default_factory=lambda: [1.0, 1.0, 1.0])
+    scaleX: float = 1.0
+    scaleY: float = 20.0
+    layout: SimpleLayout = dataclasses.field(default_factory=SimpleLayout)
+    scrollValueX: float = 0.0
+    scrollValueY: float = 0.0
+    debug: Any = None
+    perfHover: Optional[PointerEvent] = None
+
     meta_datas: Annotated[list[Any], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
     all_events: Annotated[list[dict], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=list)
     name_cnt_to_polygons: Annotated[dict[str, tuple[np.ndarray, np.ndarray]], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
+    @staticmethod
+    def bind_scale_xy(comp: mui.Component):
+        comp.bind_fields_unchecked_dict({
+            "scale-x": "scaleX",
+            "scale-y": "scaleY",
+        })
+        return comp
+
+def _keyhold_handler_dfdsl(root: VisModel, data: KeyboardHoldEvent):
+    """This function will be compiled to javascript in frontend. so we only support limited python syntax/method.
+    """
+    if root.perfHover is not None:
+        prev = root.scaleX
+        prev_scroll_value = root.scrollValueX
+        dx = 0.0
+        is_scale = data.code == "KeyW" or data.code == "KeyS"
+        if data.code == "KeyW":
+            dx = data.deltaTime * 0.002 * root.scaleX
+        elif data.code == "KeyS":
+            dx = -data.deltaTime * 0.002 * root.scaleX
+        elif data.code == "KeyA":
+            dx = -data.deltaTime * 0.002 / root.scaleX
+        elif data.code == "KeyD":
+            dx = data.deltaTime * 0.002 / root.scaleX
+        if is_scale:
+            new_scale = MathUtil.clamp(dx + prev, 1.0, 100.0)
+            real_dx = new_scale - prev
+            root.scaleX = new_scale
+            # scaledWidth = (innerWidth * scaleX)
+            # offset_view_inner = offset / width * (innerWidth * scaleX) - scrollValueX * ((innerWidth * scaleX) - innerWidth)
+            # new_offset_view_inner = offset / width * (innerWidth * (scaleX + dX)) - scrollValueX * ((innerWidth * (scaleX + dX)) - innerWidth)
+
+            # offset_view_inner = offset / width * scaleX - scrollValueX * (scaleX - 1)
+            # new_offset_view_inner = offset / width * (scaleX + dX) - newScrollValueX * (scaleX + dX - 1)
+
+
+            # offset_view_inner = offset / width 
+            # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
+
+            # offset_view_inner = 0
+            # new_offset_view_inner = offset / width * dX - newScrollValueX * dX
+
+            # offset_view_inner = offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1)
+            # new_offset_view_inner = offset / width * scaleX - newScrollValueX * (scaleX - 1)
+
+            # offset_view_inner = offset / width
+            # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
+
+            # offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1) == offset / width * (scaleX) - newScrollValueX * (scaleX - 1)
+            # -offset / width * dX - scrollValueX * (scaleX - dX - 1) == -newScrollValueX * (scaleX - 1)
+
+            # newScrollValueX = (offset / width * dX + scrollValueX * (scaleX - dX - 1)) / (scaleX - 1)
+            # newScrollValueX = (offset / width + scrollValueX) * dX / (scaleX - 1) + scrollValueX
+
+            root.scrollValueX = MathUtil.clamp((root.perfHover.pointLocal[0] + 0.5 - prev_scroll_value) * real_dx / Math.max(prev - 1.0, 1e-6) + prev_scroll_value, 0.0, 1.0)
+        else:
+            root.scrollValueX = MathUtil.clamp(prev_scroll_value + dx, 0.0, 1.0)
+
 
 def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: float, 
         min_ts: int, depth_padding: float, height: float) -> tuple[VisInfo, Any]:
@@ -84,6 +160,12 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
     y_arr = depth_padding + (event_depth - 0.5) * (height + depth_padding) - 1.5 * depth_padding
     trs_arr = np.stack([x_arr, -y_arr, np.zeros_like(x_arr)], axis=1)
     scales_arr = np.stack([event_dur * dur_scale, height * np.ones_like(event_dur), np.ones_like(event_dur)], axis=1)
+    
+    width = float((x_arr + scales_arr[:, 0] / 2).max())
+    height = float((y_arr + scales_arr[:, 1] / 2).max())
+    block_min_width = scales_arr[:, 0].min()
+    trs_arr[:, 0] -= width / 2
+    trs_arr[:, 1] += height / 2
     info_idxes_arr = np.array([ev["field_idx"] for ev in duration_events], dtype=np.int32)
     perfetto_slice_cache: dict[str, Any] = {}
     # print("1.1", time.time() - t, len(duration_events))
@@ -117,6 +199,9 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
         info_idxes=info_idxes_arr,
         rank_ids=np.array([event["rank"] for event in duration_events], dtype=np.int32),
         durations=np.array(event_dur / 1e9, dtype=np.float32),
+        width=width,
+        height=height,
+        minWidth=block_min_width,
     ), name_cnt_to_polygons
 
 class PerfMonitor(mui.FlexBox):
@@ -140,23 +225,75 @@ class PerfMonitor(mui.FlexBox):
         line_select_samename_cond = mui.MatchCase.binary_selection(True, line_select_samename)
 
         self._cam_ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(left="none"))
-        canvas = three.Canvas([
-            self._cam_ctrl,
-            three.InfiniteGridHelper(5, 50, "gray"),
+
+        perf_event_plane = three.Mesh([
+            three.PlaneGeometry(1.0, 1000.0),
+            three.MeshBasicMaterial().prop(transparent=True, opacity=0.0),
+        ]).prop(position=(0, 0, -0.2))
+        perf_group = three.Group([
+            boxmesh,
+            line_cond,
+            line_start_cond,
+            line_end_cond,
             three.Group([
-                boxmesh,
-                line_cond,
-                line_start_cond,
-                line_end_cond,
-                three.Group([
-                    line_select_cond
-                ]).prop(position=(0, 0, 0.015)),
-                three.Group([
-                    line_select_samename_cond
-                ]).prop(position=(0, 0, 0.014)),
-            ]).prop(position=(-17, 17, 1))
-        ]).prop(enablePerf=False, allowKeyboardEvent=True, localClippingEnabled=True)
-        canvas.prop(cameraProps=three.PerspectiveCameraProps(position=(0, 0, 25)))
+                line_select_cond
+            ]).prop(position=(0, 0, 0.015)),
+            three.Group([
+                line_select_samename_cond
+            ]).prop(position=(0, 0, 0.014)),
+            perf_event_plane,
+        ])
+        viewport_group = three.HudGroup([
+            perf_group
+        ]).prop(top=0, left=0, padding=2, width="calc(100% - 15px)", height="calc(100% - 15px)", alignContent=False, alwaysPortal=True)
+        # viewport_group.event_hud_layout_change.on(lambda ev: print(ev))
+        scrollbar_event_plane = three.Mesh([
+            three.PlaneGeometry(1.0, 1.0),
+            three.MeshBasicMaterial().prop(color="white"),
+        ])
+
+        scrollbar = three.Mesh([
+            three.PlaneGeometry(1, 1),
+            three.MeshBasicMaterial().prop(color="orange"),
+        ])
+        # scrollbar.event_pose_change.on(lambda ev: print(ev)).configure(debounce=300)
+        scrollbar_group = three.HudGroup([
+            scrollbar
+        ]).prop(top=0, right=0, padding=2, width="15px", height="calc(100% - 15px)", borderColor="gray", borderWidth=1, childWidth=1, childHeight=1, alignContent="stretch")
+        scrollbar_bottom = three.Mesh([
+            three.PlaneGeometry(1, 1),
+            three.MeshBasicMaterial().prop(color="orange"),
+        ])
+        scrollbar_bottom_group = three.HudGroup([
+            scrollbar_bottom
+        ]).prop(bottom=0, left=0, padding=2, width="100%", height="15px", borderColor="gray", borderWidth=1, childWidth=1, childHeight=1, alignContent="stretch")
+
+        scrollbar_plane_group = three.HudGroup([
+            scrollbar_event_plane
+        ]).prop(top=0, left=0, width="100%", height="100%", childWidth=1, childHeight=1, position=(0, 0, -2), alignContent="stretch")
+
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000, children=[
+            viewport_group,  
+            # boxmeshX,
+            scrollbar_group,
+            scrollbar_bottom_group,
+        ]).prop(position=(0, 0, 10))
+
+        cam = three.OrthographicCamera(near=0.1, far=1000, children=[
+            viewport_group,  
+            # boxmeshX,
+            scrollbar_group,
+            scrollbar_plane_group,
+            scrollbar_bottom_group,
+
+        ]).prop(position=(0, 0, 10))
+
+        canvas = three.Canvas([
+            # self._cam_ctrl,
+            three.InfiniteGridHelper(5, 50, "gray"),
+            cam.prop(makeDefault=True),
+        ]).prop(enablePerf=False, allowKeyboardEvent=True)
+
         canvas.prop(menuItems=[
             mui.MenuItem("reset", "reset"),
             mui.MenuItem("clear", "clear"),
@@ -170,14 +307,25 @@ class PerfMonitor(mui.FlexBox):
         boxmesh.event_move.add_frontend_draft_change(draft, "hoverData", r"{offset: offset, instanceId: instanceId, dur: ndarray_getitem(__TARGET__.durations, not_null(instanceId, `0`)), info: getitem(__TARGET__.infos, ndarray_getitem(__TARGET__.info_idxes, not_null(instanceId, `0`))) }")
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "hoverData")
         boxmesh.event_click.on_standard(self._on_click)
+        perf_event_plane.bind_fields_unchecked_dict({
+            "scale-x": "width",
+            "scale-y": "height",
+        })
+        perf_event_plane.event_move.add_frontend_draft_change(draft, "perfHover")
+        perf_event_plane.event_leave.add_frontend_draft_set_none(draft, "perfHover")
 
-        canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS"])
+        viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
+        scrollbar_event_plane.event_wheel.add_frontend_draft_change(draft, "scrollValueY", f"clamp(__PREV_VALUE__ + wheel.deltaY * `0.001`, `0`, `1`)")
+        # scrollbar_event_plane.event_wheel.on(lambda e: print(e)).configure(debounce=300)
+        scrollbar.event_pose_change.add_frontend_draft_change(draft, "scrollValueY", f"clamp(-positionLocal[1] / maximum(`1` - __TARGET__.layout.scrollFactorY, `0.0001`) + `0.5`, `0`, `1`)")
+        scrollbar_bottom.event_pose_change.add_frontend_draft_change(draft, "scrollValueX", f"clamp(positionLocal[0] / maximum(`1` - __TARGET__.layout.scrollFactorX, `0.0001`) + `0.5`, `0`, `1`)")
 
-        canvas.event_keyboard_hold.add_frontend_draft_change(draft.whole_scales, 0, f"clamp(__PREV_VALUE__ + "
-            "matchcase_varg(code, 'KeyW', deltaTime * `0.01`, 'KeyS', -deltaTime * `0.01`), "
-            "`1.0`, `10.0`)")
+        canvas.event_viewport_change.add_frontend_draft_change(draft, "viewport")
 
-        boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales", scale="$.whole_scales")
+        canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD"])
+        canvas.event_keyboard_hold.add_frontend_handler(_keyhold_handler_dfdsl)
+        boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales")
+        # VisModel.bind_scale_xy(perf_group)
         # devmesh.bind_fields(scale="$.whole_scales")
         label_box = mui.VBox([
             mui.Typography("")
@@ -189,20 +337,37 @@ class PerfMonitor(mui.FlexBox):
         label = mui.MatchCase.binary_selection(True, label_box)
         label.bind_fields(condition="$.hoverData != `null`")
         line.bind_fields(points="array(ndarray_getitem($.trs, not_null($.hoverData.instanceId, `0`)))", 
-                         aabbSizes="ndarray_getitem($.scales, not_null($.hoverData.instanceId, `0`))", scale="$.whole_scales")
+                         aabbSizes="ndarray_getitem($.scales, not_null($.hoverData.instanceId, `0`))")
+        viewport_group.bind_fields(childWidthScale="scaleX", childHeight=f"height * scaleY", scrollValueY="scrollValueY", scrollValueX="scrollValueX")
+        # scrollbar_group.bind_fields(childHeight=f"not_null(layout.scrollFactorY, `1`)")
+        scrollbar.bind_fields_unchecked_dict({
+            "position-y": "-(scrollValueY - `0.5`) * (`1` - layout.scrollFactorY)",
+            "scale-y": "layout.scrollFactorY",
+        })
+        scrollbar_bottom.bind_fields_unchecked_dict({
+            "position-x": "(scrollValueX - `0.5`) * (`1` - layout.scrollFactorX)",
+            "scale-x": "layout.scrollFactorX",
+        })
+
+        perf_group.bind_fields_unchecked_dict({
+            "scale-x": "scaleX * layout.innerSizeX / (where(width == `0`, layout.innerSizeX, width))",
+            "scale-y": "scaleY",
+        })
         line_cond.bind_fields(condition="$.hoverData != `null`")
 
-        line_select_samename.bind_fields(points="clickClusterPoints", aabbSizes="clickClusterAABBSizes", scale="$.whole_scales")
+        line_select_samename.bind_fields(points="clickClusterPoints", aabbSizes="clickClusterAABBSizes")
         line_select_samename_cond.bind_fields(condition="$.clickClusterPoints != `null`")
 
 
         line_select.bind_fields(points="array(ndarray_getitem($.trs, not_null(clickInstanceId, `0`)))", 
-                         aabbSizes="ndarray_getitem($.scales, not_null(clickInstanceId, `0`))", scale="$.whole_scales")
+                         aabbSizes="ndarray_getitem($.scales, not_null(clickInstanceId, `0`))")
         line_select_cond.bind_fields(condition="$.clickInstanceId != `null`")
 
-        line_start.bind_fields(points="hoverData.info.left_line", scale="$.whole_scales")
+        line_start.bind_fields(points="hoverData.info.left_line")
+
         line_start_cond.bind_fields(condition="$.hoverData != `null`")
-        line_end.bind_fields(points="hoverData.info.right_line", scale="$.whole_scales")
+        line_end.bind_fields(points="hoverData.info.right_line")
+
         line_end_cond.bind_fields(condition="$.hoverData != `null`")
         header = mui.Typography().prop(variant="caption")
         self.history: list[VisModel] = []
@@ -211,7 +376,7 @@ class PerfMonitor(mui.FlexBox):
         # select = mui.Autocomplete("history", [], self._select_vis_model).prop(size="small", textFieldProps=mui.TextFieldProps(muiMargin="dense"))
         self.history_slider = slider
         self._header = header
-        self._detail_viewer = mui.JsonViewer()
+        self._detail_viewer = mui.JsonViewer() # .bind_fields(data="perfHover")
         self._update_lock = asyncio.Lock()
         self.max_num_history = 1000
         dm.init_add_layout([
@@ -255,7 +420,7 @@ class PerfMonitor(mui.FlexBox):
         indexes_empty = np.zeros((0,), dtype=np.int32)
         durs_empty = np.zeros((0,), dtype=np.float32)
         return VisModel(trs_empty, colors_empty, scales_empty, indexes_empty, 
-            indexes_empty, durs_empty, 0, [])
+            indexes_empty, durs_empty, 0, 0, 0, 0, [])
 
     async def _on_menu_select(self, value: str):
         if value == "reset":
@@ -330,7 +495,7 @@ class PerfMonitor(mui.FlexBox):
             t = time.time()
             vis_model = await asyncio.get_running_loop().run_in_executor(None, partial(self.perf_data_to_vis_model, user_scale=scale, max_depth=max_depth), data_list_all_rank)
             # vis_model = self.perf_data_to_vis_model(data_list_all_rank, user_scale=scale)
-            print("perf_data_to_vis_model time", time.time() - t)
+            print("perf_data_to_vis_model time", time.time() - t, vis_model.trs.shape)
             # insert step sorted
             # calc insert loc by bisect 
             vis_model.meta_datas = meta_datas
@@ -380,6 +545,13 @@ class PerfMonitor(mui.FlexBox):
             draft.meta_datas = vis_model.meta_datas
             draft.all_events = vis_model.all_events
             draft.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
+            draft.width = vis_model.width
+            draft.height = vis_model.height
+            draft.scrollValueX = 0
+            draft.scrollValueY = 0
+            draft.scaleX = 1
+            draft.scaleY = 20
+
         # self.dm.model.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
         # self.dm.model.all_events = vis_model.all_events
         async with self.dm.draft_update() as draft:
@@ -404,7 +576,7 @@ class PerfMonitor(mui.FlexBox):
         name_to_events: dict[tuple[str, int], list[dict]] = {}
         min_ts_all = math.inf
         max_ts_all = 0
-        depth_accum = 1
+        depth_accum = 0
         for rank, data_list in enumerate(data_list_all_rank):
             data_list = build_depth_from_trace_events(data_list)
             # remove event with depth > 1
@@ -455,8 +627,8 @@ class PerfMonitor(mui.FlexBox):
                 total_dur += ev["dur"]
             rate = total_dur / (max_ts - min_ts) / len(events)
             left_line_points = [
-                [min_ts * dur_scale, -5000, 0.02],
-                [min_ts * dur_scale, 5000, 0.02],
+                [min_ts * dur_scale , -5000, 0.02],
+                [min_ts * dur_scale , 5000, 0.02],
             ]
             right_line_points = [
                 [max_ts * dur_scale, -5000, 0.02],
@@ -465,11 +637,12 @@ class PerfMonitor(mui.FlexBox):
             duration_second = (max_ts - min_ts) / 1e9
             field_infos.append(PerfFieldInfo(name, min_ts, max_ts, duration_second, rate, left_line_points, right_line_points, cnt, f"{name}::{cnt}"))
         # print(4, time.time() - t)
-
         all_events = sum(data_list_all_rank, [])
         vis_info, name_cnt_to_polygons = _get_vis_data_from_duration_events(all_events, dur_scale, 0, depth_padding, height)
+        for info in field_infos:
+            info.left_line = [[x - vis_info.width / 2, y, z] for x, y, z in info.left_line]
+            info.right_line = [[x - vis_info.width / 2, y, z] for x, y, z in info.right_line]
         # print(5, time.time() - t)
-
         vis_model = VisModel(
             total_duration=max_ts_all - min_ts_all,
             trs=vis_info.trs,
@@ -481,5 +654,8 @@ class PerfMonitor(mui.FlexBox):
             infos=field_infos,
             all_events=all_events,
             name_cnt_to_polygons=name_cnt_to_polygons,
+            width=vis_info.width,
+            height=vis_info.height,
+            minWidth=vis_info.minWidth,
         )
         return vis_model 

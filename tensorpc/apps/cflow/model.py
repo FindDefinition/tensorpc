@@ -299,7 +299,7 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
                                Optional[ComputeFlowModel]))
     prev_path_draft_if_exist = root_draft.cur_path + [
         "nodes"
-    ] + D.create_array(cur_model_draft.selected_node) + ["flow"
+    ] + D.array(cur_model_draft.selected_node) + ["flow"
                                                          ]  # type: ignore
     selected_node = cur_model_draft.nodes[cur_model_draft.selected_node]
     is_not_subflow_node_selected = D.logical_or(
