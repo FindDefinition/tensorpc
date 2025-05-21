@@ -556,7 +556,7 @@ def extract_arrays_from_data(data,
                              handle_unique_tree_id: bool = False,
                              external_ctx: Optional[_ExtractContext] = None):
     if external_ctx is None:
-        ctx = _ExtractContext(object_classes, JSON_INDEX_KEY)
+        ctx = _ExtractContext(object_classes, json_index)
     else:
         ctx = external_ctx
     arrays = ctx.arrays
