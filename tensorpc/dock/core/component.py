@@ -835,7 +835,7 @@ class UIUpdateEvent:
 
     def to_dict(self):
         if self.json_only:
-            return JsonSpecialData(self.uid_to_data_undefined)
+            return JsonSpecialData.from_option(self.uid_to_data_undefined, is_json_only=True, need_freeze=False)
         else:
             return self.uid_to_data_undefined
 
@@ -1271,18 +1271,21 @@ class _EventSlotBase(Generic[TEventData]):
             ))
         return self
 
-    def add_frontend_handler(self, func: Callable[[Any, TEventData], None]) -> Self:
+    def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True) -> Self:
         """use Python Frontend Language (subset of python) to handle event in frontend directly.
         """
         func_ast, code = parse_func_to_df_ast(func)
+        op = EventFrontendUpdateOp(
+            attr="",
+            targetPath="",
+            pflAstJson=json.dumps(pfl_ast_to_dict(func_ast)),
+            pflCode=code,
+        )
+        if not use_immer:
+            op.dontUseImmer = True
         self.comp._append_event_handler_update_op(
             self.event_type,
-            update_op=EventFrontendUpdateOp(
-                attr="",
-                targetPath="",
-                pflAstJson=json.dumps(pfl_ast_to_dict(func_ast)),
-                pflCode=code,
-            ))
+            update_op=op)
         return self
 
     def add_frontend_draft_set_none(self, target_draft: Any, attr: Union[str, int], target_comp: Union["Component", Undefined] = undefined) -> Self:
@@ -1424,6 +1427,7 @@ class EventFrontendUpdateOp:
     srcPath: Optional[Union[Undefined, str]] = undefined
     pflAstJson: Union[Undefined, str] = undefined
     pflCode: Union[Undefined, str] = undefined
+    dontUseImmer: Union[Undefined, bool] = undefined
 
 T_child_structure = TypeVar("T_child_structure",
                             default=Any,
@@ -1801,7 +1805,7 @@ class Component(Generic[T_base_props, T_child]):
         if evs:
             res["usedEvents"] = evs
         if self._flow_json_only:
-            res["props"] = JsonSpecialData(props)
+            res["props"] = JsonSpecialData.from_option(props, is_json_only=True, need_freeze=False)
         return res
 
     def _get_used_events_dict(self):

@@ -3,6 +3,7 @@ import pickle
 from collections import abc
 from enum import Enum, IntEnum
 from functools import reduce
+import time
 from typing import Any, AsyncIterable, AsyncIterator, Callable, Dict, Hashable, Iterable, Iterator, List, Optional, Sequence, Tuple, TypeVar, Union
 from typing_extensions import Literal
 from tensorpc.core.client import RemoteException
@@ -36,6 +37,10 @@ class JsonNodeSpecialFlags(IntEnum):
     FREEZE = 0x4
 
     MASK_ARRAY_AND_JSON_ONLY = ARRAY | JSON_ONLY
+
+class FrontendMsgDecodeFlag(IntEnum):
+    NEED_SCAN = 0x1
+
 
 class Placeholder(object):
 
@@ -194,15 +199,24 @@ def data2pb(array_or_bytes: Union[bytes, np.ndarray, JSArrayBuffer],
 
 class JsonSpecialData:
 
-    def __init__(self, data, is_json: bool = True, need_freeze: bool = False) -> None:
+    def __init__(self, data, flag: int) -> None:
         self.data = data
+        self.flag = flag
+
+    def __repr__(self):
+        return "JsonSpecialData[{},{}]".format(type(self.data), self.flag)
+
+    @classmethod
+    def from_option(cls, data, is_json_only: bool, need_freeze: bool):
         flag = 0
-        if is_json:
+        if is_json_only:
             flag |= JsonNodeSpecialFlags.JSON_ONLY
         if need_freeze:
             flag |= JsonNodeSpecialFlags.FREEZE
-        self.flag = flag
+        return cls(data, flag)
 
+    def replace_data(self, new_data: Any):
+        return JsonSpecialData(new_data, self.flag)
 
 class FromBufferStream(object):
 
@@ -404,13 +418,20 @@ def to_protobuf_stream_gen(data_list: List[Any],
 def is_json_index(data, json_idx_key=JSON_INDEX_KEY):
     return isinstance(data, dict) and json_idx_key in data
 
+class _ExtractContext:
+    def __init__(self, object_classes: Tuple[Any, ...], json_index: str):
+        self.arrays = []
+        self.object_classes = object_classes
+        self.json_index = json_index
+        self.flags = 0
 
-def _extract_arrays_from_data(arrays,
-                              data,
-                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                              json_index=""):
+def _extract_arrays_from_data(data,
+                              ctx: _ExtractContext):
     # can't use abc.Sequence because string is sequence too.
     # TODO use pytorch optree if available
+    object_classes = ctx.object_classes
+    json_index = ctx.json_index
+    arrays = ctx.arrays
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
     if isinstance(data, (list, tuple)):
         data_skeleton = [None] * len(data)
@@ -424,7 +445,7 @@ def _extract_arrays_from_data(arrays,
                 arrays.append(e)
             else:
                 data_skeleton[i] = _extract_arrays_from_data(
-                    arrays, e, object_classes, json_index)
+                    e, ctx)
         data_skeleton_res = data_skeleton
         if isinstance(data, tuple):
             data_skeleton_res = tuple(data_skeleton)
@@ -440,15 +461,15 @@ def _extract_arrays_from_data(arrays,
                 arrays.append(v)
             else:
                 data_skeleton[k] = _extract_arrays_from_data(
-                    arrays, v, object_classes, json_index)
+                    v, ctx)
         return data_skeleton
     elif isinstance(data, JsonSpecialData):
+        ctx.flags |= FrontendMsgDecodeFlag.NEED_SCAN
         if json_index:
             data_skeleton = {json_index: [data.data, data.flag]}
         else:
-            data_skeleton = Placeholder(len(arrays), 0, data.flag, data)
-
-        return data.data
+            data_skeleton = Placeholder(0, 0, data.flag, data.data)
+        return data_skeleton
     elif isinstance(data, UniqueTreeIdForComp):
         # we delay UniqueTreeIdForComp conversion here to allow modify uid
         return data.uid_encoded
@@ -464,12 +485,12 @@ def _extract_arrays_from_data(arrays,
             data_skeleton = data
         return data_skeleton
 
-def _extract_arrays_from_data_no_unique_id(arrays,
-                              data,
-                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                              json_index=""):
+def _extract_arrays_from_data_no_unique_id(data, ctx: _ExtractContext):
     # can't use abc.Sequence because string is sequence too.
     # TODO use pytorch optree if available
+    object_classes = ctx.object_classes
+    json_index = ctx.json_index
+    arrays = ctx.arrays
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
     if isinstance(data, (list, tuple)):
         data_skeleton = [None] * len(data)
@@ -483,7 +504,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
                 arrays.append(e)
             else:
                 data_skeleton[i] = _extract_arrays_from_data_no_unique_id(
-                    arrays, e, object_classes, json_index)
+                    e, ctx)
         data_skeleton_res = data_skeleton
         if isinstance(data, tuple):
             data_skeleton_res = tuple(data_skeleton)
@@ -499,13 +520,15 @@ def _extract_arrays_from_data_no_unique_id(arrays,
                 arrays.append(v)
             else:
                 data_skeleton[k] = _extract_arrays_from_data_no_unique_id(
-                    arrays, v, object_classes, json_index)
+                    v, ctx)
         return data_skeleton
     elif isinstance(data, JsonSpecialData):
+        ctx.flags |= FrontendMsgDecodeFlag.NEED_SCAN
         if json_index:
             data_skeleton = {json_index: [data.data, data.flag]}
         else:
             data_skeleton = Placeholder(0, 0, data.flag, data.data)
+        return data_skeleton
     else:
         data_skeleton = None
         if isinstance(data, object_classes):
@@ -522,18 +545,21 @@ def _extract_arrays_from_data_no_unique_id(arrays,
 def extract_object_from_data(data,
                              object_classes):
     arrays: List[Any] = []
-    data_skeleton = _extract_arrays_from_data(arrays,
-                                              data,
-                                              object_classes=object_classes,
-                                              json_index=JSON_INDEX_KEY)
+    ctx = _ExtractContext(object_classes, JSON_INDEX_KEY)
+    data_skeleton = _extract_arrays_from_data(data, ctx)
     return arrays, data_skeleton
 
 
 def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
                              json_index="",
-                             handle_unique_tree_id: bool = False):
-    arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = []
+                             handle_unique_tree_id: bool = False,
+                             external_ctx: Optional[_ExtractContext] = None):
+    if external_ctx is None:
+        ctx = _ExtractContext(object_classes, JSON_INDEX_KEY)
+    else:
+        ctx = external_ctx
+    arrays = ctx.arrays
     if HAS_OPTREE:
         variables, structure = optree.tree_flatten(data)
         new_vars = []
@@ -545,6 +571,7 @@ def extract_arrays_from_data(data,
                     new_vars.append(Placeholder(len(arrays), byte_size(v)))
                 arrays.append(v)
             elif isinstance(v, JsonSpecialData):
+                ctx.flags |= FrontendMsgDecodeFlag.NEED_SCAN
                 if json_index:
                     special = {json_index: [v.data, v.flag]}
                 else:
@@ -557,62 +584,68 @@ def extract_arrays_from_data(data,
                 new_vars.append(v)
         # currently no way to convert structure to json, so we have to build json skeleton manually
         data_skeleton = optree.tree_unflatten(structure, new_vars)
+        if arrays:
+            ctx.flags |= FrontendMsgDecodeFlag.NEED_SCAN
         return arrays, data_skeleton
     if handle_unique_tree_id:
-        data_skeleton = _extract_arrays_from_data(arrays,
-                                                data,
-                                                object_classes=object_classes,
-                                                json_index=json_index)
+        data_skeleton = _extract_arrays_from_data(data, ctx)
     else:
-        data_skeleton = _extract_arrays_from_data_no_unique_id(arrays,
-                                                data,
-                                                object_classes=object_classes,
-                                                json_index=json_index)
+        data_skeleton = _extract_arrays_from_data_no_unique_id(data, ctx)
+    if arrays:
+        ctx.flags |= FrontendMsgDecodeFlag.NEED_SCAN
     return arrays, data_skeleton
 
 
 def put_arrays_to_data(arrays, data_skeleton, json_index="") -> Any:
-    if not arrays:
-        return data_skeleton
+    # if not arrays:
+    #     return data_skeleton
     return _put_arrays_to_data(arrays, data_skeleton, json_index)
 
 
-def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY):
+def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY) -> Any:
     if isinstance(data_skeleton, (list, tuple)):
         length = len(data_skeleton)
-        data = [None] * length
+        data_arr: list[Any] = [None] * length
         for i in range(length):
             e = data_skeleton[i]
             if isinstance(e, Placeholder):
                 if (e.flag & JsonNodeSpecialFlags.ARRAY):
-                    data[i] = arrays[e.index]
+                    data_arr[i] = arrays[e.index]
+                elif e.flag & JsonNodeSpecialFlags.FREEZE or e.flag & JsonNodeSpecialFlags.JSON_ONLY:
+                    data_arr[i] = JsonSpecialData(e.data, e.flag)
                 else:
-                    data[i] = _put_arrays_to_data(arrays, e.data, json_index)
-            elif is_json_index(e, json_index) and (e[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+                    data_arr[i] = _put_arrays_to_data(arrays, e.data, json_index)
+            elif is_json_index(e, json_index):
                 flag = e[json_index][1]
                 if flag & JsonNodeSpecialFlags.ARRAY:
-                    data[i] = arrays[e[json_index][0]]
+                    data_arr[i] = arrays[e[json_index][0]]
+                elif flag & JsonNodeSpecialFlags.FREEZE or flag & JsonNodeSpecialFlags.JSON_ONLY:
+                    data_arr[i] = JsonSpecialData(e[json_index][0], flag)
                 else:
-                    data[i] = e[json_index][0]
+                    data_arr[i] = _put_arrays_to_data(arrays, e[json_index][0], json_index)
             else:
-                data[i] = _put_arrays_to_data(arrays, e, json_index)
+                data_arr[i] = _put_arrays_to_data(arrays, e, json_index)
         if isinstance(data_skeleton, tuple):
-            data = tuple(data)
-        return data
+            data_arr = tuple(data_arr)
+        return data_arr
     elif isinstance(data_skeleton, abc.Mapping):
         data = {}
         for k, v in data_skeleton.items():
             if isinstance(v, Placeholder):
                 if (v.flag & JsonNodeSpecialFlags.ARRAY):
                     data[k] = arrays[v.index]
+                elif v.flag & JsonNodeSpecialFlags.FREEZE or v.flag & JsonNodeSpecialFlags.JSON_ONLY:
+                    data[k] = JsonSpecialData(v.data, v.flag)
                 else:
                     data[k] = _put_arrays_to_data(arrays, v.data, json_index)
-            elif is_json_index(v, json_index) and (v[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+            elif is_json_index(v, json_index):
                 flag = v[json_index][1]
                 if flag & JsonNodeSpecialFlags.ARRAY:
                     data[k] = arrays[v[json_index][0]]
+                elif flag & JsonNodeSpecialFlags.FREEZE or flag & JsonNodeSpecialFlags.JSON_ONLY:
+                    data[k] = JsonSpecialData(v[json_index][0], flag)
                 else:
-                    data[k] = v[json_index][0]
+                    data[k] = _put_arrays_to_data(arrays, v[json_index][0], json_index)
             else:
                 data[k] = _put_arrays_to_data(arrays, v, json_index)
         return data
@@ -620,14 +653,18 @@ def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY):
         if isinstance(data_skeleton, Placeholder):
             if (data_skeleton.flag & JsonNodeSpecialFlags.ARRAY):
                 data = arrays[data_skeleton.index]
+            elif data_skeleton.flag & JsonNodeSpecialFlags.FREEZE or data_skeleton.flag & JsonNodeSpecialFlags.JSON_ONLY:
+                data = JsonSpecialData(data_skeleton.data, data_skeleton.flag)
             else:
                 data = data_skeleton.data
-        elif is_json_index(data_skeleton, json_index) and (data_skeleton[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+        elif is_json_index(data_skeleton, json_index):
             flag = data_skeleton[json_index][1]
             if flag & JsonNodeSpecialFlags.ARRAY:
                 data = arrays[data_skeleton[json_index][0]]
+            elif flag & JsonNodeSpecialFlags.FREEZE or flag & JsonNodeSpecialFlags.JSON_ONLY:
+                data = JsonSpecialData(data_skeleton[json_index][0], flag)
             else:
-                data = data_skeleton[json_index][0]
+                data = _put_arrays_to_data(arrays, data_skeleton[json_index][0], json_index)
         else:
             data = data_skeleton
         return data
@@ -991,9 +1028,12 @@ class SocketMessageEncoder:
     def __init__(
         self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
         # unique tree id obj will only be handled in websocket.
-        arrays, data_skeleton = extract_arrays_from_data(data, json_index=JSON_INDEX_KEY, handle_unique_tree_id=True)
+        ctx = _ExtractContext(
+            (np.ndarray, bytes, JSArrayBuffer), JSON_INDEX_KEY)
+        arrays, data_skeleton = extract_arrays_from_data(data, json_index=JSON_INDEX_KEY, handle_unique_tree_id=True, external_ctx=ctx)
         self.arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = arrays
         self.data_skeleton = data_skeleton
+        self._flags = ctx.flags
         self._total_size = 0
         self._arr_metadata: List[Tuple[int, List[int]]] = []
         for arr in self.arrays:
@@ -1023,7 +1063,7 @@ class SocketMessageEncoder:
         return self._total_size
 
     def get_skeleton(self):
-        return [self._arr_metadata, self.data_skeleton]
+        return [self._flags, self._arr_metadata, self.data_skeleton]
 
     def get_message_chunks(self, type: SocketMsgType, req: wsdef_pb2.Header,
                            chunk_size: int):

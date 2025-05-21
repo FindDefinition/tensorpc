@@ -789,15 +789,20 @@ class WebsocketHandler:
                 await _cancel(task)
             # t = time.time()
             if sending_tasks:
-                try:
-                    # TODO if this function fail...
-                    for task in sending_tasks:
+                # TODO if this function fail...
+                for task in sending_tasks:
+                    try:
                         await task[0]
-                    # await asyncio.wait([x[0] for x in sending_tasks])
-                except ConnectionResetError:
-                    print("Cannot write to closing transport")
-                except JsonEncodeException:
-                    print("encode message to json failed. check your data!")
+                        # await asyncio.wait([x[0] for x in sending_tasks])
+                    except ConnectionResetError:
+                        print("Cannot write to closing transport")
+                        if not task[0].done():
+                            await _cancel(task[0])
+                    except JsonEncodeException:
+                        print("encode message to json failed. check your data!")
+                        if not task[0].done():
+                            await _cancel(task[0])
+
             for task, ev_str in sending_tasks:
                 exc = task.exception()
                 if exc is not None:

@@ -361,7 +361,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             await self._store.write_whole_model(new_model)
         await self.sync_model()
 
-    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
+    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         # convert dynamic node to static in op to avoid where op.
         ops = await self._update_with_jmes_ops_backend(ops)
         # any modify on external field won't be included in frontend.
@@ -375,6 +375,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             _DataclassSer(obj=op.opData),
                             dict_factory_with_field=facto_fn)
                 op.opData = cast(dict, opData)["obj"]
+        if need_freeze:
+            frontend_ops = [op.freeze_assign_data(is_json_only) for op in frontend_ops]
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({
@@ -384,13 +386,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         else:
             return None 
 
-    async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp]):
+    async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         if ops:
             async with self._lock:
                 await self.flow_event_emitter.emit_async(
                     self._backend_draft_update_event_key,
                     Event(self._backend_draft_update_event_key, ops))
-                ev_or_none = await self._update_with_jmes_ops_event(ops)
+                ev_or_none = await self._update_with_jmes_ops_event(ops, is_json_only, need_freeze)
                 if ev_or_none is not None:
                     return await self.send_and_wait(ev_or_none)
 
@@ -413,7 +415,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         raise NotImplementedError("you can't bind fields on DataModel")
 
     @contextlib.asynccontextmanager
-    async def draft_update(self):
+    async def draft_update(self, is_json_only: bool = False, need_freeze: bool = False):
         """Do draft update immediately after this context.
         We won't perform real update during draft operation because we need to keep state same between
         frontend and backend. if your update code raise error during draft operation, the real model in backend won't 
@@ -424,6 +426,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         update immediately.
 
         WARNING: draft change event handler will be called (if change) in each draft update.
+
+        Args:
+            is_json_only: if True, all updated data will be treated as json only object (no ndarray or bytes).
+            need_freeze: if True, we will freeze all assigned data. MAKE SURE YOU WON'T MODIFY FREEZED DATA!
         """
         draft = self.get_draft()
         cur_ctx = get_draft_update_context_noexcept()
@@ -431,7 +437,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             raise RuntimeError("Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler.")
         with capture_draft_update() as ctx:
             yield draft
-        await self._update_with_jmes_ops(ctx._ops)
+        await self._update_with_jmes_ops(ctx._ops, is_json_only, need_freeze)
 
     @staticmethod
     def get_draft_external(model: T) -> T:

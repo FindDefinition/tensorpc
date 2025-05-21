@@ -243,6 +243,7 @@ class PerfMonitor(mui.FlexBox):
             ]).prop(position=(0, 0, 0.014)),
             perf_event_plane,
         ]).prop(position=(0, 0, -1.1))
+        # TODO: portal don't support view
         viewport_group = three.HudGroup([
             perf_group
         ]).prop(top=0, left=0, padding=2, width="calc(100% - 15px)", height="calc(100% - 15px)", alignContent=False, alwaysPortal=False)
@@ -329,7 +330,7 @@ class PerfMonitor(mui.FlexBox):
         canvas.event_viewport_change.add_frontend_draft_change(draft, "viewport")
 
         canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD"])
-        canvas.event_keyboard_hold.add_frontend_handler(_keyhold_handler_dfdsl)
+        canvas.event_keyboard_hold.add_frontend_handler(_keyhold_handler_dfdsl, use_immer=False)
         boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales")
         # VisModel.bind_scale_xy(perf_group)
         # devmesh.bind_fields(scale="$.whole_scales")
@@ -543,7 +544,9 @@ class PerfMonitor(mui.FlexBox):
             draft.trs = vis_model.trs 
             draft.colors = vis_model.colors 
             draft.scales = vis_model.scales 
-            draft.infos = vis_model.infos 
+            # draft.infos = JsonSpecialData.from_option(vis_model.infos, is_json_only=True, need_freeze=True) 
+            # draft.infos = vis_model.infos
+
             draft.info_idxes = vis_model.info_idxes 
             draft.rank_ids = vis_model.rank_ids 
             draft.durations = vis_model.durations
@@ -557,7 +560,9 @@ class PerfMonitor(mui.FlexBox):
             draft.scrollValueY = 0
             draft.scaleX = 1
             draft.scaleY = 20
-
+        async with self.dm.draft_update(is_json_only=True, need_freeze=True) as draft:
+            # infos is too large and don't need to modify
+            draft.infos = vis_model.infos
         # self.dm.model.name_cnt_to_polygons = vis_model.name_cnt_to_polygons
         # self.dm.model.all_events = vis_model.all_events
         async with self.dm.draft_update() as draft:
@@ -566,8 +571,8 @@ class PerfMonitor(mui.FlexBox):
                 await self._update_detail(prev_click_instance_id)
                 info_idx = int(self.dm.model.info_idxes[prev_click_instance_id]) 
                 info = self.dm.model.infos[info_idx]
-                self.dm.get_draft().clickClusterPoints = vis_model.name_cnt_to_polygons[info.cluster_name][0]
-                self.dm.get_draft().clickClusterAABBSizes = vis_model.name_cnt_to_polygons[info.cluster_name][1]
+                draft.clickClusterPoints = vis_model.name_cnt_to_polygons[info.cluster_name][0]
+                draft.clickClusterAABBSizes = vis_model.name_cnt_to_polygons[info.cluster_name][1]
             else:
                 draft.clickInstanceId = None
                 draft.clickClusterPoints = None

@@ -16,7 +16,7 @@ class App:
     def my_layout(self):
         self.monitor = PerfMonitor(use_view=True)
         # self.monitor2 = mui.HBox([mui.Markdown("## PerfMonitor"),])
-        self.monitor2 = PerfMonitor(use_view=True)
+        # self.monitor2 = PerfMonitor(use_view=True)
 
         return mui.VBox([
             mui.Button("Load Trace", self._set_data),
@@ -41,4 +41,4 @@ class App:
         trace_events = trace["traceEvents"]
         trace_events2 = copy.deepcopy(trace_events)
         await self.monitor.append_perf_data(0, [trace_events2], [None], max_depth=15)
-        # await self.monitor2.append_perf_data(0, [trace_events], [None], max_depth=2)
+        # await self.monitor2.append_perf_data(0, [trace_events], [None], max_depth=4)

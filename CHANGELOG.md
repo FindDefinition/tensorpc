@@ -1,4 +1,15 @@
 # Changelog
+# [0.20.0] - 2025-05-21
+### Added 
+- add json-only and need-freeze to websocket protocol. now user can send large frozen json object to frontend.
+### Changed
+- BREAKING CHANGE: change websocket protocol.
+
+## [0.19.0] - 2025-05-20
+### Added 
+- add `Python Frontend Language` support for `updateDataModel`, user can write python code, we will compile it to javascript and run it in frontend.
+- add `calc` support in `HudGroup`
+
 # [0.18.1] - 2025-05-12
 ### Fixed 
 - fix unexpected python 3.11+ grammar

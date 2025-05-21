@@ -45,9 +45,10 @@ import json
 import traceback
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
-from typing_extensions import Literal
+from typing_extensions import Literal, Self
 from tensorpc.core import inspecttools
 from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, resolve_type_hints
+from tensorpc.core.core_io import JsonSpecialData
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
@@ -185,6 +186,23 @@ class DraftUpdateOp:
                 if node.value in _DYNAMIC_FUNC_TYPES:
                     return True
         return False 
+
+    def freeze_assign_data(self, is_json_only: bool = False) -> Self:
+        if self.op == JMESPathOpType.SetAttr or self.op == JMESPathOpType.ArraySet:
+            # freeze the assign data
+            new_items = [(k, JsonSpecialData.from_option(v, is_json_only, True)) for k, v in self.opData["items"]]
+            new_opdata = self.opData.copy()
+            new_opdata["items"] = new_items
+            res = dataclasses.replace(self, opData=new_opdata)
+        elif self.op == JMESPathOpType.DictUpdate:
+            # freeze the assign data
+            new_items = {k: JsonSpecialData.from_option(v, is_json_only, True) for k, v in self.opData["items"]}
+            new_opdata = self.opData.copy()
+            new_opdata["items"] = new_items
+            res = dataclasses.replace(self, opData=new_opdata)
+        else:
+            res = dataclasses.replace(self)
+        return res 
 
 class DraftUpdateProcessContext:
     def __init__(self, proc: Callable[[DraftUpdateOp], DraftUpdateOp]):
