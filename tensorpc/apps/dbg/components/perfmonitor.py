@@ -205,7 +205,7 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
     ), name_cnt_to_polygons
 
 class PerfMonitor(mui.FlexBox):
-    def __init__(self):
+    def __init__(self, use_view: bool = False):
         trs_empty = np.zeros((0, 3), dtype=np.float32)
         boxmesh = three.InstancedMesh(trs_empty, 200000, [
             three.PlaneGeometry(),
@@ -242,15 +242,15 @@ class PerfMonitor(mui.FlexBox):
                 line_select_samename_cond
             ]).prop(position=(0, 0, 0.014)),
             perf_event_plane,
-        ])
+        ]).prop(position=(0, 0, -1.1))
         viewport_group = three.HudGroup([
             perf_group
-        ]).prop(top=0, left=0, padding=2, width="calc(100% - 15px)", height="calc(100% - 15px)", alignContent=False, alwaysPortal=True)
+        ]).prop(top=0, left=0, padding=2, width="calc(100% - 15px)", height="calc(100% - 15px)", alignContent=False, alwaysPortal=False)
         # viewport_group.event_hud_layout_change.on(lambda ev: print(ev))
         scrollbar_event_plane = three.Mesh([
             three.PlaneGeometry(1.0, 1.0),
             three.MeshBasicMaterial().prop(color="white"),
-        ])
+        ]).prop(position=(0, 0, -2.1))
 
         scrollbar = three.Mesh([
             three.PlaneGeometry(1, 1),
@@ -287,12 +287,18 @@ class PerfMonitor(mui.FlexBox):
             scrollbar_bottom_group,
 
         ]).prop(position=(0, 0, 10))
-
-        canvas = three.Canvas([
-            # self._cam_ctrl,
-            three.InfiniteGridHelper(5, 50, "gray"),
-            cam.prop(makeDefault=True),
-        ]).prop(enablePerf=False, allowKeyboardEvent=True)
+        if use_view:
+            canvas = three.View([
+                # self._cam_ctrl,
+                three.InfiniteGridHelper(5, 50, "gray"),
+                cam.prop(makeDefault=True),
+            ]).prop(allowKeyboardEvent=True)
+        else:
+            canvas = three.Canvas([
+                # self._cam_ctrl,
+                three.InfiniteGridHelper(5, 50, "gray"),
+                cam.prop(makeDefault=True),
+            ]).prop(enablePerf=False, allowKeyboardEvent=True)
 
         canvas.prop(menuItems=[
             mui.MenuItem("reset", "reset"),

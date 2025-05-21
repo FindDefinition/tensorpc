@@ -569,13 +569,16 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
                          ThreeViewProps,
                          children,
                          allowed_events=[
-                             FrontendEventType.ContextMenuSelect.value,
-                             FrontendEventType.KeyHold.value,
+                            FrontendEventType.ContextMenuSelect.value,
+                            FrontendEventType.KeyHold.value,
+                            FrontendEventType.CanvasViewportChange.value,
                          ])
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenuSelect)
         self.event_keyboard_hold = self._create_event_slot(
             FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
+        self.event_viewport_change = self._create_event_slot(
+            FrontendEventType.CanvasViewportChange, lambda x: ViewportChangeEvent(**x))
 
     @property
     def prop(self):

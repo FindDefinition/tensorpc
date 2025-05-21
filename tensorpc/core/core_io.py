@@ -1,7 +1,7 @@
 import json
 import pickle
 from collections import abc
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import reduce
 from typing import Any, AsyncIterable, AsyncIterator, Callable, Dict, Hashable, Iterable, Iterator, List, Optional, Sequence, Tuple, TypeVar, Union
 from typing_extensions import Literal
@@ -30,22 +30,30 @@ class EncodeMethod(Enum):
     PickleArray = 4
     MessagePackArray = 5
 
+class JsonNodeSpecialFlags(IntEnum):
+    ARRAY = 0x1
+    JSON_ONLY = 0x2
+    FREEZE = 0x4
+
+    MASK_ARRAY_AND_JSON_ONLY = ARRAY | JSON_ONLY
 
 class Placeholder(object):
 
-    def __init__(self, index: int, nbytes: int):
+    def __init__(self, index: int, nbytes: int, flag: int = int(JsonNodeSpecialFlags.ARRAY), data: Optional[Any] = None):
         self.index = index
         self.nbytes = nbytes
+        self.flag = flag
+        self.data = data
 
     def __add__(self, other):
         assert self.index == other.index
-        return Placeholder(self.index, self.nbytes + other.nbytes)
+        return Placeholder(self.index, self.nbytes + other.nbytes, self.flag, self.data)
 
     def __repr__(self):
         return "Placeholder[{},{}]".format(self.index, self.nbytes)
 
     def __eq__(self, other):
-        return self.index == other.index and self.nbytes == other.nbytes
+        return self.index == other.index and self.nbytes == other.nbytes and self.flag == other.flag
 
 
 KT = TypeVar("KT")
@@ -184,10 +192,16 @@ def data2pb(array_or_bytes: Union[bytes, np.ndarray, JSArrayBuffer],
         raise NotImplementedError("only support ndarray/bytes.")
 
 
-class JsonOnlyData:
+class JsonSpecialData:
 
-    def __init__(self, data) -> None:
+    def __init__(self, data, is_json: bool = True, need_freeze: bool = False) -> None:
         self.data = data
+        flag = 0
+        if is_json:
+            flag |= JsonNodeSpecialFlags.JSON_ONLY
+        if need_freeze:
+            flag |= JsonNodeSpecialFlags.FREEZE
+        self.flag = flag
 
 
 class FromBufferStream(object):
@@ -404,7 +418,7 @@ def _extract_arrays_from_data(arrays,
             e = data[i]
             if isinstance(e, object_classes):
                 if json_index:
-                    data_skeleton[i] = {json_index: len(arrays)}
+                    data_skeleton[i] = {json_index: [len(arrays), 1]}
                 else:
                     data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
                 arrays.append(e)
@@ -420,7 +434,7 @@ def _extract_arrays_from_data(arrays,
         for k, v in data.items():
             if isinstance(v, object_classes):
                 if json_index:
-                    data_skeleton[k] = {json_index: len(arrays)}
+                    data_skeleton[k] = {json_index: [len(arrays), 1]}
                 else:
                     data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
                 arrays.append(v)
@@ -428,7 +442,12 @@ def _extract_arrays_from_data(arrays,
                 data_skeleton[k] = _extract_arrays_from_data(
                     arrays, v, object_classes, json_index)
         return data_skeleton
-    elif isinstance(data, JsonOnlyData):
+    elif isinstance(data, JsonSpecialData):
+        if json_index:
+            data_skeleton = {json_index: [data.data, data.flag]}
+        else:
+            data_skeleton = Placeholder(len(arrays), 0, data.flag, data)
+
         return data.data
     elif isinstance(data, UniqueTreeIdForComp):
         # we delay UniqueTreeIdForComp conversion here to allow modify uid
@@ -437,7 +456,7 @@ def _extract_arrays_from_data(arrays,
         data_skeleton = None
         if isinstance(data, object_classes):
             if json_index:
-                data_skeleton = {json_index: len(arrays)}
+                data_skeleton = {json_index: [len(arrays), 1]}
             else:
                 data_skeleton = Placeholder(len(arrays), byte_size(data))
             arrays.append(data)
@@ -458,7 +477,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
             e = data[i]
             if isinstance(e, object_classes):
                 if json_index:
-                    data_skeleton[i] = {json_index: len(arrays)}
+                    data_skeleton[i] = {json_index: [len(arrays), 1]}
                 else:
                     data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
                 arrays.append(e)
@@ -474,7 +493,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
         for k, v in data.items():
             if isinstance(v, object_classes):
                 if json_index:
-                    data_skeleton[k] = {json_index: len(arrays)}
+                    data_skeleton[k] = {json_index: [len(arrays), 1]}
                 else:
                     data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
                 arrays.append(v)
@@ -482,13 +501,16 @@ def _extract_arrays_from_data_no_unique_id(arrays,
                 data_skeleton[k] = _extract_arrays_from_data_no_unique_id(
                     arrays, v, object_classes, json_index)
         return data_skeleton
-    elif isinstance(data, JsonOnlyData):
-        return data.data
+    elif isinstance(data, JsonSpecialData):
+        if json_index:
+            data_skeleton = {json_index: [data.data, data.flag]}
+        else:
+            data_skeleton = Placeholder(0, 0, data.flag, data.data)
     else:
         data_skeleton = None
         if isinstance(data, object_classes):
             if json_index:
-                data_skeleton = {json_index: len(arrays)}
+                data_skeleton = {json_index: [len(arrays), 1]}
             else:
                 data_skeleton = Placeholder(len(arrays), byte_size(data))
             arrays.append(data)
@@ -518,12 +540,16 @@ def extract_arrays_from_data(data,
         for v in variables:
             if isinstance(v, object_classes):
                 if json_index:
-                    new_vars.append({json_index: len(arrays)})
+                    new_vars.append({json_index: [len(arrays), 1]})
                 else:
                     new_vars.append(Placeholder(len(arrays), byte_size(v)))
                 arrays.append(v)
-            elif isinstance(v, JsonOnlyData):
-                new_vars.append(v.data)
+            elif isinstance(v, JsonSpecialData):
+                if json_index:
+                    special = {json_index: [v.data, v.flag]}
+                else:
+                    special = Placeholder(0, 0, v.flag, v.data)
+                new_vars.append(special)
             elif isinstance(v, UniqueTreeIdForComp) and handle_unique_tree_id:
                 # we delay UniqueTreeIdForComp conversion here to allow modify uid
                 new_vars.append(v.uid_encoded)
@@ -558,9 +584,16 @@ def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY):
         for i in range(length):
             e = data_skeleton[i]
             if isinstance(e, Placeholder):
-                data[i] = arrays[e.index]
-            elif is_json_index(e, json_index):
-                data[i] = arrays[e[json_index]]
+                if (e.flag & JsonNodeSpecialFlags.ARRAY):
+                    data[i] = arrays[e.index]
+                else:
+                    data[i] = _put_arrays_to_data(arrays, e.data, json_index)
+            elif is_json_index(e, json_index) and (e[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+                flag = e[json_index][1]
+                if flag & JsonNodeSpecialFlags.ARRAY:
+                    data[i] = arrays[e[json_index][0]]
+                else:
+                    data[i] = e[json_index][0]
             else:
                 data[i] = _put_arrays_to_data(arrays, e, json_index)
         if isinstance(data_skeleton, tuple):
@@ -570,17 +603,31 @@ def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY):
         data = {}
         for k, v in data_skeleton.items():
             if isinstance(v, Placeholder):
-                data[k] = arrays[v.index]
-            elif is_json_index(v, json_index):
-                data[k] = arrays[v[json_index]]
+                if (v.flag & JsonNodeSpecialFlags.ARRAY):
+                    data[k] = arrays[v.index]
+                else:
+                    data[k] = _put_arrays_to_data(arrays, v.data, json_index)
+            elif is_json_index(v, json_index) and (v[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+                flag = v[json_index][1]
+                if flag & JsonNodeSpecialFlags.ARRAY:
+                    data[k] = arrays[v[json_index][0]]
+                else:
+                    data[k] = v[json_index][0]
             else:
                 data[k] = _put_arrays_to_data(arrays, v, json_index)
         return data
     else:
         if isinstance(data_skeleton, Placeholder):
-            data = arrays[data_skeleton.index]
-        elif is_json_index(data_skeleton, json_index):
-            data = arrays[data_skeleton[json_index]]
+            if (data_skeleton.flag & JsonNodeSpecialFlags.ARRAY):
+                data = arrays[data_skeleton.index]
+            else:
+                data = data_skeleton.data
+        elif is_json_index(data_skeleton, json_index) and (data_skeleton[json_index][1] & JsonNodeSpecialFlags.MASK_ARRAY_AND_JSON_ONLY):
+            flag = data_skeleton[json_index][1]
+            if flag & JsonNodeSpecialFlags.ARRAY:
+                data = arrays[data_skeleton[json_index][0]]
+            else:
+                data = data_skeleton[json_index][0]
         else:
             data = data_skeleton
         return data

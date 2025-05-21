@@ -415,6 +415,8 @@ class CompareType(enum.IntEnum):
     GREATER_EQUAL = 5
     IS = 6
     IS_NOT = 7
+    IN = 8
+    NOT_IN = 9
 
 _AST_COMPARE_TO_PFL_COMPARE = {
     ast.Eq: CompareType.EQUAL,
@@ -425,6 +427,8 @@ _AST_COMPARE_TO_PFL_COMPARE = {
     ast.GtE: CompareType.GREATER_EQUAL,
     ast.Is: CompareType.IS,
     ast.IsNot: CompareType.IS_NOT,
+    ast.In: CompareType.IN,
+    ast.NotIn: CompareType.NOT_IN,
 }
 
 @dataclasses.dataclass
@@ -543,8 +547,12 @@ class PFLCompare(PFLExpr):
     right: PFLExpr
     def __post_init__(self):
         if not (self.op == CompareType.EQUAL or self.op == CompareType.NOT_EQUAL or self.op == CompareType.IS or self.op == CompareType.IS_NOT):
-            self.left.st.check_support_binary_op("left")
-            self.right.st.check_support_binary_op("right")
+            if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
+                # only support object
+                assert self.left.st.type == PFLStaticTypeType.STRING and self.right.st.type == PFLStaticTypeType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
+            else:
+                self.left.st.check_support_binary_op("left")
+                self.right.st.check_support_binary_op("right")
         self.st = PFLStaticType(PFLStaticTypeType.BOOL)
         self.is_const = PFLExpr.all_constexpr(self.left, self.right)
         return self 
@@ -580,6 +588,7 @@ class PFLCall(PFLExpr):
 class PFLName(PFLExpr):
     id: str
     is_store: Union[Undefined, bool] = undefined
+    is_new: Union[Undefined, bool] = undefined
     def __post_init__(self):
         if self.st.type == PFLStaticTypeType.OBJECT_DATACLASS:
             assert self.st.annotype is not None, "dataclass must have annotype"
@@ -722,6 +731,7 @@ _ALL_SUPPORTED_AST_TYPES = {
     ast.AugAssign,
     ast.If,    
     ast.Expr,
+    ast.IfExp,
 }
 
 class PFLAstParseError(Exception):
@@ -806,9 +816,14 @@ def _parse_block_to_df_ast(body: list[ast.stmt], scope: dict[str, PFLStaticType]
                     raise PFLAstParseError("only support single assign", stmt)
                 value = _parse_expr_to_df_ast(stmt.value, scope)
                 tgt = stmt.targets[0]
+                is_new_var = False
                 if isinstance(tgt, ast.Name):
+                    if tgt.id not in scope:
+                        is_new_var = True
                     scope[tgt.id] = value.st
                 target = _parse_expr_to_df_ast(stmt.targets[0], scope)
+                if isinstance(target, PFLName):
+                    target.is_new = is_new_var
                 block.body.append(PFLAssign(PFLASTType.ASSIGN, target=target, value=value))
             elif isinstance(stmt, ast.AugAssign):
                 target = _parse_expr_to_df_ast(stmt.target, scope)
@@ -883,7 +898,6 @@ def parse_func_to_df_ast(func: Callable, scope: Optional[dict[str, PFLStaticType
     func_code_lines = clean_source_code(func_code_lines)
     code = "\n".join(func_code_lines)
     code = remove_common_indent_from_code(code)
-    print(code)
     tree = ast.parse(code)
     tree = ast.fix_missing_locations(RewriteSTLName(func.__globals__).visit(tree))
 

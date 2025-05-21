@@ -54,7 +54,7 @@ from tensorpc.dock.client import AppLocalMeta, MasterMeta
 from tensorpc.dock.core.uitypes import ALL_KEY_CODES
 from tensorpc.dock.serv_names import serv_names
 
-from tensorpc.core.core_io import JsonOnlyData
+from tensorpc.core.core_io import JsonSpecialData
 from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
@@ -835,7 +835,7 @@ class UIUpdateEvent:
 
     def to_dict(self):
         if self.json_only:
-            return JsonOnlyData(self.uid_to_data_undefined)
+            return JsonSpecialData(self.uid_to_data_undefined)
         else:
             return self.uid_to_data_undefined
 
@@ -1801,7 +1801,7 @@ class Component(Generic[T_base_props, T_child]):
         if evs:
             res["usedEvents"] = evs
         if self._flow_json_only:
-            res["props"] = JsonOnlyData(props)
+            res["props"] = JsonSpecialData(props)
         return res
 
     def _get_used_events_dict(self):

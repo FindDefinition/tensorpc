@@ -1,3 +1,4 @@
+import copy
 import json
 import math
 
@@ -13,10 +14,19 @@ import tensorpc.core.datamodel as D
 class App:
     @mark_create_layout
     def my_layout(self):
-        self.monitor = PerfMonitor()
+        self.monitor = PerfMonitor(use_view=True)
+        # self.monitor2 = mui.HBox([mui.Markdown("## PerfMonitor"),])
+        self.monitor2 = PerfMonitor(use_view=True)
+
         return mui.VBox([
             mui.Button("Load Trace", self._set_data),
-            self.monitor
+            three.ViewCanvas([
+                self.monitor.prop(flex=1),
+                # self.monitor2.prop(flex=1),
+
+            ]).prop(display="flex",
+                flexDirection="column", width="100%", height="100%", overflow="hidden"),
+            
         ]).prop(minHeight=0,
                 minWidth=0,
                 width="100%",
@@ -29,5 +39,6 @@ class App:
         with open(path, "r") as f:
             trace = json.load(f)
         trace_events = trace["traceEvents"]
-
-        await self.monitor.append_perf_data(0, [trace_events], [None], max_depth=10)
+        trace_events2 = copy.deepcopy(trace_events)
+        await self.monitor.append_perf_data(0, [trace_events2], [None], max_depth=15)
+        # await self.monitor2.append_perf_data(0, [trace_events], [None], max_depth=2)
