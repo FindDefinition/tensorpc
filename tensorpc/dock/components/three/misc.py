@@ -948,8 +948,8 @@ class LineProps(Object3dBaseProps):
     opacity: Annotated[Union[NumberType, Undefined],
                        typemetas.CommonObject(default=1.0)] = undefined
     variant: Union[Literal["default", "aabb"], Undefined] = undefined
-    aabbSizes: Union[list[tuple[NumberType, NumberType,
-                       NumberType]], np.ndarray, Undefined] = undefined
+    aabbSizes: Union[tuple[NumberType, NumberType,
+                       NumberType], np.ndarray, Undefined] = undefined
 
 class Line(Object3dWithEventBase[LineProps]):
 

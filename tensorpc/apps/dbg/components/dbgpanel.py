@@ -410,7 +410,7 @@ class MasterDebugPanel(mui.FlexBox):
         appctx.get_app().add_file_resource(FILE_RESOURCE_KEY, self._trace_download)
         self._scan_shutdown_ev.clear()
         self._scan_loop_task = asyncio.create_task(
-            self._scan_loop(self._scan_shutdown_ev))
+            self._scan_loop(self._scan_shutdown_ev), name="dbg-scan-loop")
         if not appctx.app_is_remote_comp():
             filter_cfg_str = await appctx.read_data_storage(f"{self._app_storage_key}/record_filter", raise_if_not_found=False)
             if filter_cfg_str is not None:
@@ -497,7 +497,7 @@ class MasterDebugPanel(mui.FlexBox):
             if sleep_task in done:
                 wait_tasks.remove(sleep_task)
                 sleep_task = asyncio.create_task(
-                    asyncio.sleep(self._scan_duration))
+                    asyncio.sleep(self._scan_duration), name="dbg-scan-sleep")
                 wait_tasks.append(sleep_task)
                 try:
                     await self._update_remote_server_discover_lst()

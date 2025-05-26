@@ -3244,7 +3244,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._shutdown_ev: asyncio.Event = asyncio.Event()
         self._remote_task: Optional[asyncio.Task] = None
 
-        self._patch_in_remote = False
         self._cur_ts = 0
 
         self._fastrpc_timeout = 5
@@ -3317,10 +3316,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                         self._key, prefixes, url, port)
             res = await aiter_remote.__anext__()
             layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
-            _patch_in_remote = self._patch_in_remote
             root_comp_uid = root_comp_uid_before
-            if not _patch_in_remote:
-                layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
+            layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
             self.set_cur_child_uids(list(layout.keys()))
             for k, v in layout.items():
                 assert isinstance(v["uid"], UniqueTreeId), f"{layout}"
@@ -3336,8 +3333,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             # print("LAYOUT", layout)
             await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
             self._is_remote_mounted = True
-            next_item_task = asyncio.create_task(aiter_remote.__anext__())
-            shutdown_task = asyncio.create_task(self._shutdown_ev.wait())
+            next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
+            shutdown_task = asyncio.create_task(self._shutdown_ev.wait(), name="rcomp-shutdown-wait")
             while True:
                 try:
                     done, pending = await asyncio.wait(
@@ -3365,40 +3362,21 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
                         else:
                             app_event_dict = ev
-                            if self._patch_in_remote:
-                                # sync some state from remote component
-                                for ev_type, ev_dict in app_event_dict["typeToEvents"]:
-                                    if ev_type == AppEventType.UpdateComponents:
-                                        # when layout in remote changed, we must keep comp uids in main app.
-                                        assert "remoteComponentAllChilds" in ev_dict
-                                        self.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
-                                app_ev = AppEvent.from_dict(app_event_dict)
-                            else:
-                                app_event = AppEvent.from_dict(app_event_dict)
-                                # ev._remote_prefixes = prefixes
-                                app_event.patch_keys_prefix_inplace(prefixes)
-                                for ui_ev in app_event.type_to_event.values():
-                                    if isinstance(ui_ev, UpdateComponentsEvent):
-                                        assert ui_ev.remote_component_all_childs is not None
-                                        ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
-                                            ui_ev.remote_component_all_childs, prefixes)
-                                        self.set_cur_child_uids(ui_ev.remote_component_all_childs)
-                                app_event_dict = app_event.to_dict()
-                                app_event_dict = patch_unique_id(app_event_dict, prefixes)
+                            app_event = AppEvent.from_dict(app_event_dict)
+                            # ev._remote_prefixes = prefixes
+                            app_event.patch_keys_prefix_inplace(prefixes)
+                            for ui_ev in app_event.type_to_event.values():
+                                if isinstance(ui_ev, UpdateComponentsEvent):
+                                    assert ui_ev.remote_component_all_childs is not None
+                                    ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
+                                        ui_ev.remote_component_all_childs, prefixes)
+                                    self.set_cur_child_uids(ui_ev.remote_component_all_childs)
+                            app_event_dict = app_event.to_dict()
+                            app_event_dict = patch_unique_id(app_event_dict, prefixes)
 
-                                # if get_app()._is_remote_component:
-                                #     print("---------REMOTE-------", self._flow_uid)
-                                #     print("REMOTE!!!", app_event_dict)
-                                #     print("---------REMOTE END-------")
-                                # else:
-                                #     print("---------LOCAL-------", self._flow_uid, self._cur_child_uids)
-
-                                #     print("LOCAL!!!", app_event_dict)
-                                #     print("---------LOCAL END-------")
-
-                                app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
+                            app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
                             await self.put_app_event(app_ev)
-                        next_item_task = asyncio.create_task(aiter_remote.__anext__())
+                        next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
                     except StopAsyncIteration:
                         break
 
@@ -3453,7 +3431,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 self._shutdown_ev.clear()
                 await self.health_check(1)
                 self._remote_task = asyncio.create_task(
-                    self._remote_msg_handle_loop(prefixes, "", -1))
+                    self._remote_msg_handle_loop(prefixes, "", -1), name="remote_msg_handle_loop")
                 self._cur_ts = 0
         except BaseException as e:
             await self.send_exception(e)
@@ -3490,11 +3468,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        if self._patch_in_remote:
-            return res["layout"], res["remoteRootUid"]
-        else:
-            return self._patch_layout_dict(res["layout"],
-                                           res["remoteRootUid"], prefixes)
+        return self._patch_layout_dict(res["layout"],
+                                        res["remoteRootUid"], prefixes)
 
     def _patch_layout_dict(self, layout, remote_root_uid: str, prefixes: list[str]):
         layout_dict = layout
@@ -3515,11 +3490,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        if self._patch_in_remote:
-            return res["layout"], res["remoteRootUid"]
-        else:
-            return self._patch_layout_dict(res["layout"],
-                                           res["remoteRootUid"], prefixes)
+        return self._patch_layout_dict(res["layout"],
+                                        res["remoteRootUid"], prefixes)
 
     async def handle_remote_event(self,
                                   ev_data: tuple[str, Any],
@@ -3531,9 +3503,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             ev_data[0]: ev_data[1]
         }
         uiev = UIEvent.from_dict(ev_data_dict)
-        if not self._patch_in_remote:
-            uiev.unpatch_keys_prefix_inplace(prefixes)
-            ev_data_dict = uiev.to_dict()
+        uiev.unpatch_keys_prefix_inplace(prefixes)
+        ev_data_dict = uiev.to_dict()
         while True:
             try:
                 return await self.remote_call(

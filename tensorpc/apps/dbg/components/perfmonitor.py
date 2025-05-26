@@ -1,13 +1,9 @@
 import asyncio
 import bisect
-import copy
 from functools import partial
-import json
 import math
 import time
 
-import yaml
-from tensorpc.constants import TENSORPC_DEV_SECRET_PATH
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout
@@ -135,7 +131,7 @@ def _keyhold_handler_dfdsl(root: VisModel, data: KeyboardHoldEvent):
             # newScrollValueX = (offset / width * dX + scrollValueX * (scaleX - dX - 1)) / (scaleX - 1)
             # newScrollValueX = (offset / width + scrollValueX) * dX / (scaleX - 1) + scrollValueX
 
-            root.scrollValueX = MathUtil.clamp((root.perfHover.pointLocal[0] + 0.5 - prev_scroll_value) * real_dx / Math.max(prev - 1.0, 1e-6) + prev_scroll_value, 0.0, 1.0)
+            root.scrollValueX = MathUtil.clamp((root.perfHover.pointLocal[0] + 0.5 - prev_scroll_value) * real_dx / Math.max(new_scale - 1.0, 1e-6) + prev_scroll_value, 0.0, 1.0)
         else:
             root.scrollValueX = MathUtil.clamp(prev_scroll_value + dx, 0.0, 1.0)
 
@@ -321,7 +317,6 @@ class PerfMonitor(mui.FlexBox):
         perf_event_plane.event_move.add_frontend_draft_change(draft, "perfHover")
         perf_event_plane.event_leave.add_frontend_draft_set_none(draft, "perfHover")
 
-        viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
         scrollbar_event_plane.event_wheel.add_frontend_draft_change(draft, "scrollValueY", f"clamp(__PREV_VALUE__ + wheel.deltaY * `0.001`, `0`, `1`)")
         # scrollbar_event_plane.event_wheel.on(lambda e: print(e)).configure(debounce=300)
         scrollbar.event_pose_change.add_frontend_draft_change(draft, "scrollValueY", f"clamp(-positionLocal[1] / maximum(`1` - __TARGET__.layout.scrollFactorY, `0.0001`) + `0.5`, `0`, `1`)")
@@ -378,8 +373,8 @@ class PerfMonitor(mui.FlexBox):
         line_end_cond.bind_fields(condition="$.hoverData != `null`")
         header = mui.Typography().prop(variant="caption")
         self.history: list[VisModel] = []
-        slider = mui.BlenderSlider(0, 1, 1, self._select_vis_model)
-        slider.prop(isInteger=True, showControlButton=True)
+        slider = mui.BlenderSlider(0, 0, 1, self._select_vis_model)
+        slider.prop(isInteger=True, showControlButton=True, showTotal=True)
         # select = mui.Autocomplete("history", [], self._select_vis_model).prop(size="small", textFieldProps=mui.TextFieldProps(muiMargin="dense"))
         self.history_slider = slider
         self._header = header

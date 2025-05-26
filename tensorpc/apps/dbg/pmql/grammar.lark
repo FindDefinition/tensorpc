@@ -1,0 +1,55 @@
+
+// Module-only queries
+
+// mod1.asd*.mod3
+// mod1.**.mod3
+// mod1.<Block>.name
+// mod1.**.<nn.Linear>
+
+// Variable queries
+// args[0]
+// kwargs.*states
+// kwargs.**.key
+
+// Module+Call Variable queries
+
+// mod1.asd*.mod3@args[0]
+// mod1.asd*.mod3@kwargs.*states
+// mod1.asd*.mod3@ret
+// mod1.asd*.mod3@ret[0].key
+
+// Module+stack based queries
+// mod1.asd*.mod3!var_query_expr # fwd call frame, looking for previous non-torch call frame.
+
+?start: query_expr | module_var_query | module_stack_query
+?mod_query_item: plain_item | type_item | double_glob | partial_glob
+
+plain_item: NAME
+type_item: "<" QUALNAME ">"
+index_item: "[" (SIGNED_INT | STAR | ESCAPED_STRING) "]"
+double_glob: "**"
+partial_glob_strip: WORD_WITH_LOWER ("*" WORD_WITH_LOWER)*
+partial_glob:  STAR? partial_glob_strip STAR?
+
+query_expr: mod_query_item (("." mod_query_item) | index_item)*
+module_variable_query_expr: VQ_LITERALS (("." mod_query_item) | index_item)*
+
+module_var_query: query_expr "@" module_variable_query_expr
+module_stack_query: query_expr "!" query_expr
+
+%import common.CNAME -> NAME
+%import common.LETTER -> LETTER
+%import common.DIGIT -> DIGIT
+%import common.SIGNED_INT -> SIGNED_INT
+%import common.ESCAPED_STRING
+
+VQ_LITERALS: "args" | "kwargs" | "ret"
+
+WORD_WITH_LOWER: (LETTER | DIGIT | "_")+
+
+QUALNAME: NAME ("." NAME)*
+
+
+STAR: "*"
+
+%ignore /[\t \f]+/  // WS

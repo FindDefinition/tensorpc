@@ -290,18 +290,21 @@ class AnnotatedType:
     def is_dataclass_type(self) -> bool:
         return dataclasses.is_dataclass(self.origin_type)
 
+    def _is_non_class_base_type(self):
+        return self.is_union_type() or self.is_any_type() or self.is_tuple_type()
+
     def is_dict_type(self) -> bool:
-        if self.is_union_type():
+        if self._is_non_class_base_type():
             return False
         return issubclass(self.origin_type, dict)
 
     def is_list_type(self) -> bool:
-        if self.is_union_type():
+        if self._is_non_class_base_type():
             return False
         return issubclass(self.origin_type, list)
 
     def is_sequence_type(self) -> bool:
-        if self.is_union_type() or self.is_any_type():
+        if self._is_non_class_base_type():
             return False
         assert inspect.isclass(
             self.origin_type
@@ -310,7 +313,7 @@ class AnnotatedType:
                           Sequence) and not issubclass(self.origin_type, str)
 
     def is_mapping_type(self) -> bool:
-        if self.is_union_type() or self.is_any_type():
+        if self._is_non_class_base_type():
             return False
         assert inspect.isclass(
             self.origin_type
@@ -371,6 +374,18 @@ class AnnotatedType:
                                               is_undefined=self.is_undefined)
             for field in dataclasses.fields(self.origin_type)
         }
+
+    def get_dataclass_fields_and_annotated_types(
+            self) -> dict[str, tuple["AnnotatedType", Field]]:
+        assert self.is_dataclass_type()
+        type_hints = get_type_hints_with_cache(self.origin_type,
+                                               include_extras=True)
+        res: dict[str, tuple["AnnotatedType", Field]] = {}
+        for field in dataclasses.fields(self.origin_type):
+            field_type = type_hints[field.name]
+            field_annotype = parse_type_may_optional_undefined(field_type)
+            res[field.name] = (field_annotype, field)
+        return res
 
     @staticmethod
     def get_any_type():

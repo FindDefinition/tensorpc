@@ -2,12 +2,12 @@ import dataclasses
 import math
 import random
 import struct
-from typing import Union
+from typing import Any, Union
 from .pfl_reg import register_df_std
-
+import numpy as np 
 # implement all math func in javascript Math 
 
-@register_df_std(js_name="Math")
+@register_df_std(mapped_name="Math", backend="js")
 @dataclasses.dataclass
 class Math:
     @staticmethod 
@@ -174,9 +174,44 @@ class Math:
     SQRT2: float = math.sqrt(2)
 
 
-@register_df_std(js_name="MathUtil")
+@register_df_std(mapped_name="MathUtil", backend="js")
 @dataclasses.dataclass
 class MathUtil:
     @staticmethod
     def clamp(x: float, min_val: float, max_val: float) -> float:
         return max(min(x, max_val), min_val)
+
+@register_df_std(mapped_name="NdArray", mapped=np.ndarray, backend="js")
+@dataclasses.dataclass
+class NdArray:
+    shape: list[int]
+    dtype: int
+    ndim: int
+    def __getitem__(self, key: int) -> np.ndarray: ...
+    def tolist(self) -> list[Any]: ...
+    def size(self) -> int: ...
+
+@register_df_std(mapped_name="Numpy", mapped=np, backend="js")
+@dataclasses.dataclass
+class Numpy:
+    float32: int = 0
+    float64: int = 4
+    int8: int = 3
+    int16: int = 2
+    int32: int = 1
+    int64: int = 8
+    uint8: int = 6
+    uint16: int = 9
+    uint32: int = 10
+    uint64: int = 11
+    bool_: int = 5
+    
+    @staticmethod
+    def array(data: list[Any]) -> np.ndarray: ...
+    @staticmethod
+    def zeros(shape: list[int], dtype: int) -> np.ndarray: ...
+    @staticmethod
+    def ones(shape: list[int], dtype: int) -> np.ndarray: ...
+    @staticmethod
+    def full(shape: list[int], val: Union[int, float], dtype: int) -> np.ndarray: ...
+

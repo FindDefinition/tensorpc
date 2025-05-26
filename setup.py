@@ -54,6 +54,7 @@ REQUIRED = [
     "hsluv",
     "fsspec",
     "orjson",
+    "lark",
 ]
 
 # What packages are optional?

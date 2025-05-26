@@ -2856,6 +2856,7 @@ class BlenderSliderProps(MUIComponentBaseProps):
     iconColor: Union[Undefined, str] = undefined
     fractionDigits: Union[Undefined, int] = undefined
     isInteger: Union[Undefined, bool] = undefined
+    showTotal: Union[Undefined, bool] = undefined
 
 
 class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
@@ -4561,7 +4562,7 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
     @property
     def update_event(self):
         propcls = self.propcls
-        return self._update_props_base(propcls, json_only=True)
+        return self._update_props_base(propcls)
 
     async def update_tree(self, tree: JsonLikeNode):
         await self.send_and_wait(self.update_event(tree=tree))
@@ -4643,8 +4644,7 @@ class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
         ]
         super().__init__(base_type,
                          prop_cls,
-                         allowed_events=tview_events,
-                         json_only=True)
+                         allowed_events=tview_events)
         self.props.tree = tree
 
         self.event_select = self._create_event_slot(
@@ -4725,7 +4725,6 @@ class RawTanstackJsonLikeTree(RawJsonLikeTreeBase[RawTanstackJsonLikeTreeProps]
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls,
-                                       json_only=True,
                                        ensure_json_keys=["tree"])
 
     async def handle_event(self, ev: Event, is_sync: bool = False):

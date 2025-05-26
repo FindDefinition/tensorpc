@@ -1,6 +1,4 @@
 import asyncio
-import collections
-import collections.abc
 import dataclasses
 import inspect
 import io
@@ -58,8 +56,6 @@ class AppObject:
     obj: Any = None
     mounted_app_meta: Optional[MountedAppMeta] = None
 
-
-_PATCH_IN_REMOTE = False
 
 class RemoteComponentService:
 
@@ -201,18 +197,10 @@ class RemoteComponentService:
         root_uid = app_obj.app.root._flow_uid
         assert root_uid is not None
         layout_dict = lay["layout"]
-        if _PATCH_IN_REMOTE:
-            layout_dict = patch_uid_keys_with_prefix(layout_dict, prefixes)
-            for k, v in layout_dict.items():
-                layout_dict[k] = patch_unique_id(v, prefixes)
         lay["layout"] = layout_dict
         # # print("APP layout_dict", layout_dict)
-        if _PATCH_IN_REMOTE:
-            lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
-                prefixes + root_uid.parts).uid_encoded
-        else:
-            lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
-                root_uid.parts).uid_encoded
+        lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
+            root_uid.parts).uid_encoded
         return lay
 
     async def mount_app_generator(self, key: str,
@@ -379,24 +367,11 @@ class RemoteComponentService:
         return await app_obj.app.handle_msg_from_remote_comp(rpc_key, event)
 
     def _patch_app_event(self, ev: AppEvent, prefixes: List[str], app: App,):
-        if _PATCH_IN_REMOTE:
-            ev._remote_prefixes = prefixes
-            ev.patch_keys_prefix_inplace(prefixes)
         for ui_ev in ev.type_to_event.values():
             if isinstance(ui_ev, UpdateComponentsEvent):
                 comp_dict = app.root._get_uid_encoded_to_comp_dict()
-                if _PATCH_IN_REMOTE:
-                    uids = list(comp_dict.keys())
-                    for v in comp_dict.values():
-                        if isinstance(v, RemoteComponentBase):
-                            uids.extend(v._cur_child_uids)
-                    ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
-                        list(comp_dict.keys()), prefixes)
-                else:
-                    ui_ev.remote_component_all_childs = list(comp_dict.keys())
+                ui_ev.remote_component_all_childs = list(comp_dict.keys())
         ev_dict = ev.to_dict()
-        if _PATCH_IN_REMOTE:
-            ev_dict = patch_unique_id(ev_dict, prefixes)
         return ev_dict
 
     async def _send_grpc_event_large(self,
@@ -425,8 +400,6 @@ class RemoteComponentService:
         prefixes = app_obj.mounted_app_meta.prefixes
         if type == AppEventType.UIEvent.value:
             ev = UIEvent.from_dict(data)
-            if _PATCH_IN_REMOTE:
-                ev.unpatch_keys_prefix_inplace(prefixes)
             return await app_obj.app._handle_event_with_ctx(ev, is_sync)
 
     async def handle_simple_rpc(self, key: str, event: str, *args, **kwargs):

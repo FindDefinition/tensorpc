@@ -8,10 +8,10 @@ WARNING: PFL is static typed to get better performance, union isn't supported ex
 
 """
 import contextlib
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Type, Union
 
 from tensorpc.core import inspecttools
-from tensorpc.core.annolib import AnnotatedType, Undefined, parse_annotated_function, parse_type_may_optional_undefined, undefined
+from tensorpc.core.annolib import AnnotatedType, T_dataclass, Undefined, child_dataclass_type_generator, child_type_generator_with_dataclass, parse_annotated_function, parse_type_may_optional_undefined, undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from typing_extensions import Self
 import enum 
@@ -21,7 +21,9 @@ import contextvars
 
 from tensorpc.core.datamodel.pfl.pfl_std import Math, MathUtil
 from tensorpc.core.funcid import clean_source_code, remove_common_indent_from_code
-from .pfl_reg import STD_REGISTRY
+from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.core.tree_id import UniqueTreeId
+from .pfl_reg import STD_REGISTRY, StdRegistryItem
 
 class PFLStaticTypeType(enum.IntEnum):
     UNKNOWN = -1
@@ -34,8 +36,9 @@ class PFLStaticTypeType(enum.IntEnum):
     FUNCTION = 6
     NONE_TYPE = 7
     UNDEFINED_TYPE = 8
-    OBJECT_DATACLASS = 9
+    DATACLASS_TYPE = 9
     ANY = 10
+    DATACLASS_OBJECT = 11
 
 _BASE_TYPE_TO_STRING = {
     PFLStaticTypeType.UNKNOWN: "unknown",
@@ -53,7 +56,7 @@ _TYPE_CAN_CAST_TO_BOOL = {
     PFLStaticTypeType.STRING,
     PFLStaticTypeType.ARRAY,
     PFLStaticTypeType.OBJECT,
-    PFLStaticTypeType.OBJECT_DATACLASS,
+    PFLStaticTypeType.DATACLASS_OBJECT,
 }
 
 _TYPE_SUPPORT_BINARY_OP = {
@@ -84,10 +87,17 @@ _BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE = {
 }
 
 class PFLParseContext:
-    def __init__(self, lines: list[str]):
+    def __init__(self, lines: list[str], backend: str = "js", temp_std_items: Optional[dict[Type, StdRegistryItem]] = None):
         self.lines = lines
 
         self.error_node: Optional[ast.AST] = None
+        self._backend = backend
+
+        self._std_item_cache: dict[Type, StdRegistryItem] = {}
+        if temp_std_items is not None:
+            self._std_item_cache.update(temp_std_items)
+        self._func_parse_result_cache: dict[Callable, PFLStaticType] = {}
+        self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
 
     def format_error_from_lines_node(self, node: ast.AST):
         if hasattr(node, "lineno") and hasattr(node, "col_offset"):
@@ -97,6 +107,30 @@ class PFLParseContext:
                 line = self.lines[lineno - 1]
                 return f"{line}\n{' ' * col_offset}^"
         return ""
+
+    def cached_parse_func(self, func: Callable, ignore_self: bool = False) -> "PFLStaticType":
+        if func in self._func_parse_result_cache:
+            return self._func_parse_result_cache[func]
+        sig = inspect.signature(func)
+        return PFLStaticType.from_signature(sig, ignore_self=ignore_self)
+
+    def cached_get_std_item(self, dcls: Type[T_dataclass]):
+        if dcls in self._std_item_cache:
+            return self._std_item_cache[dcls]
+        item = STD_REGISTRY.get_item_by_dcls(dcls, self._backend)
+        if item is None:
+            raise ValueError(f"can't find your type {get_qualname_of_type(dcls)} from std registry.")
+        self._std_item_cache[dcls] = item 
+        return item 
+
+    def cached_get_dcls_by_mapped_type(self, usercls: Any):
+        if usercls in self._mapped_type_cache:
+            return self._mapped_type_cache[usercls]
+        item = STD_REGISTRY.get_dcls_item_by_mapped_type(usercls, self._backend)
+        if item is None:
+            raise ValueError(f"can't find your mapped type {get_qualname_of_type(usercls)} from std registry.")
+        self._mapped_type_cache[usercls] = item 
+        return item 
 
 _PFLPARSE_CONTEXT: contextvars.ContextVar[
     Optional[PFLParseContext]] = contextvars.ContextVar(
@@ -159,13 +193,18 @@ def _dftype_with_gen_to_supported_methods(vt: Any):
 class PFLStaticType:
     type: PFLStaticTypeType
     childs: list['PFLStaticType'] = dataclasses.field(default_factory=list)
-    return_type: Optional["PFLStaticType"] = None
     has_optional: bool = False
     has_undefined: bool = False
+    # for custom dataclass
+    mapped: str = ""
     # for container and dataclass
     annotype: Optional[AnnotatedType] = None
+    # for function
+    return_type: Optional["PFLStaticType"] = None
     default: Union[Undefined, Any] = undefined
     is_vaargs: bool = False
+    # for dataclass in function arg
+    is_temp: bool = False
 
     def to_dict(self):
         childs = [c.to_dict() for c in self.childs]
@@ -180,6 +219,9 @@ class PFLStaticType:
             res["has_undefined"] = self.has_undefined
         if self.is_vaargs:
             res["is_vaargs"] = self.is_vaargs
+        if self.mapped:
+            res["mapped"] = self.mapped
+
         return res
 
     def __repr__(self) -> str:
@@ -189,9 +231,12 @@ class PFLStaticType:
         elif self.type == PFLStaticTypeType.OBJECT:
             child_repr = str(self.childs[0])
             res = f"Record<string, {child_repr}>"
-        elif self.type == PFLStaticTypeType.OBJECT_DATACLASS:
+        elif self.type == PFLStaticTypeType.DATACLASS_TYPE:
             assert self.annotype is not None 
-            res = str(self.annotype.origin_type)
+            res = str(self.annotype.origin_type.__name__)
+        elif self.type == PFLStaticTypeType.DATACLASS_OBJECT:
+            assert self.annotype is not None 
+            res = str(self.annotype.origin_type.__name__) + "()"
         elif self.type == PFLStaticTypeType.FUNCTION:
             args_str = []
             for arg in self.childs:
@@ -203,55 +248,75 @@ class PFLStaticType:
             res = f"({args}) => {self.return_type}"
         else:
             res = _BASE_TYPE_TO_STRING[self.type]
+        if self.mapped:
+            res += f"({self.mapped})"
+
         if self.has_optional:
             res += " | null"
         if self.has_undefined:
             res += " | undefined"
         return res
 
+    def get_origin_type_checked(self):
+        assert self.annotype is not None 
+        return self.annotype.origin_type
+
     @classmethod 
-    def from_annotype(cls, annotype: AnnotatedType) -> Self:
+    def from_annotype(cls, annotype: AnnotatedType, is_type: bool = True) -> Self:
         if annotype.origin_type in _BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
             res = cls(_BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE[annotype.origin_type])
         elif annotype.is_number_type():
             res = cls(PFLStaticTypeType.NUMBER)
         elif annotype.is_list_type():
             value_anno_type = annotype.get_list_value_anno_type()
-            res = cls(PFLStaticTypeType.ARRAY, [PFLStaticType.from_annotype(value_anno_type)])
+            res = cls(PFLStaticTypeType.ARRAY, [PFLStaticType.from_annotype(value_anno_type, is_type)])
         elif annotype.is_dict_type():
             value_anno_type = annotype.get_dict_value_anno_type()
-            res = cls(PFLStaticTypeType.OBJECT, [PFLStaticType.from_annotype(value_anno_type)])
+            res = cls(PFLStaticTypeType.OBJECT, [PFLStaticType.from_annotype(value_anno_type, is_type)])
         elif annotype.is_dataclass_type():
-            res = cls(PFLStaticTypeType.OBJECT_DATACLASS)
+            res = cls(PFLStaticTypeType.DATACLASS_TYPE if is_type else PFLStaticTypeType.DATACLASS_OBJECT)
+            item = get_parse_context_checked().cached_get_std_item(annotype.origin_type)
+            res.mapped = item.mapped_name
+            res.is_temp = item.is_temp
         elif annotype.is_tuple_type():
             # TODO add real tuple support
             first_child_type = annotype.child_types[0]
             assert all(c == first_child_type for c in annotype.child_types), "tuple must be same type"
-            res = cls(PFLStaticTypeType.ARRAY, [PFLStaticType.from_annotype(parse_type_may_optional_undefined(first_child_type))])
+            res = cls(PFLStaticTypeType.ARRAY, [PFLStaticType.from_annotype(parse_type_may_optional_undefined(first_child_type), is_type)])
         elif annotype.is_any_type():
             res = cls(PFLStaticTypeType.ANY, [])
         else:
-            raise ValueError(f"not support annotype {annotype}")
+            mapped_item = get_parse_context_checked().cached_get_dcls_by_mapped_type(annotype.origin_type)
+            if mapped_item is None:
+                raise ValueError(f"not support annotype {annotype}")
+            res = cls(PFLStaticTypeType.DATACLASS_TYPE if is_type else PFLStaticTypeType.DATACLASS_OBJECT)
+            res.mapped = mapped_item.mapped_name
+            annotype = parse_type_may_optional_undefined(mapped_item.dcls)
+
         res.annotype = annotype
         res.has_optional = annotype.is_optional
         res.has_undefined = annotype.is_undefined 
         return res
 
     @classmethod 
-    def from_signature(cls, sig: inspect.Signature) -> Self:
+    def from_signature(cls, sig: inspect.Signature, ignore_self: bool = False) -> Self:
         res = cls(PFLStaticTypeType.FUNCTION)
+        cnt = 0
         for param in sig.parameters.values():
+            if ignore_self and cnt == 0 and param.name == "self":
+                continue 
             assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
             annotype = parse_type_may_optional_undefined(param.annotation)
-            arg = PFLStaticType.from_annotype(annotype)
+            arg = PFLStaticType.from_annotype(annotype, is_type=False)
             res.childs.append(arg)
             if param.default is not inspect.Parameter.empty:
                 arg.default = param.default
             arg.is_vaargs = param.kind == inspect.Parameter.VAR_POSITIONAL
+            cnt += 1
         if sig.return_annotation is not inspect.Parameter.empty:
             if sig.return_annotation is not None:
                 annotype = parse_type_may_optional_undefined(sig.return_annotation)
-                res.return_type = PFLStaticType.from_annotype(annotype)
+                res.return_type = PFLStaticType.from_annotype(annotype, is_type=False)
             else:
                 res.return_type = PFLStaticType(PFLStaticTypeType.NONE_TYPE)
         return res 
@@ -259,16 +324,20 @@ class PFLStaticType:
     def __eq__(self, other):
         if not isinstance(other, PFLStaticType):
             return False
-        if other.type == PFLStaticTypeType.ANY:
+        if other.type == PFLStaticTypeType.ANY or self.type == PFLStaticTypeType.ANY:
             return True
         if self.type != other.type:
             return False
+        if self.type == PFLStaticTypeType.DATACLASS_OBJECT:
+            assert self.annotype is not None 
+            return self.get_origin_type_checked() is other.get_origin_type_checked()
         if len(self.childs) != len(other.childs):
             return False
         for i in range(len(self.childs)):
             if self.childs[i] != other.childs[i]:
                 return False
         return True
+        
 
     def can_cast_to_bool(self):
         return self.type in _TYPE_CAN_CAST_TO_BOOL
@@ -300,6 +369,9 @@ class PFLStaticType:
                 return self.childs[0].is_convertable(tgt.childs[0])
             return False
         return self == tgt
+
+    def check_convertable(self, tgt: "PFLStaticType", desc: str):
+        assert self.is_convertable(tgt), f"{desc} is not convertable from {self} to {tgt}"
 
 @dataclasses.dataclass
 class PFLStaticVar(PFLStaticType):
@@ -431,6 +503,30 @@ _AST_COMPARE_TO_PFL_COMPARE = {
     ast.NotIn: CompareType.NOT_IN,
 }
 
+_PFL_BINARY_TYPE_TO_METHOD_NAME = {
+    CompareType.EQUAL: "__eq__",
+    CompareType.NOT_EQUAL: "__ne__",
+    CompareType.LESS: "__lt__",
+    CompareType.LESS_EQUAL: "__le__",
+    CompareType.GREATER: "__gt__",
+    CompareType.GREATER_EQUAL: "__ge__",
+    CompareType.IN: "__contains__",
+    CompareType.NOT_IN: "__contains__",
+
+    BinOpType.ADD: "__add__",
+    BinOpType.SUB: "__sub__",
+    BinOpType.MULT: "__mul__",
+    BinOpType.DIV: "__truediv__",
+    BinOpType.MOD: "__mod__",
+    BinOpType.POW: "__pow__",
+    BinOpType.LSHIFT: "__lshift__",
+    BinOpType.RSHIFT: "__rshift__",
+    BinOpType.BIT_OR: "__or__",
+    BinOpType.BIT_XOR: "__xor__",
+    BinOpType.BIT_AND: "__and__",
+}
+
+
 @dataclasses.dataclass
 class PFLAstNodeBase:
     type: PFLASTType
@@ -491,6 +587,7 @@ class PFLIf(PFLAstStmt):
 class PFLExprStmt(PFLAstStmt):
     value: PFLExpr
 
+
 @dataclasses.dataclass(kw_only=True)
 class PFLBoolOp(PFLExpr):
     op: BoolOpType
@@ -501,19 +598,6 @@ class PFLBoolOp(PFLExpr):
         assert self.left.st.support_bool_op()
         assert self.right.st.support_bool_op()
         self.st = PFLStaticType(PFLStaticTypeType.BOOL)
-        self.is_const = PFLExpr.all_constexpr(self.left, self.right)
-        return self 
-
-@dataclasses.dataclass(kw_only=True)
-class PFLBinOp(PFLExpr):
-    op: BinOpType
-    left: PFLExpr
-    right: PFLExpr
-
-    def __post_init__(self):
-        self.left.st.check_support_binary_op("left")
-        self.right.st.check_support_binary_op("right")
-        self.st = PFLStaticType(PFLStaticTypeType.NUMBER)
         self.is_const = PFLExpr.all_constexpr(self.left, self.right)
         return self 
 
@@ -541,18 +625,80 @@ class PFLIfExp(PFLExpr):
         return self 
 
 @dataclasses.dataclass(kw_only=True)
-class PFLCompare(PFLExpr):
-    op: CompareType
+class PFLBinOpBase(PFLExpr):
     left: PFLExpr
     right: PFLExpr
+    # when we use custom operator, indicate which operand is used
+    # for custom operator resolution.
+    is_right: Union[bool, Undefined] = undefined
+    def resolve_custom_type(self, op: Union[BinOpType, CompareType]):
+        # overrideable operators
+        left = self.left 
+        right = self.right
+        is_custom_type: bool = False
+        custom_res_type = None
+        resolved_custom_expr = None
+        if left.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+            resolved_custom_expr = left 
+        elif right.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+            resolved_custom_expr = right 
+            self.is_right = True
+        if resolved_custom_expr is not None:
+            assert not resolved_custom_expr.st.is_temp, f"temp dataclass {resolved_custom_expr.st} (not stdlib) can't be used in custom operator"
+            dcls_type = resolved_custom_expr.st.get_origin_type_checked()
+            # use custom operator in left st if found
+            op_name = _PFL_BINARY_TYPE_TO_METHOD_NAME[op]
+            op_func = inspect.getattr_static(dcls_type, op_name, None)
+            assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
+            op_func_st = get_parse_context_checked().cached_parse_func(op_func, True)
+            assert len(op_func_st.childs) == 1, f"custom operator {op_name} must have one arg, but got {len(op_func_st.childs)}"
+            if left.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+                right.st.check_convertable(op_func_st.childs[0], f"custom operator {op_name} arg")
+            elif right.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+                left.st.check_convertable(op_func_st.childs[0], f"custom operator {op_name} arg")
+            is_custom_type = True
+            custom_res_type = op_func_st.return_type
+            assert custom_res_type is not None, f"custom operator {op_name} must have return type"
+        return is_custom_type, custom_res_type
+
+@dataclasses.dataclass(kw_only=True)
+class PFLBinOp(PFLBinOpBase):
+    op: BinOpType
     def __post_init__(self):
-        if not (self.op == CompareType.EQUAL or self.op == CompareType.NOT_EQUAL or self.op == CompareType.IS or self.op == CompareType.IS_NOT):
-            if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
-                # only support object
-                assert self.left.st.type == PFLStaticTypeType.STRING and self.right.st.type == PFLStaticTypeType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
-            else:
-                self.left.st.check_support_binary_op("left")
-                self.right.st.check_support_binary_op("right")
+        is_custom_type, custom_res_type = self.resolve_custom_type(self.op)
+        if not is_custom_type:
+            self.left.st.check_support_binary_op("left")
+            self.right.st.check_support_binary_op("right")
+            self.st = PFLStaticType(PFLStaticTypeType.NUMBER)
+        else:
+            assert custom_res_type is not None 
+            self.st = custom_res_type
+        self.is_const = PFLExpr.all_constexpr(self.left, self.right)
+        return self 
+
+@dataclasses.dataclass(kw_only=True)
+class PFLCompare(PFLBinOpBase):
+    op: CompareType
+    def __post_init__(self):
+        is_custom_type = False
+        if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
+            # contains operator don't support custom datatype
+            assert self.left.st.type != PFLStaticTypeType.DATACLASS_OBJECT
+            assert self.right.st.type != PFLStaticTypeType.DATACLASS_OBJECT
+
+        if not (self.op == CompareType.IS or self.op == CompareType.IS_NOT):
+            # overrideable operators
+            is_custom_type, _ = self.resolve_custom_type(self.op)
+        
+        if not is_custom_type:
+            # all operands are base type
+            if not (self.op == CompareType.EQUAL or self.op == CompareType.NOT_EQUAL or self.op == CompareType.IS or self.op == CompareType.IS_NOT):
+                # handle string-type compares
+                if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
+                    assert self.left.st.type == PFLStaticTypeType.STRING and self.right.st.type == PFLStaticTypeType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
+                else:
+                    self.left.st.check_support_binary_op("left")
+                    self.right.st.check_support_binary_op("right")
         self.st = PFLStaticType(PFLStaticTypeType.BOOL)
         self.is_const = PFLExpr.all_constexpr(self.left, self.right)
         return self 
@@ -562,27 +708,43 @@ class PFLCall(PFLExpr):
     # don't support kwargs due to js
     func: PFLExpr
     args: list[PFLExpr]
-
+    is_ctor: Union[Undefined, bool] = undefined
     def __post_init__(self):
         # validate args
-        assert self.func.st.type == PFLStaticTypeType.FUNCTION, f"func must be function, but got {self.func.st.type}"
+        is_ctor: bool = False
+        if self.func.st.type == PFLStaticTypeType.DATACLASS_TYPE:
+            # create std objects 
+            is_ctor = True 
+        self.is_ctor = is_ctor
+        assert self.func.st.type == PFLStaticTypeType.FUNCTION or self.func.st.type == PFLStaticTypeType.DATACLASS_TYPE, f"func must be function/dcls, but got {self.func.st.type}"
         last_is_vaarg = False 
-        if self.func.st.childs:
-            last_is_vaarg = self.func.st.childs[-1].is_vaargs
+        if self.func.st.type == PFLStaticTypeType.FUNCTION:
+            func_arg_types = self.func.st.childs
+            if func_arg_types:
+                last_is_vaarg = func_arg_types[-1].is_vaargs
+        else:
+            annotype = self.func.st.annotype
+            assert annotype is not None 
+            field_types = list(annotype.get_dataclass_field_annotated_types().values())
+            func_arg_types = [PFLStaticType.from_annotype(f, is_type=False) for f in field_types]
         if not last_is_vaarg:
-            assert len(self.args) <= len(self.func.st.childs), f"func {self.func} expect {len(self.func.st.childs)} args, but got {len(self.args)}"
+            assert len(self.args) <= len(func_arg_types), f"func {self.func} expect {len(func_arg_types)} args, but got {len(self.args)}"
         for i, a in enumerate(self.args):
             if not last_is_vaarg:
-                func_arg = self.func.st.childs[i]
-                assert a.st == func_arg, f"arg {i} expect {func_arg}, but got {a.st}"
+                func_arg = func_arg_types[i]
+                a.st.check_convertable(func_arg, f"func {self.func} arg {i}")
             else:
-                if i < len(self.func.st.childs) - 1:
-                    func_arg = self.func.st.childs[i]
-                    assert a.st == func_arg, f"arg {i} expect {func_arg}, but got {a.st}"
+                if i < len(func_arg_types) - 1:
+                    func_arg = func_arg_types[i]
+                    a.st.check_convertable(func_arg, f"func {self.func} arg {i}")
                 else:
-                    assert a.st == self.func.st.childs[-1], f"arg {i} expect {self.func.st.childs[-1]}, but got {a.st}"
-        assert self.func.st.return_type is not None, f"func {self.func} must have return type"
-        self.st = dataclasses.replace(self.func.st.return_type)
+                    a.st.check_convertable(func_arg_types[-1], f"func {self.func} arg {i}")
+        if self.func.st.type != PFLStaticTypeType.FUNCTION:
+            self.st = dataclasses.replace(self.func.st, type=PFLStaticTypeType.DATACLASS_OBJECT, childs=[], return_type=None)
+        else:
+            assert self.func.st.return_type is not None, f"func {self.func} must have return type"
+            self.st = dataclasses.replace(self.func.st.return_type)
+
 
 @dataclasses.dataclass(kw_only=True)
 class PFLName(PFLExpr):
@@ -590,7 +752,7 @@ class PFLName(PFLExpr):
     is_store: Union[Undefined, bool] = undefined
     is_new: Union[Undefined, bool] = undefined
     def __post_init__(self):
-        if self.st.type == PFLStaticTypeType.OBJECT_DATACLASS:
+        if self.st.type == PFLStaticTypeType.DATACLASS_TYPE or self.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
             assert self.st.annotype is not None, "dataclass must have annotype"
 
 
@@ -600,20 +762,28 @@ class PFLAttribute(PFLExpr):
     attr: str
     is_store: Union[Undefined, bool] = undefined
     def __post_init__(self):
-        if self.value.st.type == PFLStaticTypeType.OBJECT_DATACLASS:
-            # TODO support method
+        if self.value.st.type == PFLStaticTypeType.DATACLASS_TYPE or self.value.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
             assert self.st.annotype is not None, "dataclass must have annotype"
             assert self.st.annotype.is_dataclass_type()
-            field_types = self.st.annotype.get_dataclass_field_annotated_types()
+            field_types = self.st.annotype.get_dataclass_fields_and_annotated_types()
             if self.attr in field_types:
-                new_st = PFLStaticType.from_annotype(field_types[self.attr])
+                field_annotype, field = field_types[self.attr]
+                if self.value.st.type == PFLStaticTypeType.DATACLASS_TYPE:
+                    # access constant
+                    default = field.default
+                    assert default is not dataclasses.MISSING, f"access field {self.attr} by type must have default value"
+                new_st = PFLStaticType.from_annotype(field_annotype, is_type=False)
                 self.st = new_st
             else:
-                # must be static method
+                assert not self.value.st.is_temp, f"function in temp dataclass {self.value.st} (not stdlib) can't be used"
                 dcls_type = self.st.annotype.origin_type
                 unbound_func = getattr(dcls_type, self.attr)
-                assert inspecttools.isstaticmethod(dcls_type, self.attr), f"{self.attr} of {dcls_type} must be staticmethod"
-                new_st = PFLStaticType.from_signature(inspect.signature(unbound_func))
+                if self.value.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+                    ignore_self = True
+                else:
+                    ignore_self = False
+                    assert inspecttools.isstaticmethod(dcls_type, self.attr), f"{self.attr} of {dcls_type} must be staticmethod"
+                new_st = PFLStaticType.from_signature(inspect.signature(unbound_func), ignore_self=ignore_self)
                 self.st = new_st
         else:
             if self.value.st.type == PFLStaticTypeType.OBJECT or self.value.st.type == PFLStaticTypeType.ARRAY:
@@ -663,8 +833,25 @@ class PFLSubscript(PFLExpr):
         elif self.value.st.type == PFLStaticTypeType.OBJECT:
             assert self.slice.st.type == PFLStaticTypeType.STRING, f"slice must be string, but got {self.slice.st.type}"
             self.st = self.value.st.childs[0]
+        elif self.value.st.type == PFLStaticTypeType.DATACLASS_OBJECT:
+            resolved_custom_expr = self.value
+            assert not resolved_custom_expr.st.is_temp, f"temp dataclass {resolved_custom_expr.st} (not stdlib) can't be used in custom operator"
+            assert self.slice.st.type == PFLStaticTypeType.NUMBER
+            dcls_type = resolved_custom_expr.st.get_origin_type_checked()
+            # use custom operator in left st if found
+            if self.is_store == True:
+                op_name = "__setitem__"
+            else:
+                op_name = "__getitem__"
+            op_func = inspect.getattr_static(dcls_type, op_name, None)
+            assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
+            op_func_st = get_parse_context_checked().cached_parse_func(op_func, ignore_self=True)
+            assert len(op_func_st.childs) == 1, f"custom operator {op_name} must have one arg, but got {len(op_func_st.childs)}"
+            self.slice.st.check_convertable(op_func_st.childs[0], f"custom operator {op_name}|{op_func_st} arg")
+            assert op_func_st.return_type is not None, f"custom operator {op_name}|{op_func_st} must have return type"
+            self.st = op_func_st.return_type
         else:
-            raise ValueError(f"not support subscript for {self.value.st.type}")
+            raise ValueError(f"not support subscript for {self.value.st}")
         self.is_const = PFLExpr.all_constexpr(self.value, self.slice)
         return self 
 
@@ -756,7 +943,10 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str, PFLStaticType]) -> PF
         elif isinstance(expr, ast.Subscript):
             value = _parse_expr_to_df_ast(expr.value, scope)
             slice = _parse_expr_to_df_ast(expr.slice, scope)
-            res = PFLSubscript(PFLASTType.SUBSCRIPT, value=value, slice=slice)
+            is_store = undefined
+            if isinstance(expr.ctx, ast.Store):
+                is_store = True
+            res = PFLSubscript(PFLASTType.SUBSCRIPT, value=value, slice=slice, is_store=is_store)
         elif isinstance(expr, ast.List):
             elts = [_parse_expr_to_df_ast(elt, scope) for elt in expr.elts]
             res = PFLArray(PFLASTType.ARRAY, elts=elts)
@@ -820,6 +1010,8 @@ def _parse_block_to_df_ast(body: list[ast.stmt], scope: dict[str, PFLStaticType]
                 if isinstance(tgt, ast.Name):
                     if tgt.id not in scope:
                         is_new_var = True
+                    else:
+                        value.st.check_convertable(scope[tgt.id], "assign value")
                     scope[tgt.id] = value.st
                 target = _parse_expr_to_df_ast(stmt.targets[0], scope)
                 if isinstance(target, PFLName):
@@ -850,11 +1042,12 @@ def _parse_block_to_df_ast(body: list[ast.stmt], scope: dict[str, PFLStaticType]
     return block
 
 class RewriteSTLName(ast.NodeTransformer):
-    def __init__(self, func_globals: dict[str, Any]):
+    def __init__(self, func_globals: dict[str, Any], backend: str = "js"):
         super().__init__()
         self.func_globals = func_globals
+        self.backend = backend
 
-    def visit_Attribute(self, node: ast.Attribute):
+    def _visit_Attribute_or_name(self, node: Union[ast.Attribute, ast.Name]):
         parts: list[str] = []
         cur_node = node 
         name_found = False
@@ -881,13 +1074,24 @@ class RewriteSTLName(ast.NodeTransformer):
                     cur_obj = getattr(cur_obj, part)
                 else:
                     return node
-        if isinstance(cur_obj, type):
-            if STD_REGISTRY.has_dcls_type(cur_obj):
-                return ast.Name(id=parts[-1], ctx=node.ctx, lineno=node.lineno, col_offset=node.col_offset)
+        if isinstance(cur_obj, type) or inspect.ismodule(cur_obj):
+            item = STD_REGISTRY.get_item_by_dcls(cur_obj, self.backend)
+            if item is not None:
+                mapped_name_parts = item.mapped_name.split(".")
+                # create new name and attributes
+                cur_node = ast.Name(id=mapped_name_parts[-1], ctx=node.ctx, lineno=node.lineno, col_offset=node.col_offset)
+                for part in mapped_name_parts[::-1][1:]:
+                    cur_node = ast.Attribute(value=cur_node, attr=part, ctx=node.ctx, lineno=node.lineno, col_offset=node.col_offset)
+                return cur_node
         return self.generic_visit(node)
 
+    def visit_Name(self, node: ast.Name):
+        return self._visit_Attribute_or_name(node)
 
-def parse_func_to_df_ast(func: Callable, scope: Optional[dict[str, PFLStaticType]] = None) -> tuple[PFLFunc, str]:
+    def visit_Attribute(self, node: ast.Attribute):
+        return self._visit_Attribute_or_name(node)
+
+def parse_func_to_df_ast(func: Callable, scope: Optional[dict[str, PFLStaticType]] = None, backend: str = "js") -> tuple[PFLFunc, str]:
     if isinstance(func, staticmethod):
         func = func.__func__
     # print(func.__globals__)
@@ -908,26 +1112,48 @@ def parse_func_to_df_ast(func: Callable, scope: Optional[dict[str, PFLStaticType
             body = node.body
     assert body is not None 
     args, _ = parse_annotated_function(func)
-    init_scope: dict[str, PFLStaticType] = {
-        "Math": PFLStaticType.from_annotype(parse_type_may_optional_undefined(Math)),
-        "MathUtil": PFLStaticType.from_annotype(parse_type_may_optional_undefined(MathUtil)),
-        "len": PFLStaticType.from_signature(inspect.Signature([param_fn("x", list[Any])], return_annotation=int)),
-        "print": PFLStaticType.from_signature(inspect.Signature([varparam_fn("x", Any)], return_annotation=None)),
-    }
-    if scope is not None:
-        scope = init_scope
-    dffunc_args: list[PFLStaticVar] = []
-    for arg in args:
-        param = arg.param 
-        assert param is not None 
-        # only support positional args
-        assert param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY]
-        anno_type = parse_type_may_optional_undefined(arg.type)
-        st = PFLStaticVar.from_annotype(anno_type)
-        st.name = param.name
-        init_scope[param.name] = st
-        dffunc_args.append(st)
     with enter_parse_context(PFLParseContext(func_code_lines)) as ctx:
+        init_scope: dict[str, PFLStaticType] = {
+            "len": PFLStaticType.from_signature(inspect.Signature([param_fn("x", list[Any])], return_annotation=int)),
+            "print": PFLStaticType.from_signature(inspect.Signature([varparam_fn("x", Any)], return_annotation=None)),
+            "int": PFLStaticType.from_signature(inspect.Signature([param_fn("x", Any)], return_annotation=int)),
+            "float": PFLStaticType.from_signature(inspect.Signature([param_fn("x", Any)], return_annotation=float)),
+            "str": PFLStaticType.from_signature(inspect.Signature([param_fn("x", Any)], return_annotation=str)),
+            "bool": PFLStaticType.from_signature(inspect.Signature([param_fn("x", Any)], return_annotation=bool)),
+        }
+        for k, v in STD_REGISTRY.global_dict.items():
+            init_scope[v.mapped_name] = PFLStaticType.from_annotype(parse_type_may_optional_undefined(v.dcls))
+        if scope is not None:
+            scope = init_scope
+        dffunc_args: list[PFLStaticVar] = []
+        for arg in args:
+            param = arg.param 
+            assert param is not None 
+            # only support positional args
+            assert param.kind in [inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.POSITIONAL_ONLY]
+            arg_type = arg.type
+            if arg_type not in _BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
+                if not dataclasses.is_dataclass(arg_type):
+                    item = STD_REGISTRY.get_item_by_dcls(arg_type, backend)
+                    if item is None:
+                        raise NotImplementedError(f"can't find your type {arg_type} in std library. you must implement it.")
+                    arg_type = item.dcls
+                else:
+                    assert inspect.isclass(arg_type)
+
+                    for dcls_child in child_type_generator_with_dataclass(arg_type):
+                        if dataclasses.is_dataclass(dcls_child):
+                            item = STD_REGISTRY.get_item_by_dcls(dcls_child, backend)
+                            if item is None:
+                                # add a temp item for this dataclass type
+                                temp_mapped_name = UniqueTreeId.from_parts(["temp", get_qualname_of_type(dcls_child)]).uid_encoded
+                                STD_REGISTRY.global_dict[temp_mapped_name] = StdRegistryItem(dcls_child, temp_mapped_name, backend=backend, is_temp=True)
+
+            anno_type = parse_type_may_optional_undefined(arg_type)
+            st = PFLStaticVar.from_annotype(anno_type, is_type=False)
+            st.name = param.name
+            init_scope[param.name] = st
+            dffunc_args.append(st)
         try:
             block = _parse_block_to_df_ast(body, init_scope)
             block.args = dffunc_args

@@ -31,8 +31,7 @@ from ...core.component import (BasicProps, Component,
                     UIEvent, UIRunStatus, UIType, Undefined,
                     undefined)
 from ..mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
-                  MUIContainerBase, MenuItem, PointerEventsProperties, Image as
-                  MUIImage)
+                  MUIContainerBase, MenuItem)
 from ...core.common import handle_standard_event
 from tensorpc.core.datamodel import typemetas
 if TYPE_CHECKING:
