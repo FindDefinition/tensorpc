@@ -317,6 +317,7 @@ class PerfMonitor(mui.FlexBox):
         perf_event_plane.event_move.add_frontend_draft_change(draft, "perfHover")
         perf_event_plane.event_leave.add_frontend_draft_set_none(draft, "perfHover")
 
+        viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
         scrollbar_event_plane.event_wheel.add_frontend_draft_change(draft, "scrollValueY", f"clamp(__PREV_VALUE__ + wheel.deltaY * `0.001`, `0`, `1`)")
         # scrollbar_event_plane.event_wheel.on(lambda e: print(e)).configure(debounce=300)
         scrollbar.event_pose_change.add_frontend_draft_change(draft, "scrollValueY", f"clamp(-positionLocal[1] / maximum(`1` - __TARGET__.layout.scrollFactorY, `0.0001`) + `0.5`, `0`, `1`)")
