@@ -1,16 +1,19 @@
+import fnmatch
 from pathlib import Path
-from typing import Union
+import re
+from typing import Any, Optional, Union
 from typing_extensions import Literal, TypeAlias
 import lark 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from lark import Transformer, Token
-
+import glob 
 
 _GRAMMAR_PATH = Path(__file__).parent / "grammar.lark"
 
 
 with _GRAMMAR_PATH.open("r") as f:
-    _COMPILED = lark.Lark(f)
+    data = f.read()
+    _COMPILED = lark.Lark(data)
 
 
 @dataclasses.dataclass
@@ -33,6 +36,15 @@ class IndexItem:
 @dataclasses.dataclass
 class PartialGlob:
     glob: list[str]
+    regex: Optional[re.Pattern] = None
+
+    def get_glob_regex(self):
+        if self.regex is None:
+            glob_str = "".join(self.glob)
+            # Convert glob pattern to regex
+            glob_re = fnmatch.translate(glob_str)
+            self.regex = re.compile(glob_re)
+        return self.regex
 
 QueryItem: TypeAlias = Union[PlainItem, TypeItem, DoubleGlob, IndexItem, PartialGlob]
 
@@ -48,6 +60,26 @@ class SingleQuery:
                     raise ValueError("Only one double glob is allowed in a query.")
                 double_glob_cnt += 1
 
+    def get_glob_path(self) -> str:
+        """Get the glob path from the query items."""
+        parts = []
+        for item in self.items:
+            assert not isinstance(item, TypeItem)
+            if isinstance(item, PlainItem):
+                parts.append(item.id)
+            elif isinstance(item, DoubleGlob):
+                parts.append("**")
+            elif isinstance(item, IndexItem):
+                if item.is_all:
+                    parts.append("*")
+                else:
+                    parts.append(str(item.index))
+            elif isinstance(item, PartialGlob):
+                parts.extend(item.glob)
+            else:
+                raise ValueError(f"Unknown query item type: {type(item)}")
+        return "/".join(parts)
+
 @dataclasses.dataclass
 class ModuleVariableQueryExpr:
     type: Literal["args", "kwargs", "ret"]
@@ -58,6 +90,11 @@ class ModuleVariableQuery:
     mod_query: SingleQuery
     type: Literal["args", "kwargs", "ret"]
     var_query: SingleQuery
+
+@dataclasses.dataclass
+class ModuleWeightQuery:
+    mod_query: SingleQuery
+    var_name: str
 
 @dataclasses.dataclass
 class ModuleStackQuery:
@@ -134,8 +171,13 @@ class PMQLTransformer(Transformer):
     def module_var_query(self, items):
         return ModuleVariableQuery(items[0], items[1].type, items[1].query)
 
+    def module_weight_query(self, items):
+        return ModuleWeightQuery(items[0], items[1])
+
 def parse_pmql_raw(query: str):
     return _COMPILED.parse(query)
 
 def parse_pmql(query: str):
-    return PMQLTransformer().transform(parse_pmql_raw(query))
+    res = PMQLTransformer().transform(parse_pmql_raw(query))
+    assert isinstance(res, (SingleQuery, ModuleVariableQuery, ModuleWeightQuery, ModuleStackQuery))
+    return res
