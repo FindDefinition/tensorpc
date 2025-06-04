@@ -1,4 +1,5 @@
 import concurrent
+import dataclasses
 import setproctitle
 setproctitle.getproctitle()
 import multiprocessing
@@ -19,6 +20,10 @@ from torch.nn import functional as F
 
 import torch.profiler as profiler
 
+@dataclasses.dataclass
+class MyData:
+    a: int 
+    b: int
 
 class MyModule(nn.Module):
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
@@ -88,7 +93,7 @@ def mp_func_inf_record(rank):
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         ten = torch.rand(1).to(torch.bfloat16)
         ten2 = torch.rand(1).to(torch.float16)
-
+        data = MyData(1, 2)
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
         # tensorpc.dbg.breakpoint(name="WTF")
         model = MyModule(50, 10).to(device)

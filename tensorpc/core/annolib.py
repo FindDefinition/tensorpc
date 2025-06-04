@@ -391,6 +391,14 @@ class AnnotatedType:
     def get_any_type():
         return AnnotatedType(Any, [])
 
+    def get_annometa(self, metatype: Type[T]) -> Optional[T]:
+        """Get the annometa of the specified type, if not found, return None."""
+        if self.annometa is None:
+            return None
+        for meta in self.annometa:
+            if isinstance(meta, metatype):
+                return meta
+        return None
 
 def parse_type_may_optional_undefined(
         ann_type: Any,

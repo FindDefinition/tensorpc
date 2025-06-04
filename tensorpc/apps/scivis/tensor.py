@@ -14,7 +14,7 @@ import numpy as np
 import tensorpc.core.datamodel as D
 from tensorpc.dock.components.plus.tensorutil import TensorContainer
 from tensorpc.dock.components.three.event import PointerEvent
-from tensorpc.core.datamodel.pfl.pfl_std import Math, MathUtil
+from tensorpc.core.pfl.pfl_std import Math, MathUtil
 
 @dataclasses.dataclass
 class SimpleLayout:

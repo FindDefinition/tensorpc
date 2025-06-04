@@ -2,7 +2,7 @@
 from types import ModuleType
 from typing import Any, Callable, Optional, Type, Union, TypeVar, cast
 
-from tensorpc.core.annolib import DataclassType, T_dataclass
+from tensorpc.core.annolib import DataclassType, T_dataclass, Undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 import inspect 
 import dataclasses
@@ -86,7 +86,7 @@ class StdRegistry:
 
 STD_REGISTRY = StdRegistry()
 
-def register_df_std(
+def register_pfl_std(
         func=None,
         *,
         mapped_name: Optional[str] = None,

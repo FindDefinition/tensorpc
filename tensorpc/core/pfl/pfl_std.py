@@ -3,11 +3,12 @@ import math
 import random
 import struct
 from typing import Any, Union
-from .pfl_reg import register_df_std
+from .core import register_meta_infer
+from .pfl_reg import register_pfl_std
 import numpy as np 
 # implement all math func in javascript Math 
 
-@register_df_std(mapped_name="Math", backend="js")
+@register_pfl_std(mapped_name="Math", backend="js")
 @dataclasses.dataclass
 class Math:
     @staticmethod 
@@ -174,14 +175,14 @@ class Math:
     SQRT2: float = math.sqrt(2)
 
 
-@register_df_std(mapped_name="MathUtil", backend="js")
+@register_pfl_std(mapped_name="MathUtil", backend="js")
 @dataclasses.dataclass
 class MathUtil:
     @staticmethod
     def clamp(x: float, min_val: float, max_val: float) -> float:
         return max(min(x, max_val), min_val)
 
-@register_df_std(mapped_name="NdArray", mapped=np.ndarray, backend="js")
+@register_pfl_std(mapped_name="NdArray", mapped=np.ndarray, backend="js")
 @dataclasses.dataclass
 class NdArray:
     shape: list[int]
@@ -191,7 +192,12 @@ class NdArray:
     def tolist(self) -> list[Any]: ...
     def size(self) -> int: ...
 
-@register_df_std(mapped_name="Numpy", mapped=np, backend="js")
+@register_meta_infer(NdArray.__getitem__)
+def __getitem_meta_infer(ten: Any, key: Any) -> Any:
+    return None  
+
+
+@register_pfl_std(mapped_name="Numpy", mapped=np, backend="js")
 @dataclasses.dataclass
 class Numpy:
     float32: int = 0
@@ -207,11 +213,32 @@ class Numpy:
     bool_: int = 5
     
     @staticmethod
-    def array(data: list[Any]) -> np.ndarray: ...
-    @staticmethod
-    def zeros(shape: list[int], dtype: int) -> np.ndarray: ...
-    @staticmethod
-    def ones(shape: list[int], dtype: int) -> np.ndarray: ...
-    @staticmethod
-    def full(shape: list[int], val: Union[int, float], dtype: int) -> np.ndarray: ...
+    def array(data: list[Any]) -> np.ndarray: 
+        return np.array(data)
 
+    @staticmethod
+    def zeros(shape: list[int], dtype: int) -> np.ndarray: 
+        return np.zeros(shape, dtype=_JS_DTYPE_TO_NP[dtype])
+
+    @staticmethod
+    def ones(shape: list[int], dtype: int) -> np.ndarray: 
+        return np.ones(shape, dtype=_JS_DTYPE_TO_NP[dtype])
+
+    @staticmethod
+    def full(shape: list[int], val: Union[int, float], dtype: int) -> np.ndarray: 
+        return np.full(shape, val, dtype=_JS_DTYPE_TO_NP[dtype])
+
+
+_JS_DTYPE_TO_NP = {
+    0: np.float32,
+    4: np.float64,
+    3: np.int8,
+    2: np.int16,
+    1: np.int32,
+    8: np.int64,
+    6: np.uint8,
+    9: np.uint16,
+    10: np.uint32,
+    11: np.uint64,
+    5: np.bool_,
+}

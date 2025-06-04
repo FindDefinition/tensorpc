@@ -37,7 +37,7 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 import grpc
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.datamodel.pfl.pfl_ast import parse_func_to_df_ast, pfl_ast_to_dict
+from tensorpc.core.pfl.pfl_ast import parse_func_to_df_ast, pfl_ast_to_dict
 from tensorpc.core.datamodel.events import DraftChangeEvent
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
@@ -844,8 +844,14 @@ class UIUpdateEvent:
             self.uid_to_data_undefined, prefixes)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]):
-        return cls(data)
+    def from_dict(cls, data: Union[dict[str, Any], JsonSpecialData]):
+        json_only = False
+        if isinstance(data, JsonSpecialData):
+            json_only = True
+            data_dict = data.data
+        else:
+            data_dict = data
+        return cls(data_dict, json_only)
 
     def merge_new(self, new):
         assert isinstance(new, UIUpdateEvent)
