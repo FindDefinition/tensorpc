@@ -8,7 +8,7 @@ import copy
 import dataclasses
 from functools import partial
 from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, Generator, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard
+from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard, TypeIs, Self
 from dataclasses import dataclass
 from dataclasses import Field, make_dataclass, field
 import inspect
@@ -115,6 +115,8 @@ class Undefined:
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
 
+def is_undefined(val: object) -> TypeIs[Undefined]:
+    return isinstance(val, Undefined)
 
 T = TypeVar("T")
 
@@ -404,7 +406,8 @@ def parse_type_may_optional_undefined(
         ann_type: Any,
         is_optional: Optional[bool] = None,
         is_undefined: Optional[bool] = None,
-        typevar_map: Optional[dict[TypeVar, type]] = None) -> AnnotatedType:
+        typevar_map: Optional[dict[TypeVar, type]] = None,
+        self_type: Optional[AnnotatedType] = None) -> AnnotatedType:
     """Parse a type. If is union, return its non-optional and non-undefined type list.
     else return the type itself.
 
@@ -440,6 +443,11 @@ def parse_type_may_optional_undefined(
                 return res
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
+            for i in range(len(ty_args)):
+                cur_ty_arg = ty_args[i]
+                if cur_ty_arg is Self:
+                    assert self_type is not None, "Self type must be provided when parsing Self type"
+                    ty_args[i] = self_type.raw_type
             return AnnotatedType(ty_origin, ty_args, ann_meta, is_optional,
                                  is_undefined, raw_type)
         else:

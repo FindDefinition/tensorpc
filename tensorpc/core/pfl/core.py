@@ -15,7 +15,6 @@ from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.pfl.constants import PFL_FUNC_META_ATTR
-from tensorpc.core.pfl.typemetas import PFLVariableMeta
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem
@@ -25,6 +24,10 @@ from .pfl_reg import STD_REGISTRY, StdRegistryItem
 class PFLMetaInferResult:
     data: Any
 
+@dataclasses.dataclass
+class PFLVariableMeta:
+    data: Any
+    meta_infer: Optional[Callable[..., PFLMetaInferResult]] = None
 
 class PFLExprType(enum.IntEnum):
     UNKNOWN = -1
@@ -44,6 +47,8 @@ class PFLExprType(enum.IntEnum):
     # union is only allowed in function argument, variable/function return can't be union.
     # e.g. cpp function overload don't support return type overload.
     UNION = 13
+    TUPLE = 14
+    SLICE = 15
 
 
 _BASE_TYPE_TO_STRING = {
@@ -55,6 +60,8 @@ _BASE_TYPE_TO_STRING = {
     PFLExprType.UNDEFINED_TYPE: "undefined",
     PFLExprType.ANY: "any",
     PFLExprType.RANGE: "range",
+    PFLExprType.SLICE: "slice",
+
 }
 _TYPE_CAN_CAST_TO_BOOL = {
     PFLExprType.NUMBER,
@@ -93,27 +100,19 @@ BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE = {
     range: PFLExprType.RANGE,
 }
 
+@dataclasses.dataclass
+class PFLParseConfig:
+    allow_var_union: bool = False 
+    allow_kw: bool = False
+    allow_nd_slice: bool = False
+    allow_slice: bool = False
 
-class PFLParseContext:
-
+class PFLErrorFormatContext:
     def __init__(self,
-                 lines: list[str],
-                 func_globals: Any,
-                 backend: str = "js",
-                 temp_std_items: Optional[dict[Type, StdRegistryItem]] = None):
+                 lines: list[str]):
         self.lines = lines
 
-        self.error_node: Optional[ast.AST] = None
-        self._backend = backend
-        self.anno_evaluate_globals = func_globals
-
-        self._std_item_cache: dict[Type, StdRegistryItem] = {}
-        if temp_std_items is not None:
-            self._std_item_cache.update(temp_std_items)
-        self._func_parse_result_cache: dict[Callable, PFLExprInfo] = {}
-        self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
-
-    def format_error_from_lines_node(self, node: ast.AST):
+    def format_error_from_lines_node(self, node: Any):
         if hasattr(node, "lineno") and hasattr(node, "col_offset"):
             lineno = node.lineno  # type: ignore
             col_offset = node.col_offset  # type: ignore
@@ -122,13 +121,35 @@ class PFLParseContext:
                 return f"{line}\n{' ' * col_offset}^"
         return ""
 
+class PFLParseContext(PFLErrorFormatContext):
+
+    def __init__(self,
+                 lines: list[str],
+                 func_globals: Any,
+                 backend: str = "js",
+                 temp_std_items: Optional[dict[Type, StdRegistryItem]] = None,
+                 cfg: Optional[PFLParseConfig] = None):
+        super().__init__(lines)
+        self._backend = backend
+        self.anno_evaluate_globals = func_globals
+
+        self._std_item_cache: dict[Type, StdRegistryItem] = {}
+        if temp_std_items is not None:
+            self._std_item_cache.update(temp_std_items)
+        self._func_parse_result_cache: dict[Callable, PFLExprInfo] = {}
+        self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
+        if cfg is None:
+            cfg = PFLParseConfig()
+        self.cfg = cfg
+
     def cached_parse_func(self,
                           func: Callable,
-                          ignore_self: bool = False) -> "PFLExprInfo":
+                          ignore_self: bool = False,
+                          self_type: Optional[AnnotatedType] = None) -> "PFLExprInfo":
         if func in self._func_parse_result_cache:
             return self._func_parse_result_cache[func]
         sig = inspect.signature(func)
-        return PFLExprInfo.from_signature(sig, ignore_self=ignore_self)
+        return PFLExprInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type)
 
     def cached_get_std_item(self, dcls: Type[T_dataclass]):
         if dcls in self._std_item_cache:
@@ -174,6 +195,9 @@ def get_parse_context_checked():
         raise ValueError("not in parse context")
     return ctx
 
+def get_parse_context():
+    ctx = _PFLPARSE_CONTEXT.get()
+    return ctx
 
 @dataclasses.dataclass
 class PFLExprInfo:
@@ -186,16 +210,18 @@ class PFLExprInfo:
     # for container and dataclass
     annotype: Optional[AnnotatedType] = None
     # for function
+    arg_name: Optional[str] = None
     return_type: Optional["PFLExprInfo"] = None
     default: Union[Undefined, Any] = undefined
     is_vaargs: bool = False
     is_method: bool = False
+    is_property: bool = False
     # for dataclass in function arg
     is_temp: bool = False
     # for meta call (type validation, shape inference, etc)
     # TODO should it be sent to frontend?
     _metadata: Union[Undefined, Any] = undefined
-    meta_infer: Optional[Callable] = None
+    _meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
 
     def to_dict(self):
         childs = [c.to_dict() for c in self.childs]
@@ -231,7 +257,12 @@ class PFLExprInfo:
             res = str(self.annotype.origin_type.__name__) + "()"
         elif self.type == PFLExprType.UNION:
             child_reprs = [str(c) for c in self.childs]
+            res = f"{' | '.join(child_reprs)}"
+        elif self.type == PFLExprType.TUPLE:
+            child_reprs = [str(c) for c in self.childs]
             res = f"[{', '.join(child_reprs)}]"
+        elif self.type == PFLExprType.SLICE:
+            res = f"slice"
         elif self.type == PFLExprType.FUNCTION:
             args_str = []
             for arg in self.childs:
@@ -292,18 +323,16 @@ class PFLExprInfo:
             res.mapped = item.mapped_name
             res.is_temp = item.is_temp
         elif annotype.is_tuple_type():
-            # TODO add real tuple support
-            first_child_type = annotype.child_types[0]
-            assert all(
-                c == first_child_type
-                for c in annotype.child_types), "tuple must be same type"
-            res = cls(PFLExprType.ARRAY, [
+            res = cls(PFLExprType.TUPLE, [
                 PFLExprInfo.from_annotype(
-                    parse_type_may_optional_undefined(first_child_type),
-                    is_type)
+                    parse_type_may_optional_undefined(x), is_type)
+                for x in annotype.child_types
             ])
         elif annotype.is_any_type():
             res = cls(PFLExprType.ANY, [])
+        elif annotype.origin_type is slice:
+            # we only support slice(number?).
+            res = cls(PFLExprType.SLICE, [])
         else:
             mapped_item = get_parse_context_checked(
             ).cached_get_dcls_by_mapped_type(annotype.origin_type)
@@ -322,7 +351,8 @@ class PFLExprInfo:
     @classmethod
     def from_signature(cls,
                        sig: inspect.Signature,
-                       ignore_self: bool = False) -> Self:
+                       ignore_self: bool = False,
+                       self_type: Optional[AnnotatedType] = None) -> Self:
         res = cls(PFLExprType.FUNCTION)
         cnt = 0
         for param in sig.parameters.values():
@@ -330,7 +360,11 @@ class PFLExprInfo:
                 res.is_method = True
                 continue
             assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
-            annotype = parse_type_may_optional_undefined(param.annotation)
+            if param.annotation is Self:
+                assert self_type is not None 
+                annotype = self_type
+            else:
+                annotype = parse_type_may_optional_undefined(param.annotation, self_type=self_type)
             arg = PFLExprInfo.from_annotype(annotype,
                                             is_type=False,
                                             allow_union=True)
@@ -338,11 +372,17 @@ class PFLExprInfo:
             if param.default is not inspect.Parameter.empty:
                 arg.default = param.default
             arg.is_vaargs = param.kind == inspect.Parameter.VAR_POSITIONAL
+            arg.arg_name = param.name
             cnt += 1
         if sig.return_annotation is not inspect.Parameter.empty:
             if sig.return_annotation is not None:
-                annotype = parse_type_may_optional_undefined(
-                    sig.return_annotation)
+                if sig.return_annotation is Self:
+                    assert self_type is not None 
+                    annotype = self_type 
+                else:
+                    ret_anno = sig.return_annotation
+                    annotype = parse_type_may_optional_undefined(
+                        ret_anno, self_type=self_type)
                 res.return_type = PFLExprInfo.from_annotype(annotype,
                                                             is_type=False)
             else:
@@ -368,6 +408,7 @@ class PFLExprInfo:
         return True
 
     def can_cast_to_bool(self):
+        # TODO custom type?
         return self.type in _TYPE_CAN_CAST_TO_BOOL
 
     def is_optional(self):
@@ -382,6 +423,38 @@ class PFLExprInfo:
     def check_support_binary_op(self, msg: str = ""):
         assert self.support_binary_op(
         ), f"not support binary op for {self.type}, {msg}"
+
+    def is_all_child_same(self):
+        if len(self.childs) > 0:
+            first = self.childs[0]
+            for c in self.childs[1:]:
+                if c != first:
+                    return False 
+            return True 
+        return False
+
+    def _get_base_number_type_priority(self, ty: Any):
+        if issubclass(ty, bool):
+            return 0
+        elif issubclass(ty, int):
+            return 1
+        elif issubclass(ty, float):
+            return 2
+        else:
+            raise NotImplementedError
+
+    def check_support_binary_op_and_promotion(self, other: Self) -> Optional[AnnotatedType]:
+        self.check_support_binary_op()
+        other.check_support_binary_op()
+        support_prompt = [PFLExprType.NUMBER, PFLExprType.BOOL]
+        if self.type in support_prompt and other.type in support_prompt:
+            if self.annotype is not None and other.annotype is not None:
+                self_priority = self._get_base_number_type_priority(self.annotype.origin_type)
+                other_priority = self._get_base_number_type_priority(other.annotype.origin_type)
+                if self_priority >= other_priority:
+                    return self.annotype
+                else:
+                    return other.annotype
 
     def check_support_compare_op(self, msg: str = ""):
         assert self.support_binary_op(
@@ -415,6 +488,14 @@ class PFLExprInfo:
         return self._metadata
 
     @property
+    def meta_infer(self):
+        if self.annotype is not None:
+            var_meta = self.annotype.get_annometa(PFLVariableMeta)
+            if var_meta is not None and var_meta.meta_infer is not None:
+                return var_meta.meta_infer
+        return self._meta_infer
+
+    @property
     def metadata_checked(self):
         res = self.metadata
         if isinstance(res, Undefined):
@@ -440,6 +521,11 @@ class PFLExprInfo:
                 return var_meta.data
         return None
 
+    def get_metadata(self, default: Any = None):
+        res = self.metadata
+        if isinstance(self.metadata, Undefined):
+            return default 
+        return res
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
     # since js don't support keyword, we don't need to care about kw.
@@ -460,16 +546,20 @@ def varparam_fn(name: str, anno: Any):
 class PFLFuncMeta:
     # for type meta infer, e.g. calc all static ndarray shape and dtype
     # to generate cpp code.
-    meta_infer: Optional[Callable[..., PFLMetaInferResult]] = None
+    meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
     meta_assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
-                                         PFLMetaInferResult]] = None
+                                         Optional[PFLMetaInferResult]]] = None
+
+    
+T_callable = TypeVar("T_callable", bound=Callable[..., Optional[PFLMetaInferResult]])
 
 
-T_callable = TypeVar("T_callable", bound=Callable)
-
-
-def register_meta_infer(fn: Callable):
-    fn_func = fn
+def register_meta_infer(fn: Union[Callable, property]):
+    if isinstance(fn, property):
+        assert fn.fget is not None 
+        fn_func = fn.fget
+    else:
+        fn_func = fn
 
     # if isinstance(fn, staticmethod):
     #     fn_func = fn.__func__

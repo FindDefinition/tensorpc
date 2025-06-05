@@ -37,7 +37,7 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 import grpc
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.pfl.pfl_ast import parse_func_to_df_ast, pfl_ast_to_dict
+from tensorpc.core.pfl import parse_func_to_pfl_ast, pfl_ast_to_dict
 from tensorpc.core.datamodel.events import DraftChangeEvent
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
@@ -1280,7 +1280,7 @@ class _EventSlotBase(Generic[TEventData]):
     def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True) -> Self:
         """use Python Frontend Language (subset of python) to handle event in frontend directly.
         """
-        func_ast, code = parse_func_to_df_ast(func)
+        func_ast, code = parse_func_to_pfl_ast(func)
         op = EventFrontendUpdateOp(
             attr="",
             targetPath="",

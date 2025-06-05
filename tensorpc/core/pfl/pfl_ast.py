@@ -1,17 +1,18 @@
 import ast
+from collections.abc import Sequence
 import enum
 import inspect
 from typing import Any, Callable, Optional, Union
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core import inspecttools
-from tensorpc.core.annolib import (Undefined,
+from tensorpc.core.annolib import (Undefined, is_undefined,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.pfl.constants import PFL_FUNC_META_ATTR
 from tensorpc.core.moduleid import get_qualname_of_type
 
-from .core import (PFLExprInfo, PFLExprType, PFLFuncMeta,
+from .core import (PFLExprInfo, PFLExprType, PFLFuncMeta, PFLMetaInferResult,
                    get_parse_context_checked, param_fn, varparam_fn)
 
 _PFLTYPE_TO_SUPPORTED_METHODS = {
@@ -122,6 +123,7 @@ class PFLASTType(enum.IntEnum):
     DICT = 0x20A
     ATTR = 0x20B
     IF_EXP = 0x20C
+    SLICE = 0x20D
 
     def __repr__(self):
         if self in _PFLAST_TYPE_TO_STR:
@@ -146,6 +148,8 @@ _PFLAST_TYPE_TO_STR = {
     PFLASTType.ARRAY: "array",
     PFLASTType.DICT: "dict",
     PFLASTType.ATTR: "attr",
+    PFLASTType.SLICE: "slice",
+
 }
 
 
@@ -222,6 +226,7 @@ _PFL_BINARY_TYPE_TO_METHOD_NAME = {
     BinOpType.SUB: "__sub__",
     BinOpType.MULT: "__mul__",
     BinOpType.DIV: "__truediv__",
+    BinOpType.FLOOR_DIV: "__floordiv__",
     BinOpType.MOD: "__mod__",
     BinOpType.POW: "__pow__",
     BinOpType.LSHIFT: "__lshift__",
@@ -235,6 +240,9 @@ _PFL_BINARY_TYPE_TO_METHOD_NAME = {
 @dataclasses.dataclass
 class PFLAstNodeBase:
     type: PFLASTType
+    # record lineno/col_offset from ast node for debug
+    lineno: int 
+    col_offset: int
 
 
 @dataclasses.dataclass
@@ -277,7 +285,7 @@ class PFLExpr(PFLAstNodeBase):
         pfl_meta = getattr(fn, PFL_FUNC_META_ATTR, None)
         if pfl_meta is not None:
             assert isinstance(pfl_meta, PFLFuncMeta)
-            self.st.meta_infer = pfl_meta.meta_infer
+            self.st._meta_infer = pfl_meta.meta_infer
 
     def _get_consteval_operands_if_all(
             self, *exprs: "PFLExpr") -> Optional[list[Any]]:
@@ -452,7 +460,7 @@ class PFLUnaryOp(PFLExpr):
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_context_checked().cached_parse_func(
-                op_func, True)
+                op_func, True, self_type=self.operand.st.annotype)
             assert len(
                 op_func_st.childs
             ) == 1, f"custom operator {op_name} must have one arg, but got {len(op_func_st.childs)}"
@@ -461,8 +469,16 @@ class PFLUnaryOp(PFLExpr):
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"
         if not is_custom_type:
             self.operand.st.check_support_binary_op("left")
+            if self.op == UnaryOpType.NOT:
+                self.st = dataclasses.replace(self.operand.st, type=PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
+            elif (self.op == UnaryOpType.UADD or self.op == UnaryOpType.USUB) and self.operand.st.type == PFLExprType.BOOL:
+                self.st = dataclasses.replace(self.operand.st, type=PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(int))
+            else:
+                self.st = dataclasses.replace(self.operand.st)
+        else:
+            assert custom_res_type is not None
+            self.st = custom_res_type
 
-        self.st = dataclasses.replace(self.operand.st)
         self.is_const = self.operand.is_const
         if op_func is not None:
             self._update_func_meta(op_func)
@@ -486,7 +502,11 @@ class PFLUnaryOp(PFLExpr):
         if self.st.meta_infer is not None:
             operands = self._get_consteval_operands_st_if_any(self.operand)
             if operands is not None:
-                self.st.metadata = self.st.meta_infer(*operands)
+                infer_res = self.st.meta_infer(*operands)
+                if infer_res is not None:
+                    assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                    self.st.metadata = infer_res.data
+
                 return True
         return self.consteval()
 
@@ -542,7 +562,7 @@ class PFLBinOpBase(PFLExpr):
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_context_checked().cached_parse_func(
-                op_func, True)
+                op_func, True, self_type=resolved_custom_expr.st.annotype)
             assert len(
                 op_func_st.childs
             ) == 1, f"custom operator {op_name} must have one arg, but got {len(op_func_st.childs)}"
@@ -562,8 +582,11 @@ class PFLBinOpBase(PFLExpr):
             self.left, self.right)
         if operands is not None:
             if self.st.meta_infer is not None:
-                self.st.metadata = self.st.meta_infer(*operands)
-                return True
+                infer_res = self.st.meta_infer(*operands)
+                if infer_res is not None:
+                    assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                    self.st.metadata = infer_res.data
+                    return True
         return self.consteval()
 
 
@@ -575,9 +598,8 @@ class PFLBinOp(PFLBinOpBase):
         is_custom_type, custom_res_type, op_func = self.resolve_custom_type(
             self.op)
         if not is_custom_type:
-            self.left.st.check_support_binary_op("left")
-            self.right.st.check_support_binary_op("right")
-            self.st = PFLExprInfo(PFLExprType.NUMBER)
+            promotion_type = self.left.st.check_support_binary_op_and_promotion(self.right.st)
+            self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
         else:
             assert custom_res_type is not None
             self.st = custom_res_type
@@ -597,6 +619,8 @@ class PFLBinOp(PFLBinOpBase):
                 self.st.metadata = operands[0] * operands[1]
             elif self.op == BinOpType.DIV:
                 self.st.metadata = operands[0] / operands[1]
+            elif self.op == BinOpType.FLOOR_DIV:
+                self.st.metadata = operands[0] // operands[1]
             elif self.op == BinOpType.MOD:
                 self.st.metadata = operands[0] % operands[1]
             elif self.op == BinOpType.POW:
@@ -643,7 +667,7 @@ class PFLCompare(PFLBinOpBase):
                 else:
                     self.left.st.check_support_binary_op("left")
                     self.right.st.check_support_binary_op("right")
-        self.st = PFLExprInfo(PFLExprType.BOOL)
+        self.st = PFLExprInfo(PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
         self.is_const = PFLExpr.all_constexpr(self.left, self.right)
         if op_func is not None:
             self._update_func_meta(op_func)
@@ -683,6 +707,7 @@ class PFLCall(PFLExpr):
     # don't support kwargs due to js
     func: PFLExpr
     args: list[PFLExpr]
+    kws: Union[list[tuple[str, PFLExpr]], Undefined] = undefined
     is_ctor: Union[Undefined, bool] = undefined
 
     def __post_init__(self):
@@ -707,6 +732,8 @@ class PFLCall(PFLExpr):
                 PFLExprInfo.from_annotype(f, is_type=False)
                 for f in field_types
             ]
+        if last_is_vaarg:
+            assert isinstance(self.kws, Undefined), "don't support use kwargs with *args"
         if not last_is_vaarg:
             assert len(self.args) <= len(
                 func_arg_types
@@ -723,6 +750,18 @@ class PFLCall(PFLExpr):
                 else:
                     a.st.check_convertable(func_arg_types[-1],
                                            f"func {self.func} arg {i}")
+        if not isinstance(self.kws, Undefined):
+            for name, a in self.kws:
+                found = False
+                for arg in func_arg_types:
+                    assert arg.arg_name is not None
+                    if name == arg.arg_name:
+                        found = True 
+                        a.st.check_convertable(arg,
+                                           f"func {self.func} kwarg {name}")
+                        break
+                if not found:
+                    raise ValueError(f"can't find arg {name} in function {self.func.st}")
         if self.func.st.type != PFLExprType.FUNCTION:
             self.st = dataclasses.replace(self.func.st,
                                           type=PFLExprType.DATACLASS_OBJECT,
@@ -757,12 +796,19 @@ class PFLCall(PFLExpr):
                 if self.func.st.is_method:
                     obj = self.func.value.st.metadata
                     if not isinstance(obj, Undefined):
-                        self.st.metadata = self.func.st.meta_infer(
+                        infer_res = self.func.st.meta_infer(
                             self.func.value.st, *operands)
-                        return True
+                        if infer_res is not None:
+                            assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                            self.st.metadata = infer_res.data
+                            return True
                 else:
-                    self.st.metadata = self.func.st.meta_infer(*operands)
-                    return True
+                    infer_res = self.func.st.meta_infer(*operands)
+                    if infer_res is not None:
+                        assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                        self.st.metadata = infer_res.data
+                        return True
+
         return self.consteval()
 
 
@@ -803,15 +849,23 @@ class PFLAttribute(PFLExpr):
                 assert not self.value.st.is_temp, f"function in temp dataclass {self.value.st} (not stdlib) can't be used"
                 dcls_type = self.st.annotype.origin_type
                 unbound_func = getattr(dcls_type, self.attr)
+                is_prop = False
+                if isinstance(unbound_func, property):
+                    assert unbound_func.fget is not None 
+                    unbound_func = unbound_func.fget
+                    is_prop = True
                 if self.value.st.type == PFLExprType.DATACLASS_OBJECT:
                     ignore_self = True
+                    self_type = self.value.st.annotype
                 else:
                     ignore_self = False
+                    self_type = None
                     assert inspecttools.isstaticmethod(
                         dcls_type, self.attr
                     ), f"{self.attr} of {dcls_type} must be staticmethod"
-                new_st = PFLExprInfo.from_signature(
-                    inspect.signature(unbound_func), ignore_self=ignore_self)
+                new_st = get_parse_context_checked().cached_parse_func(
+                    unbound_func, ignore_self=ignore_self, self_type=self_type)
+                new_st.is_property = is_prop
                 self.st = new_st
                 self._update_func_meta(unbound_func)
         else:
@@ -830,12 +884,31 @@ class PFLAttribute(PFLExpr):
             self.st = new_st
 
     def consteval(self):
-        operands = self._get_consteval_operands_if_all(self.value)
-        if operands is not None:
-            self.st.metadata = getattr(operands[0], self.attr)
-            return True
-        return False
+        if self.st.type == PFLExprType.FUNCTION and not self.st.is_property:
+            return False 
+        else:
+            operands = self._get_consteval_operands_if_all(self.value)
+            if operands is not None:
+                self.st.metadata = getattr(operands[0], self.attr)
+                return True
+            return False
 
+    def metaeval(self):
+        if self.st.type == PFLExprType.FUNCTION and self.st.is_property:
+            operands = self._get_consteval_operands_st_if_any(self.value)
+            if operands is not None:
+                if self.st.meta_infer is not None:
+                    infer_res = self.st.meta_infer(*operands)
+                    if infer_res is not None:
+                        assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                        self.st.metadata = infer_res.data
+                        return True
+                else:
+                    # for property without a meta_infer fn, we need to stop eval because
+                    # metadata may not contains the attr.
+                    return False
+        return self.consteval()
+        
 
 @dataclasses.dataclass(kw_only=True)
 class PFLConstant(PFLExpr):
@@ -865,25 +938,52 @@ class PFLConstant(PFLExpr):
         return True
 
 
+@dataclasses.dataclass
+class PFLSlice(PFLExpr):
+    lo: Union[Undefined, PFLExpr] = undefined 
+    hi: Union[Undefined, PFLExpr] = undefined 
+    step: Union[Undefined, PFLExpr] = undefined 
+    def __post_init__(self):
+        if not is_undefined(self.lo):
+            # TODO ellipsis?
+            assert self.lo.st.type == PFLExprType.NUMBER, f"{self.lo.st.type}"
+        if not is_undefined(self.hi):
+            assert self.hi.st.type == PFLExprType.NUMBER, f"{self.hi.st.type}"
+        if not is_undefined(self.step):
+            assert self.step.st.type == PFLExprType.NUMBER, f"{self.step.st.type}"
+        self.st = PFLExprInfo(PFLExprType.SLICE, [])
+
+    def consteval(self):
+        lo = None if is_undefined(self.lo) else self.lo.st.metadata
+        hi = None if is_undefined(self.hi) else self.hi.st.metadata
+        step = None if is_undefined(self.step) else self.step.st.metadata
+        if not is_undefined(lo) and not is_undefined(hi) and not is_undefined(step):
+            self.st.metadata = slice(lo, hi, step)
+            return True
+        return False
+
 @dataclasses.dataclass(kw_only=True)
 class PFLSubscript(PFLExpr):
     value: PFLExpr
-    slice: PFLExpr
+    slice: Union[PFLExpr, Sequence[PFLExpr]]
     is_store: Union[Undefined, bool] = undefined
 
     def __post_init__(self):
-        assert not self.value.st.is_optional(
-        ) and not self.slice.st.is_optional()
+        assert not self.value.st.is_optional()
         if self.value.st.type == PFLExprType.ARRAY:
+            assert not isinstance(self.slice, Sequence)
             assert self.slice.st.type == PFLExprType.NUMBER, f"slice must be number, but got {self.slice.st.type}"
             self.st = self.value.st.childs[0]
         elif self.value.st.type == PFLExprType.OBJECT:
+            assert not isinstance(self.slice, Sequence)
             assert self.slice.st.type == PFLExprType.STRING, f"slice must be string, but got {self.slice.st.type}"
+            self.st = self.value.st.childs[0]
+        elif self.value.st.type == PFLExprType.TUPLE:
+            assert self.value.st.is_all_child_same(), "only support subscript tuple when all tuple element has same type"
             self.st = self.value.st.childs[0]
         elif self.value.st.type == PFLExprType.DATACLASS_OBJECT:
             resolved_custom_expr = self.value
             assert not resolved_custom_expr.st.is_temp, f"temp dataclass {resolved_custom_expr.st} (not stdlib) can't be used in custom operator"
-            assert self.slice.st.type == PFLExprType.NUMBER
             dcls_type = resolved_custom_expr.st.get_origin_type_checked()
             # use custom operator in left st if found
             if self.is_store == True:
@@ -893,35 +993,60 @@ class PFLSubscript(PFLExpr):
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_context_checked().cached_parse_func(
-                op_func, ignore_self=True)
+                op_func, ignore_self=True, self_type=self.value.st.annotype)
             assert len(
                 op_func_st.childs
             ) == 1, f"custom operator {op_name} must have one arg, but got {len(op_func_st.childs)}"
-            self.slice.st.check_convertable(
-                op_func_st.childs[0],
-                f"custom operator {op_name}|{op_func_st} arg")
+            if not isinstance(self.slice, Sequence):
+                self.slice.st.check_convertable(
+                    op_func_st.childs[0],
+                    f"custom operator {op_name}|{op_func_st} arg")
             assert op_func_st.return_type is not None, f"custom operator {op_name}|{op_func_st} must have return type"
             self.st = op_func_st.return_type
             self._update_func_meta(op_func)
         else:
             raise ValueError(f"not support subscript for {self.value.st}")
-        self.is_const = PFLExpr.all_constexpr(self.value, self.slice)
+        if isinstance(self.slice, PFLExpr):
+            self.is_const = PFLExpr.all_constexpr(self.value, self.slice)
         return self
 
     def consteval(self):
-        operands = self._get_consteval_operands_if_all(self.value, self.slice)
-        if operands is not None:
-            self.st.metadata = operands[0][operands[1]]
-            return True
-        return False
+        if isinstance(self.slice, PFLExpr):
+            operands = self._get_consteval_operands_if_all(self.value, self.slice)
+            if operands is not None:
+                self.st.metadata = operands[0][operands[1]]
+                return True
+            return False
+        else:
+            operands = self._get_consteval_operands_if_all(self.value, *(self.slice))
+            if operands is not None:
+                self.st.metadata = operands[0][tuple(operands[1:])]
+                return True
+            return False
 
     def metaeval(self):
-        operands = self._get_consteval_operands_st_if_all(
-            self.value, self.slice)
-        if operands is not None and self.st.meta_infer is not None:
-            self.st.metadata = self.st.meta_infer(operands[0], operands[1])
-            return True
-        return self.consteval()
+        if isinstance(self.slice, PFLExpr):
+
+            operands = self._get_consteval_operands_st_if_all(
+                self.value, self.slice)
+            if operands is not None and self.st.meta_infer is not None:
+                infer_res = self.st.meta_infer(operands[0], operands[1])
+                if infer_res is not None:
+                    assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                    self.st.metadata = infer_res.data
+                    return True
+            return self.consteval()
+        else:
+            operands = self._get_consteval_operands_st_if_all(
+                self.value, *self.slice)
+            if operands is not None and self.st.meta_infer is not None:
+                infer_res = self.st.meta_infer(operands[0], tuple(operands[1:]))
+                if infer_res is not None:
+                    assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                    self.st.metadata = infer_res.data
+                    return True
+
+            return self.consteval()
 
 
 @dataclasses.dataclass(kw_only=True)

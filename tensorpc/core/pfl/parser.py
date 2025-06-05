@@ -1,13 +1,15 @@
 import ast
+from collections.abc import Sequence
 import inspect
 import sys
+import traceback
 from typing import Any, Callable, ForwardRef, Optional, Type, Union
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, T_dataclass, Undefined,
                                    child_dataclass_type_generator,
                                    child_type_generator_with_dataclass,
-                                   parse_annotated_function,
+                                   is_undefined, parse_annotated_function,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.pfl.constants import PFL_FUNC_META_ATTR
@@ -16,17 +18,17 @@ from tensorpc.core.funcid import (clean_source_code,
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, PFLParseContext,
-                   PFLExprInfo, PFLExprType, enter_parse_context,
-                   get_parse_context_checked, param_fn, varparam_fn,
-                   PFLFuncMeta)
+from .core import (BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, PFLParseConfig,
+                   PFLParseContext, PFLExprInfo, PFLExprType,
+                   enter_parse_context, get_parse_context, get_parse_context_checked, param_fn,
+                   varparam_fn, PFLFuncMeta)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign,
                       PFLArray, PFLAssign, PFLAstNodeBase, PFLAstStmt,
                       PFLASTType, PFLAttribute, PFLAugAssign, PFLBinOp,
                       PFLBoolOp, PFLCall, PFLCompare, PFLConstant, PFLDict,
                       PFLExpr, PFLExprStmt, PFLFor, PFLFunc, PFLIf, PFLIfExp,
-                      PFLName, PFLStaticVar, PFLSubscript, PFLUnaryOp,
-                      PFLWhile, UnaryOpType)
+                      PFLName, PFLSlice, PFLStaticVar, PFLSubscript,
+                      PFLUnaryOp, PFLWhile, UnaryOpType)
 from .pfl_reg import STD_REGISTRY, StdRegistryItem
 
 _ALL_SUPPORTED_AST_TYPES = {
@@ -93,28 +95,66 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str,
                 raise PFLAstParseError(f"undefined name {expr.id}", expr)
             st = scope[expr.id]
             res = PFLName(PFLASTType.NAME,
+                          expr.lineno,
+                          expr.col_offset,
                           id=expr.id,
                           st=dataclasses.replace(st))
         elif isinstance(expr, ast.Attribute):
             value = _parse_expr_to_df_ast(expr.value, scope)
             attr = expr.attr
             st = value.st
-            res = PFLAttribute(PFLASTType.ATTR, value=value, attr=attr, st=st)
+            res = PFLAttribute(PFLASTType.ATTR,
+                               expr.lineno,
+                               expr.col_offset,
+                               value=value,
+                               attr=attr,
+                               st=st)
         elif isinstance(expr, ast.Constant):
-            res = PFLConstant(PFLASTType.CONSTANT, value=expr.value)
+            res = PFLConstant(PFLASTType.CONSTANT,
+                              expr.lineno,
+                              expr.col_offset,
+                              value=expr.value)
+        elif isinstance(expr, ast.Slice):
+            assert get_parse_context_checked(
+            ).cfg.allow_slice, "slice is disabled in config"
+            lo = _parse_expr_to_df_ast(
+                expr.lower, scope) if expr.lower is not None else undefined
+            hi = _parse_expr_to_df_ast(
+                expr.upper, scope) if expr.upper is not None else undefined
+            step = _parse_expr_to_df_ast(
+                expr.step, scope) if expr.step is not None else undefined
+            res = PFLSlice(PFLASTType.SLICE,
+                           expr.lineno,
+                           expr.col_offset,
+                           lo=lo,
+                           hi=hi,
+                           step=step)
         elif isinstance(expr, ast.Subscript):
             value = _parse_expr_to_df_ast(expr.value, scope)
-            slice = _parse_expr_to_df_ast(expr.slice, scope)
+            slice: Union[Sequence[PFLExpr], PFLExpr]
+            if isinstance(expr.slice, ast.Tuple):
+                assert get_parse_context_checked(
+                ).cfg.allow_nd_slice, "nd slice is disabled in config"
+                slice = []
+                for item in expr.slice.elts:
+                    slice.append(_parse_expr_to_df_ast(item, scope))
+            else:
+                slice = _parse_expr_to_df_ast(expr.slice, scope)
             is_store = undefined
             if isinstance(expr.ctx, ast.Store):
                 is_store = True
             res = PFLSubscript(PFLASTType.SUBSCRIPT,
+                               expr.lineno,
+                               expr.col_offset,
                                value=value,
                                slice=slice,
                                is_store=is_store)
         elif isinstance(expr, ast.List):
             elts = [_parse_expr_to_df_ast(elt, scope) for elt in expr.elts]
-            res = PFLArray(PFLASTType.ARRAY, elts=elts)
+            res = PFLArray(PFLASTType.ARRAY,
+                           expr.lineno,
+                           expr.col_offset,
+                           elts=elts)
         elif isinstance(expr, ast.Dict):
             keys = [
                 _parse_expr_to_df_ast(key, scope) if key is not None else None
@@ -123,7 +163,11 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str,
             values = [
                 _parse_expr_to_df_ast(value, scope) for value in expr.values
             ]
-            res = PFLDict(PFLASTType.DICT, keys=keys, values=values)
+            res = PFLDict(PFLASTType.DICT,
+                          expr.lineno,
+                          expr.col_offset,
+                          keys=keys,
+                          values=values)
         elif isinstance(expr, ast.BoolOp):
             op = BoolOpType.AND if isinstance(expr.op,
                                               ast.And) else BoolOpType.OR
@@ -131,6 +175,8 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str,
                 _parse_expr_to_df_ast(value, scope) for value in expr.values
             ]
             res = PFLBoolOp(PFLASTType.BOOL_OP,
+                            expr.lineno,
+                            expr.col_offset,
                             op=op,
                             left=values[0],
                             right=values[1])
@@ -138,11 +184,20 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str,
             op = _AST_BINOP_TO_PFL_BINOP[type(expr.op)]
             left = _parse_expr_to_df_ast(expr.left, scope)
             right = _parse_expr_to_df_ast(expr.right, scope)
-            res = PFLBinOp(PFLASTType.BIN_OP, op=op, left=left, right=right)
+            res = PFLBinOp(PFLASTType.BIN_OP,
+                           expr.lineno,
+                           expr.col_offset,
+                           op=op,
+                           left=left,
+                           right=right)
         elif isinstance(expr, ast.UnaryOp):
             op = _AST_UNARYOP_TO_PFL_UNARYOP[type(expr.op)]
             operand = _parse_expr_to_df_ast(expr.operand, scope)
-            res = PFLUnaryOp(PFLASTType.UNARY_OP, op=op, operand=operand)
+            res = PFLUnaryOp(PFLASTType.UNARY_OP,
+                             expr.lineno,
+                             expr.col_offset,
+                             op=op,
+                             operand=operand)
         elif isinstance(expr, ast.Compare):
             left = _parse_expr_to_df_ast(expr.left, scope)
             assert len(expr.ops) == 1
@@ -150,35 +205,53 @@ def _parse_expr_to_df_ast(expr: ast.expr, scope: dict[str,
             assert len(expr.comparators) == 1
             right = _parse_expr_to_df_ast(expr.comparators[0], scope)
             res = PFLCompare(PFLASTType.COMPARISON,
+                             expr.lineno,
+                             expr.col_offset,
                              op=op,
                              left=left,
                              right=right)
         elif isinstance(expr, ast.Call):
             func = _parse_expr_to_df_ast(expr.func, scope)
             args = [_parse_expr_to_df_ast(arg, scope) for arg in expr.args]
-            res = PFLCall(PFLASTType.CALL, func=func, args=args)
+            kws: list[tuple[str, PFLExpr]] = []
+            for arg in expr.args:
+                assert not isinstance(
+                    arg, ast.Starred), "don't support *arg for now"
+            for kw in expr.keywords:
+                assert kw.arg is not None, "don't support **kw"
+                kws.append((kw.arg, _parse_expr_to_df_ast(kw.value, scope)))
+            parse_cfg = get_parse_context_checked().cfg
+            if not parse_cfg.allow_kw:
+                assert not expr.keywords, f"kwargs is disabled, you need to enable it in parse config."
+            res = PFLCall(PFLASTType.CALL,
+                          expr.lineno,
+                          expr.col_offset,
+                          func=func,
+                          args=args,
+                          kws=kws if kws else undefined)
         elif isinstance(expr, ast.IfExp):
             res = PFLIfExp(PFLASTType.IF_EXP,
+                           expr.lineno,
+                           expr.col_offset,
                            test=_parse_expr_to_df_ast(expr.test, scope),
                            body=_parse_expr_to_df_ast(expr.body, scope),
                            orelse=_parse_expr_to_df_ast(expr.orelse, scope))
         else:
-            raise NotImplementedError(f"not support {type(expr)}", expr)
+            raise PFLAstParseError(f"not support {type(expr)}", expr)
         if isinstance(res, (PFLName, PFLAttribute, PFLSubscript)):
             assert isinstance(expr, (ast.Name, ast.Attribute, ast.Subscript))
             if isinstance(expr.ctx, ast.Store):
                 res.is_store = True
-    except:
-        ctx = get_parse_context_checked()
-        if ctx.error_node is None:
-            ctx.error_node = expr
-        raise
+    except PFLAstParseError:
+        raise 
+    except BaseException as e:
+        raise PFLAstParseError(f"Unknown error {e}", expr) from e
     return res
 
 
-def _parse_block_to_df_ast(body: list[ast.stmt],
-                           scope: dict[str, PFLExprInfo]) -> PFLFunc:
-    block = PFLFunc(PFLASTType.BLOCK, [], [])
+def _parse_block_to_pfl_ast(body: list[ast.stmt],
+                            scope: dict[str, PFLExprInfo]) -> PFLFunc:
+    block = PFLFunc(PFLASTType.BLOCK, -1, -1, [], [])
     for stmt in body:
         try:
             if not isinstance(stmt, tuple(_ALL_SUPPORTED_AST_TYPES)):
@@ -214,6 +287,8 @@ def _parse_block_to_df_ast(body: list[ast.stmt],
                     target.st = dataclasses.replace(value.st)
                     block.body.append(
                         PFLAssign(PFLASTType.ASSIGN,
+                                  stmt.lineno,
+                                  stmt.col_offset,
                                   target=target,
                                   value=value))
                 else:
@@ -236,6 +311,8 @@ def _parse_block_to_df_ast(body: list[ast.stmt],
                         is_type=False)
                     block.body.append(
                         PFLAnnAssign(PFLASTType.ANN_ASSIGN,
+                                     stmt.lineno,
+                                     stmt.col_offset,
                                      target=target,
                                      annotation=ast.unparse(stmt.annotation),
                                      value=value))
@@ -245,6 +322,8 @@ def _parse_block_to_df_ast(body: list[ast.stmt],
                 value = _parse_expr_to_df_ast(stmt.value, scope)
                 block.body.append(
                     PFLAugAssign(PFLASTType.AUG_ASSIGN,
+                                 stmt.lineno,
+                                 stmt.col_offset,
                                  target=target,
                                  op=op,
                                  value=value))
@@ -254,10 +333,12 @@ def _parse_block_to_df_ast(body: list[ast.stmt],
                 # TODO currently variable created in if scope won't leaked to parent scope.
                 private_scope = scope.copy()
                 test = _parse_expr_to_df_ast(stmt.test, private_scope)
-                ifbody = _parse_block_to_df_ast(stmt.body, private_scope)
-                orelse = _parse_block_to_df_ast(stmt.orelse, private_scope)
+                ifbody = _parse_block_to_pfl_ast(stmt.body, private_scope)
+                orelse = _parse_block_to_pfl_ast(stmt.orelse, private_scope)
                 block.body.append(
                     PFLIf(PFLASTType.IF,
+                          stmt.lineno,
+                          stmt.col_offset,
                           test=test,
                           body=ifbody.body,
                           orelse=orelse.body))
@@ -276,30 +357,37 @@ def _parse_block_to_df_ast(body: list[ast.stmt],
                                                    "assign value")
                     private_scope[tgt.id] = value.st
                 target = _parse_expr_to_df_ast(stmt.target, private_scope)
-                forbody = _parse_block_to_df_ast(stmt.body, private_scope)
+                forbody = _parse_block_to_pfl_ast(stmt.body, private_scope)
                 block.body.append(
                     PFLFor(PFLASTType.FOR,
+                           stmt.lineno,
+                           stmt.col_offset,
                            target=target,
                            iter=value,
                            body=forbody.body))
             elif isinstance(stmt, ast.While):
                 private_scope = scope.copy()
                 test = _parse_expr_to_df_ast(stmt.test, private_scope)
-                forbody = _parse_block_to_df_ast(stmt.body, private_scope)
+                forbody = _parse_block_to_pfl_ast(stmt.body, private_scope)
                 block.body.append(
-                    PFLWhile(PFLASTType.WHILE, test=test, body=forbody.body))
+                    PFLWhile(PFLASTType.WHILE,
+                             stmt.lineno,
+                             stmt.col_offset,
+                             test=test,
+                             body=forbody.body))
             elif isinstance(stmt, ast.Expr):
                 block.body.append(
                     PFLExprStmt(PFLASTType.EXPR_STMT,
+                                stmt.lineno,
+                                stmt.col_offset,
                                 value=_parse_expr_to_df_ast(stmt.value,
                                                             scope)))
             else:
                 raise PFLAstParseError(f"not support {type(stmt)}", stmt)
-        except:
-            ctx = get_parse_context_checked()
-            if ctx.error_node is None:
-                ctx.error_node = stmt
-            raise
+        except PFLAstParseError:
+            raise 
+        except BaseException as e:
+            raise PFLAstParseError(f"Unknown error {e}", stmt) from e
     return block
 
 
@@ -425,9 +513,11 @@ def walk(node):
         yield node
 
 
-def parse_func_to_df_ast(func: Callable,
-                         scope: Optional[dict[str, PFLExprInfo]] = None,
-                         backend: str = "js") -> tuple[PFLFunc, str]:
+def parse_func_to_pfl_ast(
+        func: Callable,
+        scope: Optional[dict[str, PFLExprInfo]] = None,
+        backend: str = "js",
+        parse_cfg: Optional[PFLParseConfig] = None) -> tuple[PFLFunc, str]:
     if isinstance(func, staticmethod):
         func = func.__func__
     func_code_lines, _ = inspect.getsourcelines(func)
@@ -447,7 +537,8 @@ def parse_func_to_df_ast(func: Callable,
     args, _ = parse_annotated_function(func)
     anno_eval_globals = func.__globals__.copy()
     with enter_parse_context(
-            PFLParseContext(func_code_lines, anno_eval_globals)) as ctx:
+            PFLParseContext(func_code_lines, anno_eval_globals,
+                            cfg=parse_cfg)) as ctx:
         init_scope = _get_init_scope()
         for k, v in STD_REGISTRY.global_dict.items():
             if v.backend == backend:
@@ -503,21 +594,22 @@ def parse_func_to_df_ast(func: Callable,
             scope[param.name] = st
             dffunc_args.append(st)
         try:
-            block = _parse_block_to_df_ast(body, scope)
+            block = _parse_block_to_pfl_ast(body, scope)
             block.args = dffunc_args
-        except:
-            if ctx.error_node is not None:
-                error_line = get_parse_context_checked(
-                ).format_error_from_lines_node(ctx.error_node)
-                print(error_line)
-            raise
+        except PFLAstParseError as e:
+            error_line = get_parse_context_checked(
+            ).format_error_from_lines_node(e.node)
+            print(error_line)
+            raise e
     return block, code
 
 
 def parse_expr_to_df_ast(
-        expr_str: str,
-        var_scope: Optional[dict[str, Any]] = None,
-        backend: str = "js") -> tuple[PFLExpr, dict[str, Any]]:
+    expr_str: str,
+    var_scope: Optional[dict[str, Any]] = None,
+    backend: str = "js",
+    parse_cfg: Optional[PFLParseConfig] = None
+) -> tuple[PFLExpr, dict[str, Any]]:
     expr_str_lines = expr_str.split("\n")
     tree = ast.parse(expr_str, mode="eval")
     if var_scope is not None:
@@ -526,7 +618,8 @@ def parse_expr_to_df_ast(
     assert isinstance(tree, ast.Expression)
     tree_expr = tree.body
     # find funcdef
-    with enter_parse_context(PFLParseContext(expr_str_lines, {})) as ctx:
+    with enter_parse_context(PFLParseContext(expr_str_lines, {},
+                                             cfg=parse_cfg)) as ctx:
         init_scope = _get_init_scope()
         for k, v in STD_REGISTRY.global_dict.items():
             init_scope[v.mapped_name] = PFLExprInfo.from_annotype(
@@ -540,12 +633,11 @@ def parse_expr_to_df_ast(
                     parse_type_may_optional_undefined(type(v)), is_type=False)
         try:
             res = _parse_expr_to_df_ast(tree_expr, scope)
-        except:
-            if ctx.error_node is not None:
-                error_line = get_parse_context_checked(
-                ).format_error_from_lines_node(ctx.error_node)
-                print(error_line)
-            raise
+        except PFLAstParseError as e:
+            error_line = get_parse_context_checked(
+            ).format_error_from_lines_node(e.node)
+            print(error_line)
+            raise e
     return res, scope
 
 
@@ -608,72 +700,79 @@ def _metaeval_expr(expr_node: PFLExpr, scope: dict[str, Any]):
                 all_success.append(success)
         if all_success and not any(all_success):
             return False
-        return expr_node.metaeval()
+        try:
+            return expr_node.metaeval()
+        except BaseException as e:
+            traceback.print_exc()
+            raise PFLMetaEvalError(f"metaeval error {e}", expr_node) from e
 
 
 def _metaeval_total_tree(body: list[PFLAstStmt], scope: dict[str, Any]):
     for stmt in body:
-        if isinstance(stmt, (PFLAssign, PFLAnnAssign)):
-            # TODO add dataclass level type meta eval support
-            target_metadata = undefined
-            scope_metadata = undefined
-            if isinstance(stmt, PFLAnnAssign):
-                metadata_from_anno = stmt.target.st.get_metadata_from_anno()
-                if metadata_from_anno is not None:
-                    target_metadata = metadata_from_anno
+        try:
+            if isinstance(stmt, (PFLAssign, PFLAnnAssign)):
+                # TODO add dataclass level type meta eval support
+                target_metadata = undefined
+                scope_metadata = undefined
+                if isinstance(stmt, PFLAnnAssign):
+                    metadata_from_anno = stmt.target.st.get_metadata_from_anno()
+                    if metadata_from_anno is not None:
+                        target_metadata = metadata_from_anno
+                        stmt.target.st.metadata = target_metadata
+                if isinstance(target_metadata,
+                            Undefined) and stmt.value is not None:
+                    _metaeval_expr(stmt.value, scope)
+                    target_metadata = stmt.value.st.metadata_checked
                     stmt.target.st.metadata = target_metadata
-            if isinstance(target_metadata,
-                          Undefined) and stmt.value is not None:
+                if isinstance(stmt.target, PFLName) and stmt.target.id in scope:
+                    scope_metadata = scope[stmt.target.id]
+                if not isinstance(scope_metadata, Undefined) and not isinstance(
+                        target_metadata, Undefined):
+                    # convertable check is already done in parse.
+                    # perform meta assign check if exists
+                    assert isinstance(stmt.target, PFLName)
+                    if stmt.target.st.type == PFLExprType.DATACLASS_OBJECT:
+                        dcls = stmt.target.st.get_origin_type_checked()
+                        if hasattr(dcls, PFL_FUNC_META_ATTR):
+                            func_meta: PFLFuncMeta = getattr(
+                                dcls, PFL_FUNC_META_ATTR)
+                            if func_meta.meta_assign_check is not None:
+                                new_meta_val = func_meta.meta_assign_check(
+                                    scope_metadata, target_metadata)
+                                if new_meta_val is not None:
+                                    new_meta = new_meta_val.data
+                                    stmt.target.st.metadata = new_meta
+                if isinstance(stmt.target, PFLName):
+                    scope[stmt.target.id] = target_metadata
+            elif isinstance(stmt, PFLAugAssign):
                 _metaeval_expr(stmt.value, scope)
-                target_metadata = stmt.value.st.metadata_checked
-                stmt.target.st.metadata = target_metadata
-            if isinstance(stmt.target, PFLName) and stmt.target.id in scope:
-                scope_metadata = scope[stmt.target.id]
-
-            if not isinstance(scope_metadata, Undefined) and not isinstance(
-                    target_metadata, Undefined):
-                # convertable check is already done in parse.
-                # perform meta assign check if exists
-                assert isinstance(stmt.target, PFLName)
-                if stmt.target.st.type == PFLExprType.DATACLASS_OBJECT:
-                    dcls = stmt.target.st.get_origin_type_checked()
-                    if hasattr(dcls, PFL_FUNC_META_ATTR):
-                        func_meta: PFLFuncMeta = getattr(
-                            dcls, PFL_FUNC_META_ATTR)
-                        if func_meta.meta_assign_check is not None:
-                            new_meta_val = func_meta.meta_assign_check(
-                                scope_metadata, target_metadata)
-                            if not isinstance(new_meta_val, Undefined):
-                                new_meta = new_meta_val
-                                stmt.target.st.metadata = new_meta
-            if isinstance(stmt.target, PFLName):
-                scope[stmt.target.id] = target_metadata
-        elif isinstance(stmt, PFLAugAssign):
-            _metaeval_expr(stmt.value, scope)
-        elif isinstance(stmt, PFLIf):
-            private_scope = scope.copy()
-            _metaeval_total_tree(stmt.body, private_scope)
-            _metaeval_total_tree(stmt.orelse, private_scope)
-        elif isinstance(stmt, PFLFor):
-            private_scope = scope.copy()
-            _metaeval_expr(stmt.iter, private_scope)
-            iter_st = stmt.iter.st
-            tgt = stmt.target
-            assert isinstance(tgt, PFLName)
-            if iter_st.type == PFLExprType.ARRAY:
-                stmt.target.st.metadata = iter_st.childs[0].metadata
-                private_scope[tgt.id] = iter_st.childs[0].metadata
-            # Range iter is always number (never constexpr), so no metadata here.
-            _metaeval_total_tree(stmt.body, private_scope)
-        elif isinstance(stmt, PFLWhile):
-            private_scope = scope.copy()
-            _metaeval_expr(stmt.test, private_scope)
-            _metaeval_total_tree(stmt.body, private_scope)
-        elif isinstance(stmt, PFLExprStmt):
-            _metaeval_expr(stmt.value, scope)
-        else:
-            raise PFLMetaEvalError(f"not support {type(stmt)}", stmt)
-
+            elif isinstance(stmt, PFLIf):
+                private_scope = scope.copy()
+                _metaeval_total_tree(stmt.body, private_scope)
+                _metaeval_total_tree(stmt.orelse, private_scope)
+            elif isinstance(stmt, PFLFor):
+                private_scope = scope.copy()
+                _metaeval_expr(stmt.iter, private_scope)
+                iter_st = stmt.iter.st
+                tgt = stmt.target
+                assert isinstance(tgt, PFLName)
+                if iter_st.type == PFLExprType.ARRAY:
+                    stmt.target.st.metadata = iter_st.childs[0].metadata
+                    private_scope[tgt.id] = iter_st.childs[0].metadata
+                # Range iter is always number (never constexpr), so no metadata here.
+                _metaeval_total_tree(stmt.body, private_scope)
+            elif isinstance(stmt, PFLWhile):
+                private_scope = scope.copy()
+                _metaeval_expr(stmt.test, private_scope)
+                _metaeval_total_tree(stmt.body, private_scope)
+            elif isinstance(stmt, PFLExprStmt):
+                _metaeval_expr(stmt.value, scope)
+            else:
+                raise PFLMetaEvalError(f"not support {type(stmt)}", stmt)
+        except PFLMetaEvalError:
+            raise
+        except BaseException as e:
+            raise PFLMetaEvalError(f"Unknown error {e}", stmt) from e
 
 def metaeval_total_tree(func_node: PFLFunc,
                         scope: dict[str, Any],
@@ -691,8 +790,14 @@ def metaeval_total_tree(func_node: PFLFunc,
     for k, v in STD_REGISTRY.global_dict.items():
         if v.backend == backend:
             init_scope[v.mapped_name] = v.dcls
-    _metaeval_total_tree(func_node.body, scope)
-
+    try:
+        _metaeval_total_tree(func_node.body, scope)
+    except PFLMetaEvalError as e:
+        parse_ctx = get_parse_context()
+        if parse_ctx is not None:
+            error_line = parse_ctx.format_error_from_lines_node(e.node)
+            print(error_line)
+        raise 
 
 def _ast_as_dict(obj):
     if isinstance(obj, PFLAstNodeBase):
@@ -746,11 +851,9 @@ def pfl_ast_to_dict(node: PFLAstNodeBase):
     return _ast_as_dict(node)
 
 
-def pfl_ast_dump(node: PFLAstNodeBase):
+def ast_dump(node: PFLAstNodeBase):
     return _ast_as_dict_for_dump(node)
 
-
-_PFL_UNPARSE_UNARY_TYPE_TO_OP = {}
 
 _PFL_UNPARSE_OP_TYPE_TO_OP = {
     UnaryOpType.INVERT: "~",
@@ -769,6 +872,7 @@ _PFL_UNPARSE_OP_TYPE_TO_OP = {
     BinOpType.SUB: "-",
     BinOpType.MULT: "*",
     BinOpType.DIV: "/",
+    BinOpType.FLOOR_DIV: "//",
     BinOpType.MOD: "%",
     BinOpType.POW: "**",
     BinOpType.LSHIFT: "<<",
@@ -779,49 +883,75 @@ _PFL_UNPARSE_OP_TYPE_TO_OP = {
 }
 
 
-def unparse_expr(expr: PFLExpr) -> str:
+def unparse_pfl_expr(expr: PFLExpr) -> str:
     """
     Unparse a PFLExpr to a string representation.
     """
     if isinstance(expr, PFLName):
         return expr.id
     elif isinstance(expr, PFLAttribute):
-        return f"{unparse_expr(expr.value)}.{expr.attr}"
+        return f"{unparse_pfl_expr(expr.value)}.{expr.attr}"
     elif isinstance(expr, PFLConstant):
         return repr(expr.value)
+    elif isinstance(expr, PFLSlice):
+        lo_exist = not is_undefined(expr.lo)
+        hi_exist = not is_undefined(expr.hi)
+        step_exist = not is_undefined(expr.step)
+        lo_str = "" if is_undefined(expr.lo) else unparse_pfl_expr(expr.lo)
+        hi_str = "" if is_undefined(expr.hi) else unparse_pfl_expr(expr.hi)
+        step_str = "" if is_undefined(expr.step) else unparse_pfl_expr(
+            expr.step)
+
+        defined_cnt = int(lo_exist) + int(hi_exist) + int(step_exist)
+        if defined_cnt == 0:
+            return ":"
+        elif step_exist:
+            return f"{lo_str}:{hi_str}:{step_str}"
+        else:
+            return f"{lo_str}:{hi_str}"
     elif isinstance(expr, PFLSubscript):
-        slice_str = unparse_expr(expr.slice)
+        if isinstance(expr.slice, Sequence):
+            slice_strs = [unparse_pfl_expr(s) for s in expr.slice]
+            slice_str = ", ".join(slice_strs)
+        else:
+            slice_str = unparse_pfl_expr(expr.slice)
         if isinstance(expr.value, PFLName):
             value_str = expr.value.id
         else:
-            value_str = unparse_expr(expr.value)
+            value_str = unparse_pfl_expr(expr.value)
         return f"{value_str}[{slice_str}]"
     elif isinstance(expr, PFLArray):
-        return "[" + ", ".join(unparse_expr(elt) for elt in expr.elts) + "]"
+        return "[" + ", ".join(unparse_pfl_expr(elt)
+                               for elt in expr.elts) + "]"
     elif isinstance(expr, PFLDict):
         strs = []
         for k, v in zip(expr.keys, expr.values):
             if k is None:
-                strs.append(f"**{unparse_expr(v)}")
+                strs.append(f"**{unparse_pfl_expr(v)}")
             else:
-                strs.append(f"{unparse_expr(k)}: {unparse_expr(v)}")
+                strs.append(f"{unparse_pfl_expr(k)}: {unparse_pfl_expr(v)}")
         return "{" + ", ".join(strs) + "}"
     elif isinstance(expr, PFLBoolOp):
         if expr.op == BoolOpType.AND:
             op = "and"
         else:
             op = "or"
-        return f"({unparse_expr(expr.left)} {op} {unparse_expr(expr.right)})"
+        return f"({unparse_pfl_expr(expr.left)} {op} {unparse_pfl_expr(expr.right)})"
     elif isinstance(expr, PFLBinOp):
-        return f"({unparse_expr(expr.left)} {_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]} {unparse_expr(expr.right)})"
+        return f"({unparse_pfl_expr(expr.left)} {_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]} {unparse_pfl_expr(expr.right)})"
     elif isinstance(expr, PFLUnaryOp):
-        return f"{_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]}{unparse_expr(expr.operand)}"
+        return f"{_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]}{unparse_pfl_expr(expr.operand)}"
     elif isinstance(expr, PFLCompare):
-        return f"({unparse_expr(expr.left)} {_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]} {unparse_expr(expr.right)})"
+        return f"({unparse_pfl_expr(expr.left)} {_PFL_UNPARSE_OP_TYPE_TO_OP[expr.op]} {unparse_pfl_expr(expr.right)})"
     elif isinstance(expr, PFLCall):
-        args_str = ", ".join(unparse_expr(arg) for arg in expr.args)
-        return f"{unparse_expr(expr.func)}({args_str})"
+        args_strs = [unparse_pfl_expr(arg) for arg in expr.args]
+        if not isinstance(expr.kws, Undefined):
+            args_strs += [
+                f"{n}={unparse_pfl_expr(arg)}" for n, arg in expr.kws
+            ]
+        args_str = ", ".join(args_strs)
+        return f"{unparse_pfl_expr(expr.func)}({args_str})"
     elif isinstance(expr, PFLIfExp):
-        return f"({unparse_expr(expr.body)} if {unparse_expr(expr.test)} else {unparse_expr(expr.orelse)})"
+        return f"({unparse_pfl_expr(expr.body)} if {unparse_pfl_expr(expr.test)} else {unparse_pfl_expr(expr.orelse)})"
     else:
         raise NotImplementedError(f"Unrecognized PFLExpr type: {type(expr)}")
