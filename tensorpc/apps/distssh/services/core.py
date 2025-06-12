@@ -103,7 +103,7 @@ class FaultToleranceSSHServer:
             master_uuid="",
             master_ip=ip,
         )
-        LOGGER.warning("UUID {} for rank {} Assigned", state.uuid, cfg.rank)
+        LOGGER.warning(f"UUID {state.uuid} for rank {cfg.rank} Assigned")
         self._is_master = cfg.rank == self._master_rank
         if self._is_master:
             state.master_uuid = state.uuid
@@ -715,9 +715,9 @@ class FaultToleranceSSHServer:
         client_is_restart = (prev_client_state.uuid != state.uuid and prev_client_state.uuid != "")
         master_is_restart = (self.state.uuid != state.master_uuid and state.master_uuid != "")
         if client_is_restart:
-            LOGGER.error("client uuid changed ({} -> {}), may be restarted.", prev_client_state.uuid, state.uuid)
+            LOGGER.error(f"client uuid changed ({prev_client_state.uuid} -> {state.uuid}), may be restarted.")
         if master_is_restart:
-            LOGGER.error("master uuid changed ({} -> {}), may be restarted.", state.master_uuid, self.state.uuid)
+            LOGGER.error(f"master uuid changed ({state.master_uuid} -> {self.state.uuid}), may be restarted.")
         if client_is_restart or master_is_restart:
             await self._master_start_cmd_restart_sequence()
         async with self._master_ui.dm.draft_update() as draft_master:
