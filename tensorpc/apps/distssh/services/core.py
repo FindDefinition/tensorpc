@@ -103,6 +103,7 @@ class FaultToleranceSSHServer:
             master_uuid="",
             master_ip=ip,
         )
+        LOGGER.warning("UUID {} for rank {} Assigned", state.uuid, cfg.rank)
         self._is_master = cfg.rank == self._master_rank
         if self._is_master:
             state.master_uuid = state.uuid
@@ -713,6 +714,10 @@ class FaultToleranceSSHServer:
         prev_client_state = self._master_ui.dm.model.client_states[state.rank]
         client_is_restart = (prev_client_state.uuid != state.uuid and prev_client_state.uuid != "")
         master_is_restart = (self.state.uuid != state.master_uuid and state.master_uuid != "")
+        if client_is_restart:
+            LOGGER.error("client uuid changed ({} -> {}), may be restarted.", prev_client_state.uuid, state.uuid)
+        if master_is_restart:
+            LOGGER.error("master uuid changed ({} -> {}), may be restarted.", state.master_uuid, self.state.uuid)
         if client_is_restart or master_is_restart:
             await self._master_start_cmd_restart_sequence()
         async with self._master_ui.dm.draft_update() as draft_master:
@@ -831,7 +836,10 @@ class FaultToleranceSSHServer:
                                 if res is not None:
                                     LOGGER.warning(f"Try to rerun all cmd:")
                                     print(self._master_ui.dm.model.cmd)
-                                    await self._master_run_cmd(self._master_ui.dm.model.cmd)
+                                    try:
+                                        await self._master_run_cmd(self._master_ui.dm.model.cmd)
+                                    except:
+                                        LOGGER.error("Restart Unexpected error.", exc_info=True)
                             await self._master_sync_cmd_status()
                     else:
                         if len(self._client_robjs) != self._cfg.world_size - 1:
