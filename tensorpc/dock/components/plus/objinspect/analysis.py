@@ -379,7 +379,7 @@ class ObjectTreeParser:
             return res 
         elif isinstance(obj, TreeItem):
             # this is very special, we need to lazy access the child of a treeitem.
-            for k, v in (await obj.get_child_desps(UniqueTreeIdForTree(""))):
+            for k, v in (await obj.get_child_desps(UniqueTreeIdForTree(""))).items():
                 new_node_id = node.id.append_part(str(k))
                 next_state = self._get_next_expand_state(v, new_node_id, state)
                 if not state.should_keep(v):

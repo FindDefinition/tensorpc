@@ -23,6 +23,7 @@ from runpy import run_path
 from typing import Any, Dict, List, Optional
 
 import grpc
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
@@ -109,6 +110,8 @@ class FlowApp:
         if self.is_dynamic_code:
             module_name = "App"
             use_app_editor = False
+            reload_mgr.in_memory_fs.add_file(f"<{TENSORPC_FILE_NAME_PREFIX}-tensorpc_app_root>", init_code)
+
             self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr, init_code)
         else:
             self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)

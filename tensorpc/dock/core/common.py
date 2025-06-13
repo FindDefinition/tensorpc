@@ -55,6 +55,9 @@ _ONEARG_EDITOR_EVENTS = set([
     FrontendEventType.EditorSaveState.value,
     FrontendEventType.EditorAction.value,
     FrontendEventType.EditorCursorSelection.value,
+    FrontendEventType.EditorInlayHintsQuery.value,
+    FrontendEventType.EditorHoverQuery.value,
+    FrontendEventType.EditorCodelensQuery.value,
 ])
 
 _ONEARG_SPECIAL_EVENTS = set([
@@ -161,18 +164,24 @@ async def handle_standard_event(comp: Component,
             handlers = comp.get_event_handlers(event.type)
             sync_state = False
             # for data model components, we don't need to sync state.
+            # run state change (assign value) after user callbacks to
+            # make sure user can access both old value and new value.
+            finish_callback = None 
             if isinstance(event.keys, Undefined):
-                comp.state_change_callback(event.data, event.type)
+                finish_callback = partial(comp.state_change_callback, event.data, event.type)
                 sync_state = sync_state_after_change
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:
-                    return await comp.run_callbacks(
+                    res = await comp.run_callbacks(
                         handlers.get_bind_event_handlers(event),
                         sync_state,
                         sync_status_first=False,
                         change_status=change_status,
-                        capture_draft=capture_draft)
+                        capture_draft=capture_draft,
+                        finish_callback=finish_callback)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(
@@ -180,7 +189,8 @@ async def handle_standard_event(comp: Component,
                             sync_state,
                             sync_status_first=sync_status_first,
                             change_status=change_status,
-                            capture_draft=capture_draft))
+                            capture_draft=capture_draft,
+                            finish_callback=finish_callback))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
@@ -191,9 +201,11 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs,
+                    res = await comp.run_callbacks(run_funcs,
                                                     sync_status_first=False,
                                                     capture_draft=capture_draft)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,
@@ -206,11 +218,14 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers(event)
                 if is_sync:
-                    return await comp.run_callbacks(
+                    res = await comp.run_callbacks(
                         run_funcs,
                         sync_status_first=False,
                         change_status=change_status,
                         capture_draft=capture_draft)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
+
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,

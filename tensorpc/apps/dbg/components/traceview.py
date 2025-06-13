@@ -243,7 +243,7 @@ class TraceView(mui.FlexBox):
                                                        uid=var_name,
                                                        header=var_name)
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
         if action == EditorActionType.TraceVar.name or action == EditorActionType.TraceVarAllRank.name:
             is_dist = action == EditorActionType.TraceVarAllRank.name

@@ -37,6 +37,7 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 import grpc
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.funcid import clean_source_code, remove_common_indent_from_code
 from tensorpc.core.pfl import parse_func_to_pfl_ast, pfl_ast_to_dict
 from tensorpc.core.datamodel.events import DraftChangeEvent
 import tensorpc.core.datamodel.jmes as jmespath
@@ -456,6 +457,9 @@ class FrontendEventType(enum.IntEnum):
     EditorSaveState = 53
     EditorAction = 55
     EditorCursorSelection = 56
+    EditorInlayHintsQuery = 57
+    EditorHoverQuery = 58
+    EditorCodelensQuery = 59
 
     # leaflet events
     MapZoom = 60
@@ -498,7 +502,8 @@ class FrontendEventType(enum.IntEnum):
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
     UIType.Allotment, UIType.GridLayout, UIType.MenuList,
-    UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown
+    UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown,
+    UIType.MonacoEditor
 }
 
 
@@ -1280,7 +1285,12 @@ class _EventSlotBase(Generic[TEventData]):
     def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True) -> Self:
         """use Python Frontend Language (subset of python) to handle event in frontend directly.
         """
-        func_ast, code = parse_func_to_pfl_ast(func)
+        func_ast = parse_func_to_pfl_ast(func, backend="js")
+        # clean code since we use code as key.
+        func_code_lines = [line.rstrip() for line in func_ast.compile_info.code.splitlines()]
+        func_code_lines = clean_source_code(func_code_lines)
+        code = "\n".join(func_code_lines)
+        code = remove_common_indent_from_code(code)
         op = EventFrontendUpdateOp(
             attr="",
             targetPath="",
@@ -2275,7 +2285,8 @@ class Component(Generic[T_base_props, T_child]):
             sync_status_first: bool = False,
             res_callback: Optional[Callable[[Any], _CORO_NONE]] = None,
             change_status: bool = True,
-            capture_draft: bool = False):
+            capture_draft: bool = False,
+            finish_callback: Optional[Callable[[], _CORO_NONE]] = None):
         """
         Runs the given callback function and handles its result and potential exceptions.
 
@@ -2303,7 +2314,7 @@ class Component(Generic[T_base_props, T_child]):
         # otherwise don't use this because slow
         if sync_status_first:
             ev = asyncio.Event()
-            await self.sync_status(sync_state, ev)
+            await self.sync_status(False, ev)
             await ev.wait()
         res_list :list[Any] = []
         assert self._flow_uid is not None
@@ -2345,7 +2356,10 @@ class Component(Generic[T_base_props, T_child]):
             # finally:
             if not batch_ev.is_empty():
                 await self.put_app_event(batch_ev)
-
+            if finish_callback is not None:
+                coro = finish_callback()
+                if inspect.iscoroutine(coro):
+                    await coro
             if change_status:
                 self._flow_comp_status = UIRunStatus.Stop.value
                 await self.sync_status(sync_state)
@@ -3101,6 +3115,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         return update_ev
 
     async def update_childs_complex(self):
+        """TODO: this function assume the child components isn't changed.
+        if you need to update child comps, you must use set_new_layout.
+        """
         await self.send_and_wait(self.update_childs_complex_event())
 
     async def update_childs_locally(self,

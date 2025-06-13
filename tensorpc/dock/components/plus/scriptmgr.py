@@ -279,7 +279,7 @@ class ScriptManager(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
@@ -407,7 +407,7 @@ class ScriptManager(mui.FlexBox):
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value]))
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
@@ -728,7 +728,7 @@ class ScriptManagerV2(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
@@ -751,7 +751,7 @@ class ScriptManagerV2(mui.FlexBox):
                 # TODO add better option
                 await self._on_run_script(value)
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         model = self.dm.model
         draft = self.dm.get_draft()

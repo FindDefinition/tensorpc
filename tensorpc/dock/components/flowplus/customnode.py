@@ -129,7 +129,7 @@ class CustomNode(ComputeNode):
         return cnode
 
     async def handle_code_editor_save(self,
-                                      save_ev: mui.MonacoEditorSaveEvent,
+                                      save_ev: mui.MonacoSaveEvent,
                                       update_editor: bool = False,
                                       check_template_key: bool = True):
         value = save_ev.value
@@ -177,7 +177,7 @@ class CustomNode(ComputeNode):
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
             await ctx.cflow.update_templates()
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         act = act_ev.action
         if act == CustomNodeEditorActionNames.CreateTemplate:
             await self._setting_dialog.put_app_event(self._setting_template_name.update_event(value=self.name))

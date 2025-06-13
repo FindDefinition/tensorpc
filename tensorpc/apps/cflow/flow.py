@@ -304,7 +304,7 @@ class ComputeFlow(mui.FlexBox):
             print(f"CLOSE EXECUTOR {executor.get_id()}")
             await executor.close()
 
-    def _process_save_ev_before_save(self, ev: mui.MonacoEditorSaveEvent, drafts: ComputeFlowDrafts):
+    def _process_save_ev_before_save(self, ev: mui.MonacoSaveEvent, drafts: ComputeFlowDrafts):
         cur_flow_draft = drafts.cur_model
         sel_node = drafts.selected_node
         cur_selected_node_draft = cur_flow_draft.selected_node

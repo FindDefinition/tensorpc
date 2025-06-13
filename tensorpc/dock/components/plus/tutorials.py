@@ -156,7 +156,7 @@ class AppInMemory(mui.FlexBox):
         layout_flex.set_wrapped_obj(layout.get_wrapped_obj())
         await self.show_box.update_childs({"layout": layout_flex})
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         reload_mgr = self.flow_app_comp_core.reload_mgr
         reload_mgr.in_memory_fs.modify_file(self.path, value)
@@ -187,7 +187,7 @@ class CodeBlock(mui.FlexBox):
         self.prop(flexFlow="column")
         self.editor.event_editor_save.on(self._on_editor_save)
 
-    async def _on_editor_save(self, value: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, value: mui.MonacoSaveEvent):
         self.code = value.value
 
     async def _on_run(self):

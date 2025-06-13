@@ -268,6 +268,9 @@ class AnnotatedType:
     def is_any_type(self) -> bool:
         return self.origin_type is Any
 
+    def is_type_var(self) -> bool:
+        return isinstance(self.origin_type, TypeVar)
+
     def is_tuple_type(self) -> bool:
         return self.origin_type is tuple or self.origin_type is Tuple
 
@@ -293,7 +296,7 @@ class AnnotatedType:
         return dataclasses.is_dataclass(self.origin_type)
 
     def _is_non_class_base_type(self):
-        return self.is_union_type() or self.is_any_type() or self.is_tuple_type()
+        return self.is_union_type() or self.is_any_type() or self.is_tuple_type() or self.is_type_var()
 
     def is_dict_type(self) -> bool:
         if self._is_non_class_base_type():
@@ -406,7 +409,6 @@ def parse_type_may_optional_undefined(
         ann_type: Any,
         is_optional: Optional[bool] = None,
         is_undefined: Optional[bool] = None,
-        typevar_map: Optional[dict[TypeVar, type]] = None,
         self_type: Optional[AnnotatedType] = None) -> AnnotatedType:
     """Parse a type. If is union, return its non-optional and non-undefined type list.
     else return the type itself.
@@ -416,8 +418,8 @@ def parse_type_may_optional_undefined(
     raw_type = ann_type
     ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
     if isinstance(ann_type, TypeVar):
-        assert typevar_map is not None and ann_type in typevar_map, f"TypeVar is not supported, but get {ann_type}"
-        ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
+        return AnnotatedType(ann_type, [], ann_meta, False,
+                                 False, ann_type)
     # check ann_type is Union
     ty_origin = get_origin(ann_type)
     if ty_origin is not None:

@@ -2,11 +2,49 @@ import dataclasses
 import math
 import random
 import struct
-from typing import Any, Union
-from .core import register_meta_infer
+from typing import Any, Optional, Union
+from .core import mark_meta_infer, register_backend, PFLParseConfig
 from .pfl_reg import register_pfl_std
 import numpy as np 
 # implement all math func in javascript Math 
+
+register_backend("js", PFLParseConfig(
+    allow_var_union=False,
+    allow_kw=False,
+    allow_nd_slice=False,
+    allow_slice=False,
+    allow_new_var_after_if=True,
+))
+
+@register_pfl_std(mapped_name="len", backend="js")
+def len_func(x: Any) -> int:
+    return len(x)
+
+@register_pfl_std(mapped_name="print", backend="js")
+def print_func(*x: Any) -> None:
+    return print(*x)
+
+@register_pfl_std(mapped_name="int", backend="js")
+def int_func(x: Any) -> int:
+    return int(x)
+
+@register_pfl_std(mapped_name="float", backend="js")
+def float_func(x: Any) -> float:
+    return float(x)
+
+@register_pfl_std(mapped_name="bool", backend="js")
+def bool_func(x: Any) -> bool:
+    return bool(x)
+
+@register_pfl_std(mapped_name="range", backend="js")
+def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = None) -> range:
+    if stop is None and step is None:
+        return range(start)
+    elif step is None and stop is not None:
+        return range(start, stop)
+    else:
+        assert stop is not None and step is not None, "stop and step must be provided together"
+        return range(start, stop, step) 
 
 @register_pfl_std(mapped_name="Math", backend="js")
 @dataclasses.dataclass
@@ -191,10 +229,6 @@ class NdArray:
     def __getitem__(self, key: int) -> np.ndarray: ...
     def tolist(self) -> list[Any]: ...
     def size(self) -> int: ...
-
-@register_meta_infer(NdArray.__getitem__)
-def __getitem_meta_infer(ten: Any, key: Any) -> Any:
-    return None  
 
 
 @register_pfl_std(mapped_name="Numpy", mapped=np, backend="js")

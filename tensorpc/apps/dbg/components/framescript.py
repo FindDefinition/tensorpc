@@ -181,7 +181,7 @@ class FrameScript(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
         
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
 
         if action == EditorActions.SaveAndRun.value:
@@ -212,7 +212,7 @@ class FrameScript(mui.FlexBox):
         frame_id, title = self._get_frame_id_and_title_from_frame(frame)
         return frame_id
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         if self.scripts.value is not None:
             frame_id = self._get_current_frame_id()

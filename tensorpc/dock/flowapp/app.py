@@ -661,7 +661,7 @@ class App:
         uid_to_comp_items = list(uid_to_comp.items())
         uid_to_comp_items.sort(key=lambda x: len(x[0].parts), reverse=True)
         with enter_app_context(self):
-            for _, v in uid_to_comp_items:
+            for uid, v in uid_to_comp_items:
                 await v._run_mount_special_methods(v, self._flow_reload_manager)
 
     def app_terminate(self):
@@ -981,7 +981,7 @@ class App:
                     res[uid_original] = await comps[-1].handle_event(
                         event, is_sync=is_sync)
         if is_sync:
-            return res
+            return as_dict_no_undefined(res)
 
     async def _handle_event_with_ctx(self, ev: UIEvent, is_sync: bool = False):
         # TODO run control from other component
@@ -1193,7 +1193,7 @@ class EditableApp(App):
         super().app_initialize()
         user_obj = self._get_user_app_object()
         metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
-            type(user_obj))
+            type(user_obj), no_code=self._get_app_dynamic_cls().is_dynamic_code)
 
         # for m in metas:
         #     m.bind(user_obj)

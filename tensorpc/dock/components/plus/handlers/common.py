@@ -363,7 +363,7 @@ class DefaultHandler(ObjectPreviewHandler):
         await self._objscript_editor.write("")
         await self._objscript_show.set_new_layout([])
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         if self.obj is not None and self.obj_uid is not None:
             _, layouts = get_frame_obj_layout_from_code(self.obj_uid, ev.value, self.obj)
             if layouts is not None:

@@ -1735,7 +1735,7 @@ class MonacoEditorAction:
 
 
 @dataclasses.dataclass
-class MonacoEditorProps(MUIComponentBaseProps):
+class MonacoEditorProps(FlexComponentBaseProps, ContainerBaseProps):
     value: Union[str, Undefined] = undefined
     language: Union[str, Undefined] = undefined
     path: Union[str, Undefined] = undefined
@@ -1749,10 +1749,11 @@ class _MonacoEditorControlType(enum.IntEnum):
     SetLineNumber = 0
     Save = 1
     SetValue = 2
+    SetDecoration = 3
 
 
 @dataclasses.dataclass
-class MonacoEditorSaveEvent:
+class MonacoSaveEvent:
     value: str
     saveVersionId: int
     viewState: Any
@@ -1761,36 +1762,108 @@ class MonacoEditorSaveEvent:
     lang: Optional[str] = None 
     path: Optional[str] = None 
 
+@dataclasses.dataclass
+class MonacoPosition:
+    lineNumber: int
+    column: int
 
 @dataclasses.dataclass
-class MonacoEditorSelection:
+class MonacoRange:
     startLineNumber: int
     startColumn: int
     endLineNumber: int
     endColumn: int
+
+@dataclasses.dataclass
+class MonacoSelection(MonacoRange):
     selectionStartLineNumber: int
     selectionStartColumn: int
     positionLineNumber: int
     positionColumn: int
 
+@dataclasses.dataclass
+class MonacoHoverQueryEvent:
+    position: MonacoPosition
 
 @dataclasses.dataclass
-class MonacoEditorSelectionEvent:
-    selections: List[MonacoEditorSelection]
+class MonacoInlayHintQueryEvent:
+    range: MonacoRange
+
+@dataclasses.dataclass
+class MonacoMarkdownString:
+    value: str 
+
+@dataclasses.dataclass
+class MonacoHover:
+    contents: list[MonacoMarkdownString]
+    range: Union[Undefined, MonacoRange] = undefined
+
+@dataclasses.dataclass
+class MonacoInlayHint:
+    label: str
+    position: MonacoPosition
+    tooltip: Union[Undefined, str] = undefined
+    # 1: Type, 2: Parameter
+    kind: Union[Undefined, Literal[1, 2]] = undefined 
+    paddingLeft: Union[Undefined, bool] = undefined
+    paddingRight: Union[Undefined, bool] = undefined
+
+@dataclasses.dataclass
+class MonacoInlayHintList:
+    hints: list[MonacoInlayHint]
+
+@dataclasses.dataclass
+class MonacoModelDecoration:
+    className: Union[Undefined, str] = undefined 
+    glyphMarginClassName: Union[Undefined, str] = undefined 
+    inlineClassName: Union[Undefined, str] = undefined 
+    isWholeLine: Union[Undefined, bool] = undefined
+    glyphMarginHoverMessage: Union[Undefined, MonacoMarkdownString, list[MonacoMarkdownString]] = undefined
+    hoverMessage: Union[Undefined, MonacoMarkdownString, list[MonacoMarkdownString]] = undefined
+    lineNumberHoverMessage: Union[Undefined, MonacoMarkdownString, list[MonacoMarkdownString]] = undefined
+    zIndex: Union[Undefined, int] = undefined
+    linesDecorationsClassName: Union[Undefined, str] = undefined
+    marginClassName: Union[Undefined, str] = undefined
+
+@dataclasses.dataclass
+class MonacoModelDeltaDecoration:
+    range: MonacoRange
+    options: MonacoModelDecoration
+
+@dataclasses.dataclass
+class MonacoSelectionEvent:
+    selections: List[MonacoSelection]
     selectedCode: str
     source: str
 
 
 @dataclasses.dataclass
-class MonacoEditorActionEvent:
+class MonacoActionEvent:
     action: str
-    selection: Optional[MonacoEditorSelectionEvent]
+    selection: Optional[MonacoSelectionEvent]
     userdata: Optional[Any] = None
 
 
-class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
+class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
+    @dataclasses.dataclass
+    class InlineComponent:
+        comp: Component
+        afterLineNumber: int 
+        afterColumn: Union[int, Undefined] = undefined 
+        # TODO add enum for this
+        afterColumnAffinity: Union[int, Undefined] = undefined 
+        showInHiddenAreas: Union[bool, Undefined] = undefined 
+        ordinal: Union[int, Undefined] = undefined 
+        suppressMouseDown: Union[bool, Undefined] = undefined 
+        heightInLines: Union[int, Undefined] = undefined 
+        heightInPx: Union[int, Undefined] = undefined 
+        minWidthInPx: Union[int, Undefined] = undefined 
 
-    def __init__(self, value: str, language: str, path: str) -> None:
+    @dataclasses.dataclass
+    class ChildDef:
+        icomps: dict[str, "MonacoEditor.InlineComponent"]
+
+    def __init__(self, value: str, language: str, path: str, icomps: Optional[dict[str, "MonacoEditor.InlineComponent"]] = None) -> None:
         all_evs = [
             FrontendEventType.Change.value,
             FrontendEventType.EditorQueryState.value,
@@ -1799,8 +1872,12 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             FrontendEventType.ComponentReady.value,
             FrontendEventType.EditorAction.value,
             FrontendEventType.EditorCursorSelection.value,
+            FrontendEventType.EditorInlayHintsQuery.value,
+            FrontendEventType.EditorHoverQuery.value,
+            FrontendEventType.EditorCodelensQuery.value,
         ]
-        super().__init__(UIType.MonacoEditor, MonacoEditorProps, all_evs)
+        super().__init__(UIType.MonacoEditor, MonacoEditorProps, MonacoEditor.ChildDef(icomps or {}),
+            allowed_events=all_evs)
         self.props.language = language
         self.props.path = path
         self.props.value = value
@@ -1817,16 +1894,29 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_change = self._create_event_slot(FrontendEventType.Change)
         self.event_editor_save = self._create_event_slot(
             FrontendEventType.EditorSave,
-            converter=lambda x: MonacoEditorSaveEvent(**x))
+            converter=lambda x: MonacoSaveEvent(**x))
         self.event_component_ready = self._create_event_slot_noarg(
             FrontendEventType.ComponentReady)
         self.event_editor_action = self._create_event_slot(
             FrontendEventType.EditorAction,
-            converter=lambda x: MonacoEditorActionEvent(**x))
+            converter=lambda x: MonacoActionEvent(**x))
         self.event_editor_save.on(self._default_on_editor_save)
         self.event_editor_cursor_selection = self._create_event_slot(
             FrontendEventType.EditorCursorSelection,
-            converter=lambda x: MonacoEditorSelectionEvent(**x))
+            converter=lambda x: MonacoSelectionEvent(**x))
+        self.event_editor_inlay_hints_query = self._create_event_slot(
+            FrontendEventType.EditorInlayHintsQuery,
+            lambda x: MonacoInlayHintQueryEvent(**x))
+        self.event_editor_hover_query = self._create_event_slot(
+            FrontendEventType.EditorHoverQuery,
+            lambda x: MonacoHoverQueryEvent(**x))
+        self.event_editor_codelens_query = self._create_event_slot(
+            FrontendEventType.EditorCodelensQuery)
+
+    @property
+    def childs_complex(self):
+        assert isinstance(self._child_structure, MonacoEditor.ChildDef)
+        return self._child_structure
 
     def state_change_callback(
             self,
@@ -1839,7 +1929,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self._view_state = state["viewState"]
         self._save_version_id = state.get("saveVersionId", None)
 
-    def _default_on_editor_save(self, ev: MonacoEditorSaveEvent):
+    def _default_on_editor_save(self, ev: MonacoSaveEvent):
         self._save_version_id = ev.saveVersionId
         self._view_state = ev.viewState
 
@@ -1888,6 +1978,17 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         if userdata is not None:
             data["userdata"] = userdata
         ev = self.create_comp_event(data)
+        await self.send_and_wait(ev)
+
+    async def set_decorations(self, coll: Literal["common", "debug", "breakpoint", "git"], decorations: List[MonacoModelDeltaDecoration]):
+        assert coll in ("common", "debug", "breakpoint", "git"), "collection must be one of common, debug, breakpoint, git"
+        ev_dict = {
+            "type":
+            int(_MonacoEditorControlType.SetDecoration),
+            "collection": coll,
+            "decorations": decorations,
+        }
+        ev = self.create_comp_event(ev_dict)
         await self.send_and_wait(ev)
 
     async def write(self,
@@ -1951,10 +2052,10 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             modified_props["value"] = value
         batch_ev += (self.update_event(**modified_props))
 
-    def _handle_editor_save_for_draft(self, ev: MonacoEditorSaveEvent,
+    def _handle_editor_save_for_draft(self, ev: MonacoSaveEvent,
                                       draft: Any,
                                       handler: DraftChangeEventHandler,
-                                      save_event_prep: Optional[Callable[[MonacoEditorSaveEvent], None]] = None):
+                                      save_event_prep: Optional[Callable[[MonacoSaveEvent], None]] = None):
         # we shouldn't trigger draft change handler when we save value directly from editor.
         with DataModel.add_disabled_handler_ctx([handler]):
             if save_event_prep is not None:
@@ -1968,7 +2069,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             lang_draft: Optional[Any] = None,
             path_modifier: Optional[Callable[[str], str]] = None,
             lang_modifier: Optional[Callable[[str], str]] = None,
-            save_event_prep: Optional[Callable[[MonacoEditorSaveEvent], None]] = None):
+            save_event_prep: Optional[Callable[[MonacoSaveEvent], None]] = None):
         assert not self.is_mounted(), "must be called when unmount"
         assert isinstance(draft, DraftBase)
         assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
