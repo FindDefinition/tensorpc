@@ -412,6 +412,7 @@ class PFLAsyncRunner:
         self.event_leave_bkpt: SingleAsyncEventEmitter[PFLBreakpoint] = SingleAsyncEventEmitter()
         self.event_new_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
         self.event_delete_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
+        self.event_ctrl_point_change: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
 
 
     async def _run_coro_none(self, fn: Callable[..., _CORO_NONE], *args) -> None:
@@ -423,9 +424,14 @@ class PFLAsyncRunner:
     def clear_runtime_state(self):
         self._state = PFLAsyncRunnerState(PFLAsyncRunnerStateType.IDLE)
         self._event.clear()
+        self._breakpoints.clear()
 
-    def release_breakpoint(self):
+    def release_breakpoint(self, stop: bool = False):
+        assert self._state.type == PFLAsyncRunnerStateType.PAUSE, \
+            f"release_breakpoint called in state {self._state.type}, expected PAUSE."
         self._event.set()
+        if stop:
+            self._state.type = PFLAsyncRunnerStateType.NEED_STOP
 
     def add_breakpoint(self, lineno: int, enabled: bool = True, one_shot: bool = False):
         self._breakpoints[lineno] = PFLBreakpointDesc(lineno, enabled, one_shot)
@@ -447,6 +453,10 @@ class PFLAsyncRunner:
         self._state.cur_bkpt = None 
         if self._state.type == PFLAsyncRunnerStateType.NEED_STOP:
             self._state.type = PFLAsyncRunnerStateType.IDLE
+            for cp in self._state.cur_ctrl_points.values():
+                await self.event_delete_ctrl_point.emit_async(cp)
+            self._state.cur_ctrl_points.clear()
+            self._breakpoints.clear()
             raise PFLEvalStop("Eval Stop by user.", node)
         self._state.type = PFLAsyncRunnerStateType.RUNNING_ON_THE_FLY
 
@@ -461,11 +471,16 @@ class PFLAsyncRunner:
     async def _check_enter_breakpoint(self, node: PFLAstNodeBase, scope: dict[str, Any]):
         if node.source_loc[0] in self._breakpoints:
             bkpt_desc = self._breakpoints[node.source_loc[0]]
-            try:
-                return await self._enter_breakpoint(node, scope)
-            finally:
-                if bkpt_desc.one_shot:
-                    self._breakpoints.pop(node.source_loc[0])
+            if self._state.cur_ctrl_points:
+                should_pause = all(cp.should_pause for cp in self._state.cur_ctrl_points.values())
+            else:
+                should_pause = True
+            if should_pause:
+                try:
+                    return await self._enter_breakpoint(node, scope)
+                finally:
+                    if bkpt_desc.one_shot:
+                        self._breakpoints.pop(node.source_loc[0])
 
     async def _get_subscript_target_slice(self, node: PFLSubscript, scope: dict[str, Any]):
         tgt = await self._run_expr(node.value, scope)
@@ -559,7 +574,7 @@ class PFLAsyncRunner:
 
     async def run_body(self, block_body: list[PFLAstStmt], scope: dict[str, Any]) -> Union[Any, PFLRunnerResult]:
         for stmt in block_body:
-            print("RUN STMT", type(stmt), len(self._breakpoints), stmt.source_loc[0] in self._breakpoints)
+            # print("RUN STMT", type(stmt), len(self._breakpoints), stmt.source_loc[0] in self._breakpoints)
             if self._breakpoints:
                 await self._check_enter_breakpoint(stmt, scope)
             try:
@@ -627,19 +642,14 @@ class PFLAsyncRunner:
                             await self.event_new_ctrl_point.emit_async(ctrl)
                         for i in iter_obj:
                             if ctrl.enabled:
-                                print(i, ctrl.step)
-                                if ctrl.stop_in_start:
-                                    ctrl.should_pause = ctrl.step == i
-                                    if ctrl.should_pause:
-
-                                        await self._may_pause_by_ctrl_points(stmt, private_scope)
-                                    # ctrl.should_pause = False
+                                # print(i, ctrl.step, iter_obj)
+                                if ctrl.step < i:
+                                    ctrl.step = i
+                                    await self.event_ctrl_point_change.emit_async(ctrl)
+                                # print("AFTER", i, ctrl.step)
+                                ctrl.should_pause = ctrl.step == i
                                 private_scope[tgt.id] = i
                                 result = await self.run_body(stmt.body, private_scope)
-                                if not ctrl.stop_in_start:
-                                    ctrl.should_pause = ctrl.step == i
-                                    if ctrl.should_pause:
-                                        await self._may_pause_by_ctrl_points(stmt, private_scope)
                                     # ctrl.should_pause = False
                             else:
                                 private_scope[tgt.id] = i
@@ -729,7 +739,7 @@ class PFLAsyncRunner:
     async def run_func(self, func_uid: str, scope: dict[str, Any]):
         return await self._run_func(func_uid, scope)
 
-    async def run_until(self, lineno: int, func_uid: str, scope: dict[str, Any]):
+    async def run_until(self, lineno: int, func_uid: str, scope: dict[str, Any], exit_event: Optional[asyncio.Event] = None):
         func_node = self._library.all_compiled[func_uid]
         assert self._state.type == PFLAsyncRunnerStateType.IDLE, \
             "You must call clear_runtime_state() before run_until()"
@@ -737,13 +747,27 @@ class PFLAsyncRunner:
         assert stmt_should_pause is not None, \
             f"Cannot find statement at {func_node.get_module_import_path()}:{lineno}"
         stmt_start_lineno = stmt_should_pause.source_loc[0]
-        self.add_breakpoint(stmt_start_lineno, one_shot=True)
+        self.add_breakpoint(stmt_start_lineno, one_shot=False)
         try:
             return await self._run_func(func_uid, scope)
+        except PFLEvalStop:
+            self.clear_runtime_state()
+        except:
+            traceback.print_exc()
+            raise
         finally:
-            self.remove_breakpoint(stmt_start_lineno)
+            self.clear_runtime_state()
+            if exit_event is not None:
+                exit_event.set()
+
+    def get_state(self) -> PFLAsyncRunnerState:
+        return self._state
+
+    def is_paused(self) -> bool:
+        return self._state.type == PFLAsyncRunnerStateType.PAUSE
 
     async def continue_until(self, lineno: int):
         assert self._state.type == PFLAsyncRunnerStateType.PAUSE
         self.release_breakpoint()
-        self.add_breakpoint(lineno, one_shot=True)
+        self._breakpoints.clear()
+        self.add_breakpoint(lineno, one_shot=False)

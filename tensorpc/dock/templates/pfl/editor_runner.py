@@ -7,6 +7,13 @@ from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, 
 from typing import Annotated, Any, Optional, Union
 from tensorpc.core import pfl
 
+@pfl.mark_pfl_compilable
+def inner_fn(a: float) -> float:
+    for k in range(3):
+        a += 1.0
+    return a
+
+@pfl.mark_pfl_compilable
 def func3(a: float, b: float):
     if a > 10:
         d = 5 
@@ -15,6 +22,7 @@ def func3(a: float, b: float):
     for j in range(10):
         for k in range(5):
             d += 1
+            d = inner_fn(d)
     return d + b
 
 class App:
@@ -48,11 +56,16 @@ class App:
         self.editor.event_editor_action.on(self._handle_editor_acts)
         # self.editor.event_editor_inlay_hints_query.on(self.inlay_hint_query)
         self._runner = pfl.PFLAsyncRunner(lib)
+
+        self._ctrl_to_slider: dict[int, mui.BlenderSlider] = {}
         self._runner.event_new_ctrl_point.on(partial(self._handle_ctrl_point, is_new=True))
         self._runner.event_delete_ctrl_point.on(partial(self._handle_ctrl_point, is_new=False))
+        self._runner.event_ctrl_point_change.on(self._handle_ctrl_point_update)
+
         self._runner.event_enter_bkpt.on(self._handle_enter_bkpt)
         self._runner.event_leave_bkpt.on(self._handle_leave_bkpt)
         self._runner_task: Optional[asyncio.Task] = None
+        self._runner_task_ev = asyncio.Event()
         return mui.VBox([
             self.editor.prop(flex=1)
         ]).prop(width="100%", height="100%", overflow="hidden")
@@ -67,15 +80,29 @@ class App:
         await self.editor.set_decorations("common", [])
 
     async def _handle_slider(self, value: mui.NumberType, slider: mui.BlenderSlider, ctrl: PFLCtrlFor):
+        if self._runner_task is None:
+            return 
         old = slider.int()
         new = int(value)
-        print(new, old)
-
         if new > old:
-            ctrl.step += ctrl.range.step
+            ctrl.step = new
+            ctrl.should_pause = False
+            print("RELEASE", old, new)
             self._runner.release_breakpoint()
-        elif new < old:
-            pass 
+        # elif new < old:
+        #     # rerun
+        #     print("RERUN", old, new)
+        #     self._runner.release_breakpoint(stop=True)
+        #     await self._runner_task_ev.wait()
+        #     self._runner_task = None
+
+    async def _handle_ctrl_point_update(self, ctrl: PFLCtrlBase):
+        assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
+        key = str(id(ctrl.node))
+        assert key in self.editor.childs_complex.icomps
+        slider = self.editor.childs_complex.icomps[key].comp
+        assert isinstance(slider, mui.BlenderSlider)
+        await slider.update_value(ctrl.step)
 
     async def _handle_ctrl_point(self, ctrl: PFLCtrlBase, is_new: bool):
         assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
@@ -98,10 +125,17 @@ class App:
             lineno = act.selection.selections[0].startLineNumber
             stmt = self._lib.find_stmt_by_path_lineno(self._lib.get_module_by_func(func3).uid, lineno)
             if stmt is not None:
-                self._runner_task = asyncio.create_task(self._runner.run_until(lineno, get_module_id_of_type(func3), {
-                    "a": 5,
-                    "b": 3
-                }))
+                if self._runner.is_paused():
+                    # if paused, continue from the current position
+                    await self._runner.continue_until(lineno)
+                else:
+                    self._runner_task_ev.clear()
+                    assert self._runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
+                        f"Runner is not in IDLE state, current state: {self._runner._state.type}"
+                    self._runner_task = asyncio.create_task(self._runner.run_until(lineno, get_module_id_of_type(func3), {
+                        "a": 5,
+                        "b": 3
+                    }, self._runner_task_ev))
 
     async def hover_query(self, hqevent: mui.MonacoHoverQueryEvent) -> Optional[mui.MonacoHover]:
         lineno = hqevent.position.lineNumber

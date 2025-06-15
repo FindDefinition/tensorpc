@@ -27,4 +27,4 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                      unparse_pfl_ast_to_lines, unparse_pfl_expr, PFLTreeNodeFinder)
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
                       register_pfl_std)
-from .evaluator import consteval_expr, PFLStaticEvaluator, eval_total_tree, metaeval_total_tree, PFLAsyncRunner
+from .evaluator import consteval_expr, PFLStaticEvaluator, eval_total_tree, metaeval_total_tree, PFLAsyncRunner, PFLAsyncRunnerStateType
