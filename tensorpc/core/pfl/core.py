@@ -854,14 +854,17 @@ BACKEND_CONFIG_REGISTRY: dict[str, PFLParseConfig] = {}
 def register_backend(backend: str, config: PFLParseConfig):
     BACKEND_CONFIG_REGISTRY[backend] = config
 
-
+@dataclasses.dataclass
+class PFLInlineRunEnv:
+    kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    contexts: list[contextlib.AbstractContextManager] = dataclasses.field(default_factory=list)
 
 @dataclasses.dataclass
 class PFLCompileFuncMeta:
     # indicate a function or class (TODO) can be compiled.
     backends: Optional[list[str]] = None
     # used by debugger/simulator.
-    test_kwarg_fn: Optional[Callable[[], dict[str, Any]]] = None
+    inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None
 
 @dataclasses.dataclass
 class PFLCompilable:

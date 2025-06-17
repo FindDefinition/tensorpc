@@ -726,6 +726,7 @@ def parse_func_to_pfl_ast(
     if isinstance(func, staticmethod):
         func = func.__func__
     func_uid = get_module_id_of_type(func)
+    func_meta = get_compilable_meta(func)
     outer_ctx = get_parse_context()
     if outer_ctx is not None:
         func_code_getter = outer_ctx.func_code_getter
@@ -801,6 +802,7 @@ def parse_func_to_pfl_ast(
             block.compile_info.code = code
             block.compile_info.first_lineno = first_lineno
             block.compile_info.original = func
+            block.compile_info.meta = func_meta
             if is_root:
                 ctx._all_compiled[func_uid] = block
 
@@ -884,6 +886,8 @@ def _ast_as_dict(obj):
     if isinstance(obj, PFLAstNodeBase):
         result = []
         for f in dataclasses.fields(obj):
+            if f.name == "compile_info" or f.name == "source_loc":
+                continue 
             value = _ast_as_dict(getattr(obj, f.name))
             if not isinstance(value, Undefined):
                 result.append((f.name, value))

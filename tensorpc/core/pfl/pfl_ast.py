@@ -14,7 +14,7 @@ from tensorpc.core.annolib import (Undefined, is_undefined,
 from tensorpc.core.pfl.constants import PFL_STDLIB_FUNC_META_ATTR
 from tensorpc.core.moduleid import get_qualname_of_type
 
-from .core import (PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
+from .core import (PFLCompileFuncMeta, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
                    get_parse_context_checked, param_fn, varparam_fn)
 
 
@@ -1445,6 +1445,7 @@ class _FuncCompileInfo:
     code: str = ""
     first_lineno: int = 0
     original: Optional[Any] = None
+    meta: Optional[PFLCompileFuncMeta] = None
 
 @dataclasses.dataclass(kw_only=True)
 class PFLFunc(PFLAstStmt):

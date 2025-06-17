@@ -1,5 +1,7 @@
 import asyncio
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, ExitStack
+import contextlib
 import enum
 import inspect
 import traceback
@@ -325,7 +327,6 @@ def metaeval_total_tree(func_node: PFLFunc,
     evaluator = PFLStaticEvaluator(eval_cfg)
     return evaluator.eval_total_tree(func_node, scope, backend, code_for_error, parse_cfg)
 
-
 class PFLRunnerResultType(enum.IntEnum):
     BREAK = 0
     CONTINUE = 1
@@ -413,6 +414,7 @@ class PFLAsyncRunner:
         self.event_new_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
         self.event_delete_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
         self.event_ctrl_point_change: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
+        self.event_eval_stop: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
 
 
     async def _run_coro_none(self, fn: Callable[..., _CORO_NONE], *args) -> None:
@@ -739,7 +741,7 @@ class PFLAsyncRunner:
     async def run_func(self, func_uid: str, scope: dict[str, Any]):
         return await self._run_func(func_uid, scope)
 
-    async def run_until(self, lineno: int, func_uid: str, scope: dict[str, Any], exit_event: Optional[asyncio.Event] = None):
+    async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None):
         func_node = self._library.all_compiled[func_uid]
         assert self._state.type == PFLAsyncRunnerStateType.IDLE, \
             "You must call clear_runtime_state() before run_until()"
@@ -749,7 +751,19 @@ class PFLAsyncRunner:
         stmt_start_lineno = stmt_should_pause.source_loc[0]
         self.add_breakpoint(stmt_start_lineno, one_shot=False)
         try:
-            return await self._run_func(func_uid, scope)
+            if scope is not None:
+                return await self._run_func(func_uid, scope)
+            else:
+                assert func_node.compile_info.meta is not None 
+                fn_meta = func_node.compile_info.meta
+                assert fn_meta.inline_run_env_fn is not None 
+                inline_run_env = fn_meta.inline_run_env_fn()
+                scope = inline_run_env.kwargs
+                ctxes = inline_run_env.contexts
+                with contextlib.ExitStack() as stack:
+                    for ctx in ctxes:
+                        stack.enter_context(ctx)
+                    return await self._run_func(func_uid, scope)
         except PFLEvalStop:
             self.clear_runtime_state()
         except:
@@ -759,6 +773,7 @@ class PFLAsyncRunner:
             self.clear_runtime_state()
             if exit_event is not None:
                 exit_event.set()
+            await self.event_eval_stop.emit_async()
 
     def get_state(self) -> PFLAsyncRunnerState:
         return self._state
