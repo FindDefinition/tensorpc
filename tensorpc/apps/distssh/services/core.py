@@ -297,6 +297,10 @@ class FaultToleranceSSHServer:
             await self._terminal.disconnect()
             await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
                 term_line_event_callback=self._line_event_cb)
+            state = self._terminal.get_current_state()
+            assert state is not None
+            self._debug_panel.set_parent_pid(state.pid)
+
         elif act == MasterActions.CLEAR_ALL_CKPT:
             clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.clear")
             await clear_fn()

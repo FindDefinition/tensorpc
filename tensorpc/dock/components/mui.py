@@ -2958,6 +2958,10 @@ class BlenderSliderProps(MUIComponentBaseProps):
     fractionDigits: Union[Undefined, int] = undefined
     isInteger: Union[Undefined, bool] = undefined
     showTotal: Union[Undefined, bool] = undefined
+    forwardOnly: Union[Undefined, bool] = undefined
+    disabled: Union[Undefined, bool] = undefined
+    # for inline component in monaco editor.
+    alwaysShowButton: Union[Undefined, bool] = undefined
 
 
 class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
@@ -2987,6 +2991,7 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
             assert init_value is not None and step is not None, "you must specify `init_value` and `step` if you use infinite."
             self.props.value = init_value
             self.props.infSlider = True
+            self.props.ranges = (0, 1, step)
 
         self.callback = callback
         if callback is not None:

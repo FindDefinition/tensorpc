@@ -169,6 +169,7 @@ async def handle_standard_event(comp: Component,
             finish_callback = None 
             if isinstance(event.keys, Undefined):
                 finish_callback = partial(comp.state_change_callback, event.data, event.type)
+                # comp.state_change_callback(event.data, event.type)
                 sync_state = sync_state_after_change
             if handlers is not None:
                 # state change events must sync state after callback
@@ -193,6 +194,8 @@ async def handle_standard_event(comp: Component,
                             finish_callback=finish_callback))
             else:
                 # all controlled component must sync state after state change
+                if finish_callback is not None:
+                    finish_callback()
                 if sync_state_after_change:
                     await comp.sync_status(sync_state)
         elif event.type in _NOARG_EVENTS:
