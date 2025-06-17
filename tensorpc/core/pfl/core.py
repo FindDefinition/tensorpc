@@ -854,7 +854,7 @@ BACKEND_CONFIG_REGISTRY: dict[str, PFLParseConfig] = {}
 def register_backend(backend: str, config: PFLParseConfig):
     BACKEND_CONFIG_REGISTRY[backend] = config
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class PFLInlineRunEnv:
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     contexts: list[contextlib.AbstractContextManager] = dataclasses.field(default_factory=list)
