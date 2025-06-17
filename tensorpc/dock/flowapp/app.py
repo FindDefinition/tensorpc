@@ -1189,11 +1189,17 @@ class EditableApp(App):
         finally:
             self._protect_app_observe_call = False
 
+    def _is_dynamic_code(self):
+        dcls = self._app_dynamic_cls
+        if dcls is None:
+            return True 
+        return dcls.is_dynamic_code
+
     def app_initialize(self):
         super().app_initialize()
         user_obj = self._get_user_app_object()
         metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
-            type(user_obj), no_code=self._get_app_dynamic_cls().is_dynamic_code)
+            type(user_obj), no_code=self._is_dynamic_code())
 
         # for m in metas:
         #     m.bind(user_obj)
