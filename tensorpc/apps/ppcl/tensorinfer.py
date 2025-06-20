@@ -1,48 +1,8 @@
-from collections.abc import Sequence
 from functools import partial
 from typing import Any, Optional, Type, Union
 import dataclasses
 import numpy as np 
 from tensorpc.core import pfl
-
-@dataclasses.dataclass
-class TensorProxy:
-    """
-    A proxy for a tensor that can be used to infer metadata.
-    only support basic operations.
-    
-    """
-    shape: list[int]
-    dtype: int
-    is_pointer: bool = False
-    num_element: int = 1
-
-    @staticmethod
-    def dtype_promotion(*args: int):
-        raise NotImplementedError
-
-    @staticmethod
-    def get_default_dtype_from_pfl(pfl_info: pfl.PFLExprInfo) -> int:
-        raise NotImplementedError
-
-    @staticmethod
-    def get_default_bool_dtype() -> int:
-        raise NotImplementedError
-
-    def is_scalar(self) -> bool:
-        return len(self.shape) == 0
-
-    def is_floating(self) -> bool:
-        raise NotImplementedError
-
-    def is_unsigned(self) -> bool:
-        raise NotImplementedError
-
-    def is_integer(self) -> bool:
-        raise NotImplementedError
-
-    def bit_size(self) -> int:
-        raise NotImplementedError
 
 
 @dataclasses.dataclass
@@ -89,7 +49,6 @@ def getitem_infer(data: pfl.PFLExprInfo, slice_items: Union[tuple[pfl.PFLExprInf
         elif slice_items.type == pfl.PFLExprType.NUMBER:
             assert len(data_meta.shape) > 0, "Cannot slice an empty tensor"
             new_meta = dataclasses.replace(data_meta, shape=data_meta.shape[1:])
-
         else:
             raise NotImplementedError(f"Unsupported slice type: {slice_items.type}")
         return pfl.PFLMetaInferResult(new_meta)

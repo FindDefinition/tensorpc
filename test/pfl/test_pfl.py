@@ -40,9 +40,10 @@ def func2(a: float, b: float):
     return f
 
 @pfl.mark_pfl_compilable
-def add(x: int, y: int) -> int:
+def add(x, y):
     return x + y
 
+@pfl.mark_pfl_compilable
 def func3(a: float, b: float):
     c = stl.Math.pow(a, y=b)
     if a > 10:
@@ -51,7 +52,7 @@ def func3(a: float, b: float):
         d = 3
     for j in range(10):
         d += 1
-    return add(d, 3)
+    return add(d, 3), c
 
 if __name__ == "__main__":
     # pflast, run_scope = parse_expr_to_df_ast("Math().sin(2)")

@@ -1,4 +1,5 @@
 from functools import partial
+from tensorpc.apps.ppcl.tsim import get_tensorsim_context_checked
 from tensorpc.core import pfl
 from typing_extensions import Self
 import numpy as np 
@@ -246,7 +247,8 @@ class ppcl:
 
     @staticmethod
     def program_id(axis: int) -> int: 
-        return 0
+        ctx = get_tensorsim_context_checked()
+        return ctx.grid_size[axis]
 
     @staticmethod
     def array(data: list[Any]) -> Tensor: ...

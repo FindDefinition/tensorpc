@@ -3,6 +3,7 @@ from collections.abc import Mapping
 import contextlib
 import contextvars
 import enum
+from functools import partial
 import inspect
 import sys
 from typing import (TYPE_CHECKING, Any, Callable, ForwardRef, Optional, Type, TypeVar, Union,
@@ -15,7 +16,8 @@ from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
                                    Undefined,
                                    parse_type_may_optional_undefined,
                                    undefined)
-from tensorpc.core.pfl.constants import PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR
+from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
+from tensorpc.core.pfl.constants import PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR, PFL_FUNC_ANNO_META_ATTR
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem, register_pfl_std
@@ -26,6 +28,8 @@ if TYPE_CHECKING:
 
 PFL_LOGGER = get_logger("tensorpc.pfl")
 
+_T = TypeVar("_T")
+
 @dataclasses.dataclass
 class PFLMetaInferResult:
     data: Any
@@ -34,7 +38,6 @@ class PFLMetaInferResult:
 class PFLVariableMeta:
     data: Any
     meta_infer: Optional[Callable[..., PFLMetaInferResult]] = None
-
 
 class PFLExprType(enum.IntEnum):
     UNKNOWN = -1
@@ -222,7 +225,12 @@ class PFLParseCache:
             sig = inspect.Signature([varparam_fn("x", Any)], return_annotation=Any)
             return PFLExprInfo.from_signature(sig, raw_func=func)
         else:
-            overloads = get_overloads(func)
+            meta: Optional[PFLStdlibFuncMeta] = getattr(func, PFL_STDLIB_FUNC_META_ATTR, None)
+            if meta is not None and meta.take_overloads_fn is not None:
+                overload_fn = meta.take_overloads_fn
+            else:
+                overload_fn = func
+            overloads = get_overloads(overload_fn)
             if overloads:
                 sig = inspect.signature(overloads[0])
                 overload_sigs = [inspect.signature(o) for o in overloads[1:]]
@@ -280,11 +288,6 @@ class PFLParseCache:
             )
         return item
 
-def _get_module_code_by_fn(func: Callable):
-    mod = inspect.getmodule(func)
-    assert mod is not None, "module_code_getter must be provided if func isn't a module function"
-    module_code = inspect.getsource(mod)
-    return module_code
 
 class PFLParseContext(PFLErrorFormatContext):
 
@@ -296,9 +299,7 @@ class PFLParseContext(PFLErrorFormatContext):
                  cfg: Optional[PFLParseConfig] = None,
                  eval_cfg: Optional[StaticEvalConfig] = None,
                  node_to_std_item: Optional[dict[ast.AST, StdRegistryItem]] = None,
-                 node_to_compilable: Optional[dict[ast.AST, "PFLCompilable"]] = None,
-                 func_code_getter: Callable[[Any], tuple[list[str], int]] = inspect.getsourcelines,
-                 module_code_getter: Callable[[Any], str] = _get_module_code_by_fn):
+                 node_to_compilable: Optional[dict[ast.AST, "PFLCompilable"]] = None):
         super().__init__(lines)
         # local states
         self.anno_evaluate_globals = func_globals
@@ -318,13 +319,7 @@ class PFLParseContext(PFLErrorFormatContext):
         if eval_cfg is None:
             eval_cfg = StaticEvalConfig()
         self.eval_cfg = eval_cfg
-        self._all_compiled: dict[str, PFLFunc] = {}
-        self._current_compiling: set[str] = set()
         self._disable_type_check: bool = False
-
-        self.func_code_getter = func_code_getter
-        self.module_code_getter = module_code_getter
-
 
     @classmethod 
     def from_outer_ctx(cls, ctx: Self, lines: list[str], func_globals: Any, 
@@ -334,11 +329,7 @@ class PFLParseContext(PFLErrorFormatContext):
         new_ctx = cls(lines, func_globals, ctx._backend, cfg=ctx.cfg, 
             eval_cfg=ctx.eval_cfg, node_to_std_item=node_to_std_item,
             node_to_compilable=node_to_compilable)
-        new_ctx._all_compiled  = ctx._all_compiled
-        new_ctx._current_compiling  = ctx._current_compiling
         new_ctx.cache = ctx.cache
-        new_ctx.func_code_getter = ctx.func_code_getter
-        new_ctx.module_code_getter = ctx.module_code_getter
         return new_ctx
 
 _PFLPARSE_CONTEXT: contextvars.ContextVar[
@@ -381,7 +372,6 @@ def has_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx is not None
 
-_T = TypeVar("_T")
 
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
@@ -393,6 +383,7 @@ class PFLExprInfo:
     mapped: str = ""
     # for container and dataclass
     annotype: Optional[AnnotatedType] = None
+    anno_metadatas_ext: list[Any] = dataclasses.field(default_factory=list)
     # for function
     arg_name: Optional[str] = None
     return_type: Optional["PFLExprInfo"] = None
@@ -415,8 +406,6 @@ class PFLExprInfo:
     # TODO should it be sent to frontend?
     _metadata: Union[Undefined, Any] = undefined
     _meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
-    # used by pfl run vm
-    _vm_v: Any = None
     def to_dict(self):
         childs = [c.to_dict() for c in self.childs]
         res: dict[str, Any] = {
@@ -498,6 +487,11 @@ class PFLExprInfo:
         # nested union/typevar isn't supported
         if annotype.origin_type in BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
             res = cls(BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE[annotype.origin_type])
+            # set metadata directly for const value types
+            if res.type == PFLExprType.NONE_TYPE:
+                res.metadata = None 
+            elif res.type == PFLExprType.ELLIPSIS:
+                res.metadata = ... 
         elif annotype.is_type_var():
             if allow_type_var:
                 res = cls(PFLExprType.GENERIC_TYPE)
@@ -624,6 +618,8 @@ class PFLExprInfo:
             return False
         if self.type != other.type:
             return False
+        # if self.is_optional() != other.is_optional():
+        #     return False
         if self.type == PFLExprType.NUMBER:
             if self.annotype is not None and other.annotype is not None:
                 self_origin_type = self.get_origin_type_checked()
@@ -650,6 +646,9 @@ class PFLExprInfo:
         return self.has_optional or self.has_undefined
 
     def support_bool_op(self):
+        if self.type == PFLExprType.DATACLASS_OBJECT:
+            op_func = inspect.getattr_static(self.get_origin_type_checked(), "__bool__", None)
+            return op_func is not None
         return self.type in _TYPE_SUPPORT_BINARY_OP
 
     def support_binary_op(self):
@@ -712,6 +711,8 @@ class PFLExprInfo:
         return self.type in _TYPE_SUPPORT_BINARY_OP
 
     def is_convertable(self, tgt: "PFLExprInfo"):
+        if not tgt.is_optional() and self.is_optional():
+            return False
         if tgt.type == PFLExprType.ANY:
             return True
         if tgt.type == PFLExprType.NUMBER or tgt.type == PFLExprType.BOOL:
@@ -726,8 +727,8 @@ class PFLExprInfo:
         return self.is_equal_type(tgt)
 
     def check_convertable(self, tgt: "PFLExprInfo", desc: str):
-        assert self.is_convertable(
-            tgt), f"{desc} is not convertable from {self} to {tgt}"
+        if not self.is_convertable(tgt):
+            raise ValueError(f"{desc} is not convertable from {self} to {tgt}")
 
     @property
     def metadata(self):
@@ -752,8 +753,11 @@ class PFLExprInfo:
             raise ValueError("metadata is not set")
         return res
 
-    def has_metadata(self):
-        return not isinstance(self.metadata, Undefined)
+    def has_metadata(self, *ty: Type[Any]):
+        if not ty:
+            return not isinstance(self.metadata, Undefined)
+        else:
+            return isinstance(self.metadata, ty)
 
     @metadata.setter
     def metadata(self, value: Union[Undefined, Any]):
@@ -769,6 +773,19 @@ class PFLExprInfo:
             var_meta = self.annotype.get_annometa(PFLVariableMeta)
             if var_meta is not None:
                 return var_meta.data
+        return None
+
+    def get_anno_metadatas(self):
+        res: list[Any] = self.anno_metadatas_ext.copy()
+        if self.annotype is not None and self.annotype.annometa is not None:
+            res.extend(self.annotype.annometa)
+        return res
+
+    def get_anno_metadata(self, ty: Type[_T]) -> Optional[_T]:
+        candidate = self.get_anno_metadatas()
+        for c in candidate:
+            if isinstance(c, ty):
+                return c
         return None
 
     def get_metadata(self, default: Any = None):
@@ -822,6 +839,8 @@ class PFLStdlibFuncMeta:
     # for type meta infer, e.g. calc all static ndarray shape and dtype
     # to generate cpp code.
     meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
+    # used to simplify std annotation code
+    take_overloads_fn: Optional[Callable] = None
 
     
 T_callable = TypeVar("T_callable", bound=Callable[..., Optional[PFLMetaInferResult]])
@@ -848,6 +867,8 @@ def mark_meta_infer(fn: Union[Callable, property]):
 
     return wrapper
 
+T = TypeVar("T")
+T_base_callable = TypeVar("T_base_callable", bound=Callable)
 
 BACKEND_CONFIG_REGISTRY: dict[str, PFLParseConfig] = {}
 
@@ -857,7 +878,15 @@ def register_backend(backend: str, config: PFLParseConfig):
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class PFLInlineRunEnv:
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # if not exists, we use annotations from kwargs.
+    annotations: Optional[dict[str, Any]] = None
     contexts: list[contextlib.AbstractContextManager] = dataclasses.field(default_factory=list)
+    userdata: Optional[Any] = None
+
+    def get_userdata_typed(self, ty: Type[T]) -> T:
+        assert isinstance(self.userdata, ty)
+        return self.userdata
+
 
 @dataclasses.dataclass
 class PFLCompileFuncMeta:
@@ -865,6 +894,10 @@ class PFLCompileFuncMeta:
     backends: Optional[list[str]] = None
     # used by debugger/simulator.
     inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None
+    is_template: bool = False
+    # anno_transform: (infered_anno, original_anno) -> new_anno
+    # used for convert third-party annotations such as tl.constexpr in triton.jit
+    anno_transform: Optional[Callable[[PFLExprInfo, Any], PFLExprInfo]] = None 
 
 @dataclasses.dataclass
 class PFLCompilable:
@@ -873,23 +906,31 @@ class PFLCompilable:
     meta: PFLCompileFuncMeta
 
 
-T = TypeVar("T")
 
 @overload
 def mark_pfl_compilable(fn: T) -> T: ...
 
 @overload
-def mark_pfl_compilable(fn: None = None, *, backends: Optional[list[str]] = None) -> Callable[[T], T]: ...
+def mark_pfl_compilable(fn: None = None, *, backends: Optional[list[str]] = None, 
+        inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
+        meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
 
 @register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
-def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]] = None) -> Union[T, Callable[[T], T]]:
+def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]] = None, 
+        inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
+        meta: Optional[PFLCompileFuncMeta] = None) -> Union[T, Callable[[T], T]]:
     def wrapper(fn_wrapped: T) -> T:
         prev_meta: Optional[PFLCompileFuncMeta] = getattr(fn_wrapped, PFL_COMPILE_META_ATTR, None)
-        if prev_meta is None:
-            prev_meta = PFLCompileFuncMeta(backends)
-            setattr(fn_wrapped, PFL_COMPILE_META_ATTR, prev_meta)
+        if meta is not None:
+            setattr(fn_wrapped, PFL_COMPILE_META_ATTR, meta)
         else:
-            prev_meta.backends = backends
+            if prev_meta is None:
+                prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template)
+                setattr(fn_wrapped, PFL_COMPILE_META_ATTR, prev_meta)
+            else:
+                prev_meta.backends = backends
+                prev_meta.inline_run_env_fn = inline_run_env_fn
+                prev_meta.is_template = is_template
         return cast(T, fn_wrapped)
     if fn is None:
         return wrapper
@@ -901,3 +942,27 @@ def get_compilable_meta(fn: Callable) -> Optional[PFLCompileFuncMeta]:
     if meta is None:
         return None
     return meta
+
+def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None) -> Callable[[T_base_callable], T_base_callable]:
+    def wrapper(fn_wrapped: T_base_callable) -> T_base_callable:
+        fn_unwrapped = unwrap_fn_static_cls_property(fn_wrapped)
+
+        take_overloads_fn_ = take_overloads_fn
+        if take_overloads_fn_ is not None:
+            take_overloads_fn_ = unwrap_fn_static_cls_property(take_overloads_fn_)
+        prev_meta: Optional[PFLStdlibFuncMeta] = getattr(fn_unwrapped, PFL_FUNC_ANNO_META_ATTR, None)
+        if meta_infer is not None:
+
+            meta_infer_set_first_arg = partial(meta_infer, fn_unwrapped)
+        else:
+            meta_infer_set_first_arg = None
+        if prev_meta is None:
+            prev_meta = PFLStdlibFuncMeta(take_overloads_fn=take_overloads_fn, meta_infer=meta_infer_set_first_arg)
+            setattr(fn_wrapped, PFL_STDLIB_FUNC_META_ATTR, prev_meta)
+        else:
+            if take_overloads_fn_ is not None:
+                prev_meta.take_overloads_fn = take_overloads_fn_
+            if meta_infer_set_first_arg is not None:
+                prev_meta.meta_infer = meta_infer_set_first_arg
+        return cast(T_base_callable, fn_wrapped)
+    return wrapper

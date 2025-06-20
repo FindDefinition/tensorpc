@@ -1,10 +1,13 @@
+import asyncio
+from functools import partial
 from typing import Any, Dict, List, Union
-from tensorpc.core.pfl.evaluator import PFLCtrlFor
+from tensorpc.apps.ppcl import tsim
+from tensorpc.core.moduleid import get_module_id_of_type
+from tensorpc.core.pfl.evaluator import PFLBreakpoint, PFLCtrlFor, PFLCtrlBase
 from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, appctx
-from tensorpc.apps.ppcl.std import Tensor, PointerTensor, ppcl
-from tensorpc.apps.ppcl.core import TensorMeta, DTypeEnum, ConstExprMeta
 from typing import Annotated, Any, Optional, Union
 from tensorpc.core import pfl
+
 from tensorpc.apps.ppcl.backends import tritonstd
 import triton.language as tl
 import triton
@@ -115,83 +118,141 @@ def matmul_kernel(
     # # return c_mask
     tl.store(c_ptrs, c, mask=c_mask)
 
-
 class App:
     @mark_create_layout
     def my_layout(self):
-        runner = tritonstd.parse_triton_compilable_to_runner(matmul_kernel.fn)
+        runner = tritonstd.parse_triton_compilable_to_runner(matmul_kernel.fn, do_meta_eval=True)
+        # print(ast.ret_st)
         lib = runner._library
         compiled = lib.get_compiled_unit(matmul_kernel.fn)
         module = lib.get_module_by_func(matmul_kernel.fn)
         self._lib = lib
-        # pfl.metaeval_total_tree(compiled, {
-        #     "BLOCK_SIZE_M": 128,
-        #     "BLOCK_SIZE_N": 128,
-        #     "BLOCK_SIZE_K": 32,
-        #     "GROUP_SIZE_M": 8,
-        #     "a_ptr": TensorMeta([], DTypeEnum.float16, is_pointer=True),
-        #     "b_ptr": TensorMeta([], DTypeEnum.float16, is_pointer=True),
-        #     "c_ptr": TensorMeta([], DTypeEnum.float16, is_pointer=True),
-        # }, backend="ppcl", code_for_error=module.compile_info.code)
         finder = pfl.PFLTreeNodeFinder(compiled, (pfl.PFLName, pfl.PFLAttribute, pfl.PFLArg))
         self._finder = finder
         # mui.MonacoEditor.InlineComponent(
         #     mui.BlenderSlider(0, 10, 1).prop(width="50%"), 
         #     afterLineNumber=2, heightInPx=24)
         self.editor = mui.MonacoEditor(module.compile_info.code, "python", "")
+        self.tree = plus.ObjectInspector(with_builtins=False)
+        self.editor.update_raw_props({
+            ".monaco-editor-content-decoration": {
+                "background": "lightblue"
+            }
+        })
         editor_acts: list[mui.MonacoEditorAction] = [
             mui.MonacoEditorAction(id="Run To", 
                 label="Run Towards Here", contextMenuOrder=1.5,
                 contextMenuGroupId="tensorpc-pfl-editor-action", 
                 keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+            # mui.MonacoEditorAction(id="Stop", 
+            #     label="Stop Current Run", contextMenuOrder=1.5,
+            #     contextMenuGroupId="tensorpc-pfl-editor-action"),
         ]
 
         self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts)
         self.editor.event_editor_hover_query.on(self.hover_query)
         self.editor.event_editor_action.on(self._handle_editor_acts)
         # self.editor.event_editor_inlay_hints_query.on(self.inlay_hint_query)
+        self._runner = pfl.PFLAsyncRunner(lib)
+
+        self._ctrl_to_slider: dict[int, mui.BlenderSlider] = {}
+        self._runner.event_eval_stop.on(self._handle_eval_stop)
+
+        # self._runner.event_new_ctrl_point.on(partial(self._handle_ctrl_point, is_new=True))
+        # self._runner.event_delete_ctrl_point.on(partial(self._handle_ctrl_point, is_new=False))
+        # self._runner.event_ctrl_point_change.on(self._handle_ctrl_point_update)
+
+        self._runner.event_enter_bkpt.on(self._handle_enter_bkpt)
+        self._runner.event_leave_bkpt.on(self._handle_leave_bkpt)
+        self._runner_task: Optional[asyncio.Task] = None
+        self._runner_task_ev = asyncio.Event()
         return mui.VBox([
-            self.editor.prop(flex=1)
+            mui.HBox([
+                self.editor.prop(flex=2),
+                self.tree.prop(flex=1),
+            ]).prop(flex=1)
         ]).prop(width="100%", height="100%", overflow="hidden")
 
-    # @mark_did_mount
-    # async def _on_init(self):
-    #     await self.panel.inspector.add_object_to_tree(self.tutorials,
-    #                                           key="tutorials",
-    #                                           expand_level=2)
+    async def _handle_enter_bkpt(self, bkpt: PFLBreakpoint):
+        await self.tree.tree.set_root_object_dict(bkpt.scope)
+        await self.editor.set_decorations("common", [
+            mui.MonacoModelDeltaDecoration(mui.MonacoRange(bkpt.node.source_loc[0], 1, bkpt.node.source_loc[0], 1),
+            mui.MonacoModelDecoration(className="monaco-editor-content-decoration", isWholeLine=True))
+        ])
+        for ctrl_id, ctrl in self._runner.get_state().cur_ctrl_points.items():
+            assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
+            key = str(ctrl_id)
+            if key not in self.editor.childs_complex.icomps:
+                node = ctrl.node
+                slider = mui.BlenderSlider(ctrl.range.start, ctrl.range.stop, ctrl.range.step)
+                slider.event_change.on(partial(self._handle_slider, slider=slider, ctrl=ctrl))
+                slider.prop(width="50%", showControlButton=True, showTotal=True, isInteger=True, forwardOnly=True, zIndex=10, alwaysShowButton=True)
+                inline_comp = mui.MonacoEditor.InlineComponent(
+                    slider,
+                    afterLineNumber=node.source_loc[0], heightInPx=24)
+                self.editor.childs_complex.icomps[key] = inline_comp
+            else:
+                slider = self.editor.childs_complex.icomps[key].comp
+                assert isinstance(slider, mui.BlenderSlider)
+                await slider.send_and_wait(slider.update_event(disabled=False))
+                await slider.update_value(ctrl.step)
+        all_keys = list(self.editor.childs_complex.icomps.keys())
+        for k in all_keys:
+            if int(k) not in self._runner.get_state().cur_ctrl_points:
+                # remove the slider if the ctrl point is not in the current state
+                self.editor.childs_complex.icomps.pop(k, None)
+        await self.editor.set_new_layout(self.editor.childs_complex)
+
+    async def _handle_eval_stop(self):
+        self.editor.childs_complex.icomps.clear()
+        await self.editor.set_new_layout(self.editor.childs_complex)
+
+    async def _handle_leave_bkpt(self, bkpt: PFLBreakpoint):
+        await self.tree.tree.set_root_object_dict({})
+
+        await self.editor.set_decorations("common", [])
+        for k, v in self.editor.childs_complex.icomps.items():
+            slider = v.comp
+            assert isinstance(slider, mui.BlenderSlider)
+            await slider.send_and_wait(slider.update_event(disabled=True))
+
+
+    async def _handle_slider(self, value: mui.NumberType, slider: mui.BlenderSlider, ctrl: PFLCtrlFor):
+        if self._runner_task is None:
+            return 
+        old = slider.int()
+        new = int(value)
+        if new > old:
+            ctrl.step = new
+            ctrl.should_pause = False
+            print("RELEASE", old, new)
+            self._runner.release_breakpoint()
         
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
-        if act.selection is not None:
-            lineno = act.selection.selections[0].startLineNumber
-            stmt = self._lib.find_stmt_by_path_lineno(self._lib.get_module_by_func(matmul_kernel.fn).uid, lineno)
-            print(stmt)
+        if act.action == "Run To":
+            if act.selection is not None:
+                lineno = act.selection.selections[0].startLineNumber
+                stmt = self._lib.find_stmt_by_path_lineno(self._lib.get_module_by_func(matmul_kernel.fn).uid, lineno)
+                if stmt is not None:
+                    if self._runner.is_paused():
+                        # if paused, continue from the current position
+                        await self._runner.continue_until(lineno)
+                    else:
+                        self._runner_task_ev.clear()
+                        assert self._runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
+                            f"Runner is not in IDLE state, current state: {self._runner._state.type}"
+                        with tsim.enter_tensorsim_context([0, 0, 0], [1, 1, 1]):
+                            self._runner_task = asyncio.create_task(self._runner.run_until(lineno, get_module_id_of_type(matmul_kernel.fn), 
+                                exit_event=self._runner_task_ev))
 
     async def hover_query(self, hqevent: mui.MonacoHoverQueryEvent) -> Optional[mui.MonacoHover]:
         lineno = hqevent.position.lineNumber
         col = hqevent.position.column
         node = self._finder.find_nearest_node_by_line_col(lineno, col - 1)
-        print(lineno, col)
         if node is not None and isinstance(node, (pfl.PFLExpr, pfl.PFLArg)):
             node_expr = pfl.unparse_pfl_ast(node)
             loc = node.get_source_loc_checked()
-            print(loc, type(node))
             return mui.MonacoHover([
                 mui.MonacoMarkdownString(value=f"### {node_expr}\n`{node.st}`\n{node.st.metadata}")
             ], range=mui.MonacoRange(loc[0], loc[1] + 1, loc[2], loc[3] + 1))
         return None 
-
-    async def inlay_hint_query(self, ev: mui.MonacoInlayHintQueryEvent) -> Optional[mui.MonacoInlayHintList]:
-        res: list[mui.MonacoInlayHint] = []
-        for node in self._finder._all_nodes:
-            if isinstance(node, pfl.PFLExpr) and node.st.has_metadata():
-                meta = node.st.metadata_checked
-                if isinstance(meta, TensorMeta):
-                    res.append(mui.MonacoInlayHint(
-                        label=f": {meta}",
-                        position=mui.MonacoPosition(node.get_source_loc_checked()[2], node.get_source_loc_checked()[3] + 1),
-                        kind=1,
-                    ))
-        if res:
-            return mui.MonacoInlayHintList(res)
-        return None 
-

@@ -16,27 +16,27 @@ register_backend("js", PFLParseConfig(
     allow_new_var_after_if=True,
 ))
 
-@register_pfl_std(mapped_name="len", backend="js")
+@register_pfl_std(mapped_name="len", backend="js", mapped=len)
 def len_func(x: Any) -> int:
     return len(x)
 
-@register_pfl_std(mapped_name="print", backend="js")
+@register_pfl_std(mapped_name="print", backend="js", mapped=print)
 def print_func(*x: Any) -> None:
     return print(*x)
 
-@register_pfl_std(mapped_name="int", backend="js")
+@register_pfl_std(mapped_name="int", backend="js", mapped=int)
 def int_func(x: Any) -> int:
     return int(x)
 
-@register_pfl_std(mapped_name="float", backend="js")
+@register_pfl_std(mapped_name="float", backend="js", mapped=float)
 def float_func(x: Any) -> float:
     return float(x)
 
-@register_pfl_std(mapped_name="bool", backend="js")
+@register_pfl_std(mapped_name="bool", backend="js", mapped=bool)
 def bool_func(x: Any) -> bool:
     return bool(x)
 
-@register_pfl_std(mapped_name="range", backend="js")
+@register_pfl_std(mapped_name="range", backend="js", mapped=range)
 def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = None) -> range:
     if stop is None and step is None:
         return range(start)

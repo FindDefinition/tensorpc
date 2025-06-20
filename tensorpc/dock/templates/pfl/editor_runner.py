@@ -23,6 +23,11 @@ def func3(a: float, b: float):
         for k in range(5):
             d += 1
             d = inner_fn(d)
+    d -= 100
+    for j in range(10):
+        for k in range(5):
+            d += 1
+            d = inner_fn(d)
     return d + b
 
 class App:
@@ -49,6 +54,9 @@ class App:
                 label="Run Towards Here", contextMenuOrder=1.5,
                 contextMenuGroupId="tensorpc-pfl-editor-action", 
                 keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+            # mui.MonacoEditorAction(id="Stop", 
+            #     label="Stop Current Run", contextMenuOrder=1.5,
+            #     contextMenuGroupId="tensorpc-pfl-editor-action"),
         ]
 
         self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts)
@@ -58,9 +66,11 @@ class App:
         self._runner = pfl.PFLAsyncRunner(lib)
 
         self._ctrl_to_slider: dict[int, mui.BlenderSlider] = {}
-        self._runner.event_new_ctrl_point.on(partial(self._handle_ctrl_point, is_new=True))
-        self._runner.event_delete_ctrl_point.on(partial(self._handle_ctrl_point, is_new=False))
-        self._runner.event_ctrl_point_change.on(self._handle_ctrl_point_update)
+        self._runner.event_eval_stop.on(self._handle_eval_stop)
+
+        # self._runner.event_new_ctrl_point.on(partial(self._handle_ctrl_point, is_new=True))
+        # self._runner.event_delete_ctrl_point.on(partial(self._handle_ctrl_point, is_new=False))
+        # self._runner.event_ctrl_point_change.on(self._handle_ctrl_point_update)
 
         self._runner.event_enter_bkpt.on(self._handle_enter_bkpt)
         self._runner.event_leave_bkpt.on(self._handle_leave_bkpt)
@@ -75,9 +85,41 @@ class App:
             mui.MonacoModelDeltaDecoration(mui.MonacoRange(bkpt.node.source_loc[0], 1, bkpt.node.source_loc[0], 1),
             mui.MonacoModelDecoration(className="monaco-editor-content-decoration", isWholeLine=True))
         ])
+        for ctrl_id, ctrl in self._runner.get_state().cur_ctrl_points.items():
+            assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
+            key = str(ctrl_id)
+            if key not in self.editor.childs_complex.icomps:
+                node = ctrl.node
+                slider = mui.BlenderSlider(ctrl.range.start, ctrl.range.stop, ctrl.range.step)
+                slider.event_change.on(partial(self._handle_slider, slider=slider, ctrl=ctrl))
+                slider.prop(width="50%", showControlButton=True, showTotal=True, isInteger=True, forwardOnly=True, zIndex=10, alwaysShowButton=True)
+                inline_comp = mui.MonacoEditor.InlineComponent(
+                    slider,
+                    afterLineNumber=node.source_loc[0], heightInPx=24)
+                self.editor.childs_complex.icomps[key] = inline_comp
+            else:
+                slider = self.editor.childs_complex.icomps[key].comp
+                assert isinstance(slider, mui.BlenderSlider)
+                await slider.send_and_wait(slider.update_event(disabled=False))
+                await slider.update_value(ctrl.step)
+        all_keys = list(self.editor.childs_complex.icomps.keys())
+        for k in all_keys:
+            if int(k) not in self._runner.get_state().cur_ctrl_points:
+                # remove the slider if the ctrl point is not in the current state
+                self.editor.childs_complex.icomps.pop(k, None)
+        await self.editor.set_new_layout(self.editor.childs_complex)
+
+    async def _handle_eval_stop(self):
+        self.editor.childs_complex.icomps.clear()
+        await self.editor.set_new_layout(self.editor.childs_complex)
 
     async def _handle_leave_bkpt(self, bkpt: PFLBreakpoint):
         await self.editor.set_decorations("common", [])
+        for k, v in self.editor.childs_complex.icomps.items():
+            slider = v.comp
+            assert isinstance(slider, mui.BlenderSlider)
+            await slider.send_and_wait(slider.update_event(disabled=True))
+
 
     async def _handle_slider(self, value: mui.NumberType, slider: mui.BlenderSlider, ctrl: PFLCtrlFor):
         if self._runner_task is None:
@@ -89,53 +131,24 @@ class App:
             ctrl.should_pause = False
             print("RELEASE", old, new)
             self._runner.release_breakpoint()
-        # elif new < old:
-        #     # rerun
-        #     print("RERUN", old, new)
-        #     self._runner.release_breakpoint(stop=True)
-        #     await self._runner_task_ev.wait()
-        #     self._runner_task = None
-
-    async def _handle_ctrl_point_update(self, ctrl: PFLCtrlBase):
-        assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
-        key = str(id(ctrl.node))
-        assert key in self.editor.childs_complex.icomps
-        slider = self.editor.childs_complex.icomps[key].comp
-        assert isinstance(slider, mui.BlenderSlider)
-        await slider.update_value(ctrl.step)
-
-    async def _handle_ctrl_point(self, ctrl: PFLCtrlBase, is_new: bool):
-        assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
-        if is_new:
-            node = ctrl.node
-            slider = mui.BlenderSlider(ctrl.range.start, ctrl.range.stop, ctrl.range.step)
-            slider.event_change.on(partial(self._handle_slider, slider=slider, ctrl=ctrl))
-            slider.prop(width="50%", showControlButton=True, showTotal=True, isInteger=True)
-            inline_comp = mui.MonacoEditor.InlineComponent(
-                slider,
-                afterLineNumber=node.source_loc[0], heightInPx=24)
-            self.editor.childs_complex.icomps[str(id(ctrl.node))] = inline_comp
-        else:
-            node = ctrl.node
-            self.editor.childs_complex.icomps.pop(str(id(node)), None)
-        await self.editor.set_new_layout(self.editor.childs_complex)
         
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
-        if act.selection is not None:
-            lineno = act.selection.selections[0].startLineNumber
-            stmt = self._lib.find_stmt_by_path_lineno(self._lib.get_module_by_func(func3).uid, lineno)
-            if stmt is not None:
-                if self._runner.is_paused():
-                    # if paused, continue from the current position
-                    await self._runner.continue_until(lineno)
-                else:
-                    self._runner_task_ev.clear()
-                    assert self._runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
-                        f"Runner is not in IDLE state, current state: {self._runner._state.type}"
-                    self._runner_task = asyncio.create_task(self._runner.run_until(lineno, get_module_id_of_type(func3), {
-                        "a": 5,
-                        "b": 3
-                    }, self._runner_task_ev))
+        if act.action == "Run To":
+            if act.selection is not None:
+                lineno = act.selection.selections[0].startLineNumber
+                stmt = self._lib.find_stmt_by_path_lineno(self._lib.get_module_by_func(func3).uid, lineno)
+                if stmt is not None:
+                    if self._runner.is_paused():
+                        # if paused, continue from the current position
+                        await self._runner.continue_until(lineno)
+                    else:
+                        self._runner_task_ev.clear()
+                        assert self._runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
+                            f"Runner is not in IDLE state, current state: {self._runner._state.type}"
+                        self._runner_task = asyncio.create_task(self._runner.run_until(lineno, get_module_id_of_type(func3), {
+                            "a": 5,
+                            "b": 3
+                        }, self._runner_task_ev))
 
     async def hover_query(self, hqevent: mui.MonacoHoverQueryEvent) -> Optional[mui.MonacoHover]:
         lineno = hqevent.position.lineNumber

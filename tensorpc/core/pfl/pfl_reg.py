@@ -11,7 +11,7 @@ import dataclasses
 class StdRegistryItem:
     dcls: Union[Type[DataclassType], Callable]
     mapped_name: str
-    mapped: Optional[Union[ModuleType, Type]] = None
+    mapped: Optional[Union[ModuleType, Type, Callable]] = None
     # if backend is None, it means all backends share this item
     backend: Optional[str] = "js"
     is_temp: bool = False
@@ -35,7 +35,7 @@ class StdRegistry:
         func=None,
         *,
         mapped_name: Optional[str] = None,
-        mapped: Optional[Union[ModuleType, Type]] = None,
+        mapped: Optional[Union[ModuleType, Type, Callable]] = None,
         backend: Optional[str] = "js",
         _internal_disable_type_check: bool = False,
     ):
@@ -144,7 +144,7 @@ def register_pfl_std(
     func=None,
     *,
     mapped_name: Optional[str] = None,
-    mapped: Optional[Union[ModuleType, Type]] = None,
+    mapped: Optional[Union[ModuleType, Type, Callable]] = None,
     backend: Optional[str] = "js",
     _internal_disable_type_check: bool = False,
 ):

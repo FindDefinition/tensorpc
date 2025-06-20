@@ -13,6 +13,10 @@ class Foo:
 
 @dataclasses.dataclass
 class Starship:
+    @dataclasses.dataclass
+    class Part:
+        pass
+
     stats: ClassVar[dict[str, int]] = {} # class variable
     damage: int = 10                     # instance variable
     Foo1: ClassVar[type[Foo]] = Foo

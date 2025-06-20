@@ -10,7 +10,7 @@ from typing_extensions import TypeAlias
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (Undefined, is_undefined, undefined)
 from tensorpc.core.event_emitter.single import SingleAsyncEventEmitter
-from tensorpc.core.pfl.parser import PFLLibrary
+from tensorpc.core.moduleid import get_module_id_of_type
 
 from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
@@ -20,11 +20,12 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLASTType, PFLAttribute, PFLAugAssign, PFLBinOp,
                       PFLBoolOp, PFLBreak, PFLCall, PFLCompare, PFLConstant, PFLContinue, PFLDict,
                       PFLExpr, PFLExprStmt, PFLFor, PFLFunc, PFLIf, PFLIfExp, PFLModule,
-                      PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder,
-                      PFLUnaryOp, PFLWhile, UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk,
+                      PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder, PFLTuple,
+                      PFLUnaryOp, PFLWhile, UnaryOpType, iter_child_nodes, unparse_pfl_ast, unparse_pfl_expr, walk,
                       PFLAstParseError, PFLEvalError)
 
 from .pfl_reg import  STD_REGISTRY, StdRegistryItem
+from .parser import PFLLibrary
 
 def _clear_consteval_result(node: PFLAstNodeBase):
     for n in walk(node):
@@ -72,22 +73,18 @@ def consteval_expr(expr_node: PFLExpr,
 
 
 class PFLStaticEvaluator:
-    def __init__(self, cfg: StaticEvalConfig, assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
+    def __init__(self, library: PFLLibrary, cfg: StaticEvalConfig, assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
                                          Optional[PFLMetaInferResult]]] = None):
         self.cfg = cfg
+        self._library = library
         self._assign_check = assign_check
 
-    @classmethod 
-    def strict_evaulator(cls, prefer_meta_eval: bool = False, assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
-                                         Optional[PFLMetaInferResult]]] = None):
-        cfg = StaticEvalConfig(prefer_meta_eval=prefer_meta_eval, allow_partial=False)
-        return cls(cfg, assign_check=assign_check)
 
     @classmethod 
-    def partial_evaulator(cls, prefer_meta_eval: bool = False, assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
+    def meta_evaulator(cls, library: PFLLibrary, prefer_meta_eval: bool = True, assign_check: Optional[Callable[[PFLExprInfo, PFLExprInfo],
                                          Optional[PFLMetaInferResult]]] = None):
         cfg = StaticEvalConfig(prefer_meta_eval=prefer_meta_eval, allow_partial=True)
-        return cls(cfg, assign_check=assign_check)
+        return cls(library, cfg, assign_check=assign_check)
 
     def _eval_expr(self, expr_node: PFLExpr, scope: dict[str, PFLExprInfo]):
         # perform const fold and meta inference, result is stored in metadata in each static type.
@@ -118,7 +115,7 @@ class PFLStaticEvaluator:
                 if isinstance(expr_node, PFLCall):
                     func_st = expr_node.st
                     if func_st.compiled_uid is not None:
-                        all_compiled = get_parse_context_checked()._all_compiled
+                        all_compiled = self._library.all_compiled
                         assert func_st.compiled_uid in all_compiled
                         compiled_node = all_compiled[func_st.compiled_uid]
                         func_arg_sts = compiled_node.st.childs
@@ -130,7 +127,7 @@ class PFLStaticEvaluator:
                             if args:
                                 # may use default here.
                                 func_scope[func_arg_st.arg_name] = args[0]
-                        self.eval_total_tree(compiled_node, func_scope)
+                        self._eval_total_tree_node(compiled_node, func_scope)
                         if compiled_node.ret_st is not None:
                             expr_node.st.metadata = compiled_node.ret_st.metadata
                         return True
@@ -170,29 +167,59 @@ class PFLStaticEvaluator:
                 init_scope[v.mapped_name] = init_var
         return init_scope
 
-    def eval_total_tree(self, func_node: PFLFunc,
+    def _eval_total_tree_node(self, func_node: PFLFunc,
                             scope: dict[str, Any],
-                            backend: str = "js",
-                            code_for_error: Optional[str] = None,
-                            parse_cfg: Optional[PFLParseConfig] = None,
-                            all_compiled: Optional[dict[str, PFLFunc]] = None):
+                            parse_cfg: Optional[PFLParseConfig] = None):
         # perform const fold and meta inference, result is stored in metadata in each static type.
         # WARNING: inplace operation
+        backend = self._library.backend
         if parse_cfg is None:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
             parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
         _clear_consteval_result(func_node)
+        code_for_error = self._library.get_module_by_func(func_node.uid).compile_info.code
         lines = []
         if code_for_error is not None:
             lines = code_for_error.split("\n")
         outer_ctx = get_parse_context() 
+        all_compiled = self._library.all_compiled
         if outer_ctx is not None:
             assert all_compiled is None
             parse_ctx = PFLParseContext.from_outer_ctx(outer_ctx, lines, {})
         else:
             parse_ctx = PFLParseContext(lines, {}, backend, cfg=parse_cfg, eval_cfg=self.cfg)
-            if all_compiled is not None:
-                parse_ctx._all_compiled = all_compiled
+        with enter_parse_context(parse_ctx) as ctx:
+            init_scope = self._get_init_scope(func_node, scope)
+            try:
+                self._eval_total_tree(func_node.body, init_scope)
+            except PFLEvalError as e:
+                error_line = ctx.format_error_from_lines_node(e.node)
+                if error_line:
+                    print(error_line)
+                raise e
+
+    def eval_total_tree(self, func: Union[str, Callable],
+                            scope: dict[str, Any],
+                            parse_cfg: Optional[PFLParseConfig] = None):
+        func_node = self._library.get_compiled_unit(func)
+        # perform const fold and meta inference, result is stored in metadata in each static type.
+        # WARNING: inplace operation
+        backend = self._library.backend
+        if parse_cfg is None:
+            assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
+            parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
+        _clear_consteval_result(func_node)
+        code_for_error = self._library.get_module_by_func(func).compile_info.code
+        lines = []
+        if code_for_error is not None:
+            lines = code_for_error.split("\n")
+        outer_ctx = get_parse_context() 
+        all_compiled = self._library.all_compiled
+        if outer_ctx is not None:
+            assert all_compiled is None
+            parse_ctx = PFLParseContext.from_outer_ctx(outer_ctx, lines, {})
+        else:
+            parse_ctx = PFLParseContext(lines, {}, backend, cfg=parse_cfg, eval_cfg=self.cfg)
         with enter_parse_context(parse_ctx) as ctx:
             init_scope = self._get_init_scope(func_node, scope)
             try:
@@ -209,7 +236,6 @@ class PFLStaticEvaluator:
                 if isinstance(stmt, (PFLAssign, PFLAnnAssign)):
                     # TODO add dataclass level type meta eval support
                     target_metadata = undefined
-                    scope_metadata = undefined
                     if isinstance(stmt, PFLAnnAssign):
                         metadata_from_anno = stmt.target.st.get_eval_metadata_from_anno()
                         if metadata_from_anno is not None:
@@ -220,23 +246,40 @@ class PFLStaticEvaluator:
                         # print(stmt.value)
                         self._eval_expr(stmt.value, scope)
                         if stmt.value.st.has_metadata():
-                            target_metadata = stmt.value.st.metadata_checked
-                            stmt.target.st.metadata = target_metadata
-                    if isinstance(stmt.target, PFLName) and stmt.target.id in scope:
-                        scope_metadata = scope[stmt.target.id].metadata
-                    if not isinstance(scope_metadata, Undefined) and not isinstance(
-                            target_metadata, Undefined):
+                            if isinstance(stmt.target, PFLTuple):
+                                assert isinstance(stmt.value.st.metadata, tuple)
+                                for i, elt in enumerate(stmt.target.elts):
+                                    elt.st.metadata = stmt.value.st.metadata[i]
+                                stmt.target.st.metadata = stmt.value.st.metadata
+                            else:
+                                target_metadata = stmt.value.st.metadata_checked
+                                stmt.target.st.metadata = target_metadata
+                    target_names: list[PFLName] = []
+                    target_metadatas: list[Any] = []
+                    if isinstance(stmt.target, PFLName):
+                        target_names = [stmt.target]
+                        target_metadatas = [stmt.target.st.metadata]
+                    elif isinstance(stmt.target, PFLTuple):
+                        # assert isinstance(target_metadata)
+                        for elt in stmt.target.elts:
+                            assert isinstance(elt, PFLName)
+                            target_names.append(elt)
+                            target_metadatas.append(elt.st.metadata)
+                    for target_name, target_metadata in zip(target_names, target_metadatas):
+                        scope_metadata = undefined
+                        if target_name.id in scope:
+                            scope_metadata = scope[target_name.id].metadata
                         # convertable check is already done in parse.
                         # perform meta assign check if exists
-                        assert isinstance(stmt.target, PFLName)
-                        if self._assign_check is not None:
-                            new_meta_val = self._assign_check(
-                                scope_metadata, target_metadata)
-                            if new_meta_val is not None:
-                                new_meta = new_meta_val.data
-                                stmt.target.st.metadata = new_meta
-                    if isinstance(stmt.target, PFLName) and not isinstance(target_metadata, Undefined):
-                        scope[stmt.target.id] = dataclasses.replace(stmt.target.st)
+                        if not isinstance(scope_metadata, Undefined):
+                            if self._assign_check is not None:
+                                new_meta_val = self._assign_check(
+                                    scope_metadata, target_metadata)
+                                if new_meta_val is not None:
+                                    new_meta = new_meta_val.data
+                                    stmt.target.st.metadata = new_meta
+                        if not isinstance(target_metadata, Undefined):
+                            scope[target_name.id] = dataclasses.replace(target_name.st)
                 elif isinstance(stmt, PFLAugAssign):
                     self._eval_expr(stmt.value, scope)
                     if isinstance(stmt.target, PFLName):
@@ -295,37 +338,6 @@ class PFLStaticEvaluator:
                 raise
             except BaseException as e:
                 raise PFLEvalError(f"Unknown error {e}", stmt) from e
-
-def eval_expr(node: PFLExpr,
-            scope: dict[str, Any],
-            backend: str = "js",
-            code_for_error: Optional[str] = None,
-            parse_cfg: Optional[PFLParseConfig] = None,
-            eval_cfg: Optional[StaticEvalConfig] = None):
-    if eval_cfg is None:
-        eval_cfg = StaticEvalConfig()
-    evaluator = PFLStaticEvaluator(eval_cfg)
-    return evaluator._eval_expr(node, scope)
-
-def eval_total_tree(func_node: PFLFunc,
-                    scope: dict[str, Any],
-                    backend: str = "js",
-                    code_for_error: Optional[str] = None,
-                    parse_cfg: Optional[PFLParseConfig] = None,
-                    allow_partial: bool = True):
-    eval_cfg = StaticEvalConfig(prefer_meta_eval=False, allow_partial=allow_partial)
-    evaluator = PFLStaticEvaluator(eval_cfg)
-    return evaluator.eval_total_tree(func_node, scope, backend, code_for_error, parse_cfg)
-
-def metaeval_total_tree(func_node: PFLFunc,
-                    scope: dict[str, Any],
-                    backend: str = "js",
-                    code_for_error: Optional[str] = None,
-                    parse_cfg: Optional[PFLParseConfig] = None,
-                    allow_partial: bool = True):
-    eval_cfg = StaticEvalConfig(prefer_meta_eval=True, allow_partial=allow_partial)
-    evaluator = PFLStaticEvaluator(eval_cfg)
-    return evaluator.eval_total_tree(func_node, scope, backend, code_for_error, parse_cfg)
 
 class PFLRunnerResultType(enum.IntEnum):
     BREAK = 0
@@ -386,7 +398,6 @@ class PFLEvalStop(Exception):
         self.node = node
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
-
 
 class PFLAsyncRunner:
     """A PFL runner that support breakpoints (via asyncio).
@@ -516,6 +527,9 @@ class PFLAsyncRunner:
         elif isinstance(expr, PFLArray):
             return [await self._run_expr(elt, scope)
                                 for elt in expr.elts]
+        elif isinstance(expr, PFLTuple):
+            return tuple([await self._run_expr(elt, scope)
+                                for elt in expr.elts])
         elif isinstance(expr, PFLDict):
             res = {}
             for k, v in zip(expr.keys, expr.values):
@@ -556,7 +570,7 @@ class PFLAsyncRunner:
                 res = await self._run_func(func_st.compiled_uid, kwargs)
             else:
                 func_val = await self._run_expr(expr.func, scope)
-                assert inspect.isfunction(func_val)
+                assert inspect.isfunction(func_val) or inspect.ismethod(func_val), f"expect function, but got {type(func_val)}"
                 arg_values = []
                 # compiled pfl function don't have vaargs
                 matched = expr._match_arg_sts_to_sig(func_st.childs, func_st.childs[-1].is_vaargs)
@@ -576,7 +590,6 @@ class PFLAsyncRunner:
 
     async def run_body(self, block_body: list[PFLAstStmt], scope: dict[str, Any]) -> Union[Any, PFLRunnerResult]:
         for stmt in block_body:
-            # print("RUN STMT", type(stmt), len(self._breakpoints), stmt.source_loc[0] in self._breakpoints)
             if self._breakpoints:
                 await self._check_enter_breakpoint(stmt, scope)
             try:
@@ -594,6 +607,10 @@ class PFLAsyncRunner:
                             else:
                                 tgt, slice_str = await self._get_subscript_target_slice(stmt.target, scope)
                                 tgt[slice_str] = value
+                        elif isinstance(stmt.target, PFLTuple):
+                            for i, elt in enumerate(stmt.target.elts):
+                                assert isinstance(elt, PFLName)
+                                scope[elt.id] = value[i]
                         else:
                             assert isinstance(stmt.target, PFLName)
                             scope[stmt.target.id] = value
@@ -718,12 +735,15 @@ class PFLAsyncRunner:
                     raise NotImplementedError(f"Unrecognized PFLAstNodeBase type: {type(stmt)}")
             except PFLEvalStop:
                 raise
+            except PFLEvalError:
+                raise
             except BaseException as e:
                 raise PFLEvalError(f"stmt eval error.", stmt) from e
 
     async def _run_func(self, func_uid: str, scope: dict[str, Any]):
         func_node = self._library.all_compiled[func_uid]
-        error_ctx = PFLErrorFormatContext(func_node.compile_info.code.split("\n"))
+        module = self._library.get_module_by_func(func_uid)
+        error_ctx = PFLErrorFormatContext(module.compile_info.code.split("\n"))
         try:
             res = await self.run_body(func_node.body, {**scope, **self._std_scope})
         except PFLEvalStop:
@@ -738,7 +758,21 @@ class PFLAsyncRunner:
             return res.data 
         return res 
 
-    async def run_func(self, func_uid: str, scope: dict[str, Any]):
+    async def run_func(self, func_uid: str, scope: Optional[dict[str, Any]] = None):
+        func_node = self._library.all_compiled[func_uid]
+        if scope is not None:
+            return await self._run_func(func_uid, scope)
+        else:
+            assert func_node.compile_info.meta is not None 
+            fn_meta = func_node.compile_info.meta
+            assert fn_meta.inline_run_env_fn is not None 
+            inline_run_env = fn_meta.inline_run_env_fn()
+            scope = inline_run_env.kwargs
+            ctxes = inline_run_env.contexts
+            with contextlib.ExitStack() as stack:
+                for ctx in ctxes:
+                    stack.enter_context(ctx)
+                return await self._run_func(func_uid, scope)
         return await self._run_func(func_uid, scope)
 
     async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None):
@@ -751,19 +785,7 @@ class PFLAsyncRunner:
         stmt_start_lineno = stmt_should_pause.source_loc[0]
         self.add_breakpoint(stmt_start_lineno, one_shot=False)
         try:
-            if scope is not None:
-                return await self._run_func(func_uid, scope)
-            else:
-                assert func_node.compile_info.meta is not None 
-                fn_meta = func_node.compile_info.meta
-                assert fn_meta.inline_run_env_fn is not None 
-                inline_run_env = fn_meta.inline_run_env_fn()
-                scope = inline_run_env.kwargs
-                ctxes = inline_run_env.contexts
-                with contextlib.ExitStack() as stack:
-                    for ctx in ctxes:
-                        stack.enter_context(ctx)
-                    return await self._run_func(func_uid, scope)
+            return await self.run_func(func_uid, scope)
         except PFLEvalStop:
             self.clear_runtime_state()
         except:

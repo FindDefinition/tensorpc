@@ -133,6 +133,7 @@ class PFLASTType(enum.IntEnum):
     ATTR = 0x20B
     IF_EXP = 0x20C
     SLICE = 0x20D
+    TUPLE = 0x20E
 
     def __repr__(self):
         if self in _PFLAST_TYPE_TO_STR:
@@ -180,6 +181,7 @@ class BinOpType(enum.IntEnum):
     BIT_XOR = 9
     BIT_AND = 10
     FLOOR_DIV = 11
+    MATMUL = 12
 
 
 class UnaryOpType(enum.IntEnum):
@@ -229,6 +231,7 @@ _PFL_BINARY_TYPE_TO_METHOD_NAME = {
     BinOpType.BIT_OR: "__or__",
     BinOpType.BIT_XOR: "__xor__",
     BinOpType.BIT_AND: "__and__",
+    BinOpType.MATMUL: "__matmul__",
 }
 
 _PFL_AUG_ASSIGN_METHOD_NAME = {
@@ -244,6 +247,8 @@ _PFL_AUG_ASSIGN_METHOD_NAME = {
     BinOpType.BIT_OR: "__ior__",
     BinOpType.BIT_XOR: "__ixor__",
     BinOpType.BIT_AND: "__iand__",
+    BinOpType.MATMUL: "__imatmul__",
+
 }
 
 _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME = {
@@ -265,6 +270,8 @@ _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME = {
     BinOpType.BIT_OR: "__ror__",
     BinOpType.BIT_XOR: "__rxor__",
     BinOpType.BIT_AND: "__rand__",
+    BinOpType.MATMUL: "__rmatmul__",
+
 }
 
 @dataclasses.dataclass
@@ -656,6 +663,7 @@ class PFLUnaryOp(PFLExpr):
                     assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                     self.st.metadata = infer_res.data
                     return True
+                return False
         return self.consteval()
 
 
@@ -746,6 +754,7 @@ class PFLBinOpBase(PFLExpr):
                     assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                     self.st.metadata = infer_res.data
                     return True
+                return False
         return self.consteval()
 
 
@@ -793,6 +802,8 @@ class PFLBinOp(PFLBinOpBase):
             return operands[0] ^ operands[1]
         elif self.op == BinOpType.BIT_AND:
             return operands[0] & operands[1]
+        elif self.op == BinOpType.MATMUL:
+            return operands[0] @ operands[1]
         else:
             raise NotImplementedError
 
@@ -952,7 +963,7 @@ class PFLCall(PFLExpr):
             if tv.__bound__ is not None:
                 bound_type = PFLExprInfo.from_annotype(
                     parse_type_may_optional_undefined(tv.__bound__), is_type=False, allow_union=True)
-                arg_value.check_convertable(bound_type, f"func {self.func}")
+                arg_value.check_convertable(bound_type, f"func {self.func.st}")
             
             if tv.__constraints__:
                 found = False
@@ -1043,7 +1054,7 @@ class PFLCall(PFLExpr):
         cnt = 0
         for func_arg_st, args in func_arg_st_param:
             for a in args:
-                a.st.check_convertable(func_arg_st, f"func {self.func} arg {func_arg_st.arg_name}({cnt})")
+                a.st.check_convertable(func_arg_st, f"func {self.func.st} arg {func_arg_st.arg_name}({cnt})")
                 if a.st.is_equal_type(func_arg_st):
                     match_score += 2
                 else:
@@ -1053,18 +1064,31 @@ class PFLCall(PFLExpr):
 
     def consteval(self):
         operands = self._get_consteval_operands(*self.args)
-        if operands is not None:
-            if isinstance(self.func, PFLName):
-                fn = self.func.st.metadata
-                if not isinstance(fn, Undefined):
-                    self.st.metadata = fn(*operands)
-                    return True
-                return False
-            elif isinstance(self.func, PFLAttribute):
-                obj = self.func.value.st.metadata
-                if not isinstance(obj, Undefined):
-                    self.st.metadata = getattr(obj, self.func.attr)(*operands)
-                    return True
+        if operands is None:
+            return False
+        kw_operands = None
+        if not is_undefined(self.keys):
+            assert not is_undefined(self.vals)
+            kw_operands = {}
+            for k, v in zip(self.keys, self.vals):
+                if not v.st.has_metadata():
+                    return False 
+                kw_operands[k] = v.st.metadata
+        if operands is None:
+            operands = []
+        if kw_operands is None:
+            kw_operands = {}
+        if isinstance(self.func, PFLName):
+            fn = self.func.st.metadata
+            if not isinstance(fn, Undefined):
+                self.st.metadata = fn(*operands, **kw_operands)
+                return True
+            return False
+        elif isinstance(self.func, PFLAttribute):
+            obj = self.func.value.st.metadata
+            if not isinstance(obj, Undefined):
+                self.st.metadata = getattr(obj, self.func.attr)(*operands, **kw_operands)
+                return True
         return False
 
     def metaeval(self):
@@ -1083,24 +1107,32 @@ class PFLCall(PFLExpr):
                 operands = []
             if kw_operands is None:
                 kw_operands = {}
-            if isinstance(
-                    self.func,
-                    PFLAttribute) and self.func.st.meta_infer is not None:
-                if self.func.st.is_method:
-                    obj = self.func.value.st.metadata
-                    if not isinstance(obj, Undefined):
-                        infer_res = self.func.st.meta_infer(
-                            self.func.value.st, *operands, **kw_operands)
+            if self.func.st.meta_infer is not None:
+                if isinstance(
+                        self.func,
+                        PFLAttribute):
+                    if self.func.st.is_method:
+                        obj = self.func.value.st.metadata
+                        if not isinstance(obj, Undefined):
+                            infer_res = self.func.st.meta_infer(
+                                self.func.value.st, *operands, **kw_operands)
+                            if infer_res is not None:
+                                assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
+                                self.st.metadata = infer_res.data
+                                return True
+                    else:
+                        infer_res = self.func.st.meta_infer(*operands, **kw_operands)
                         if infer_res is not None:
                             assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                             self.st.metadata = infer_res.data
                             return True
-                else:
+                elif isinstance(self.func, PFLName):
                     infer_res = self.func.st.meta_infer(*operands, **kw_operands)
                     if infer_res is not None:
                         assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                         self.st.metadata = infer_res.data
                         return True
+                return False
 
         return self.consteval()
 
@@ -1209,6 +1241,7 @@ class PFLAttribute(PFLExpr):
                         assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                         self.st.metadata = infer_res.data
                         return True
+                    return False
         return self.consteval()
         
 
@@ -1348,6 +1381,7 @@ class PFLSubscript(PFLExpr):
                     assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                     self.st.metadata = infer_res.data
                     return True
+                return False
             return self.consteval()
         else:
             operands = self._get_consteval_operands_st(
@@ -1358,6 +1392,7 @@ class PFLSubscript(PFLExpr):
                     assert isinstance(infer_res, PFLMetaInferResult), "meta infer function must return `pfl.PFLMetaInferResult`"
                     self.st.metadata = infer_res.data
                     return True
+                return False
 
             return self.consteval()
 
@@ -1386,6 +1421,25 @@ class PFLArray(PFLExpr):
             self.st.metadata = operands
             return True
         return False
+
+@dataclasses.dataclass(kw_only=True)
+class PFLTuple(PFLExpr):
+    elts: list[PFLExpr]
+    def check_and_infer_type(self):
+        if not self.elts:
+            self.st = PFLExprInfo(PFLExprType.TUPLE, [])
+            self.is_const = True
+            return self
+        self.st = PFLExprInfo(PFLExprType.TUPLE,
+                              [dataclasses.replace(e.st) for e in self.elts])
+        self.is_const = PFLExpr.all_constexpr(*self.elts)
+
+    def consteval(self):
+        # for tuple, we always store a tuple of metadata
+        # even if all meta of elts are undefined.
+        # TODO review this
+        self.st.metadata = tuple([e.st.metadata for e in self.elts])
+        return True
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -1631,6 +1685,9 @@ def unparse_pfl_expr(expr: PFLExpr) -> str:
     elif isinstance(expr, PFLArray):
         return "[" + ", ".join(unparse_pfl_expr(elt)
                                for elt in expr.elts) + "]"
+    elif isinstance(expr, PFLTuple):
+        return "(" + ", ".join(unparse_pfl_expr(elt)
+                               for elt in expr.elts) + ")"
     elif isinstance(expr, PFLDict):
         strs = []
         for k, v in zip(expr.keys, expr.values):

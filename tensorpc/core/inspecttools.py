@@ -143,3 +143,12 @@ def get_co_qualname_from_frame(frame: types.FrameType):
         if "self" in frame.f_locals:
             qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
     return qname 
+
+def unwrap_fn_static_cls_property(fn: Callable):
+    fn = inspect.unwrap(fn)
+    if isinstance(fn, (classmethod, staticmethod)):
+        return fn.__func__
+    elif isinstance(fn, property):
+        assert fn.fget is not None 
+        return fn.fget
+    return fn
