@@ -17,7 +17,7 @@ from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
-from tensorpc.core.pfl.constants import PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR, PFL_FUNC_ANNO_META_ATTR
+from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN, PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR, PFL_FUNC_ANNO_META_ATTR
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem, register_pfl_std
@@ -132,6 +132,13 @@ class PFLParseConfig:
     # otherwise new variable can only be used in the branch scope it is created.
     # when we want to generate cpp-like code, we need to set this to False,
     allow_new_var_after_if: bool = True
+    # allow isinstance. this op is supported in py/js, not supported in cpp.
+    # currently isinstance is compile-time, since we don't support var union.
+    allow_isinstance: bool = True
+    # if the test value is constexpr, we can only parse one branch to avoid
+    # type error. keep in mind that new variables created in the branch
+    # are visible in parent block.
+    inline_constexpr_if: bool = True
 
 @dataclasses.dataclass
 class StaticEvalConfig:
@@ -200,6 +207,7 @@ class PFLParseCache:
         self._std_item_cache: dict[Type, StdRegistryItem] = {}
         if temp_std_items is not None:
             self._std_item_cache.update(temp_std_items)
+        self._mapped_proxy_cache: dict[Type, Optional[StdRegistryItem]] = {}
 
         self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
         self._temp_dcls_dict: dict[tuple[str, Optional[str]], StdRegistryItem] = {}
@@ -232,19 +240,25 @@ class PFLParseCache:
                 overload_fn = func
             overloads = get_overloads(overload_fn)
             if overloads:
-                sig = inspect.signature(overloads[0])
-                overload_sigs = [inspect.signature(o) for o in overloads[1:]]
+                sig = inspect.signature(overloads[0], eval_str=True)
+                overload_sigs = [inspect.signature(o, eval_str=True) for o in overloads[1:]]
             else:
-                sig = inspect.signature(func)
+                sig = inspect.signature(func, eval_str=True)
                 overload_sigs = None
             return PFLExprInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, overload_sigs=overload_sigs, raw_func=func)
 
     def cached_parse_std_item(self, item: StdRegistryItem) -> "PFLExprInfo":
         if item.is_func:
             return self.cached_parse_func(item.dcls, disable_type_check=item._internal_disable_type_check)
-        else:
+        elif item.is_builtin:
+            assert item.mapped is not None
             return PFLExprInfo.from_annotype(
+                parse_type_may_optional_undefined(item.dcls), is_type=True, parse_cache=self, proxy_dcls=cast(Type[DataclassType], item.dcls))
+        else:
+            res = PFLExprInfo.from_annotype(
                 parse_type_may_optional_undefined(item.dcls), is_type=True, parse_cache=self)
+            res.disable_dcls_ctor = item.disable_dcls_ctor
+            return res 
 
     def cached_get_std_item(self, dcls: Type[T_dataclass]):
         if dcls in self._std_item_cache:
@@ -267,6 +281,14 @@ class PFLParseCache:
                 f"can't find your mapped type {get_qualname_of_type(usercls)} from std registry."
             )
         self._mapped_type_cache[usercls] = item
+        return item
+
+    def cached_try_get_proxy_dcls_by_mapped_type(self, usercls: Any):
+        if usercls in self._mapped_proxy_cache:
+            return self._mapped_proxy_cache[usercls]
+        item = STD_REGISTRY.get_proxy_dcls_by_mapped_type(
+            usercls, self._backend, external=self._temp_dcls_dict)
+        self._mapped_proxy_cache[usercls] = item
         return item
 
     @staticmethod
@@ -372,6 +394,24 @@ def has_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx is not None
 
+@dataclasses.dataclass(eq=False)
+class PFLFuncExprInfo:
+    arg_name: Optional[str] = None
+    return_type: Optional["PFLExprInfo"] = None
+    default: Union[Undefined, Any] = undefined
+    is_vaargs: bool = False
+    is_method: bool = False
+    is_property: bool = False
+    raw_func: Optional[Callable] = None
+    # indicate this function is a compiled function, not stdlib function.
+    # we need to get inside when evaluation
+    compiled_uid: Optional[str] = None
+    # overload: when you define a function with overloads, the signature of origin function
+    # will be ignored, and the overloads will be used instead.
+    # keep in mind that if your f has three overloads, the first overload will be saved in main PFLExprInfo.
+    # other overloads will be saved in `overloads`.
+    overloads: Optional[list["PFLExprInfo"]] = None
+
 
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
@@ -379,6 +419,12 @@ class PFLExprInfo:
     childs: list['PFLExprInfo'] = dataclasses.field(default_factory=list)
     has_optional: bool = False
     has_undefined: bool = False
+     # for base type (int, float, etc)
+     # user may need to add methods to base type. we will check
+     # methods of user subclassed type when call method.
+    is_basetype_subclassed: bool = False
+    proxy_dcls: Optional[Any] = None
+    disable_dcls_ctor: bool = False
     # for custom dataclass
     mapped: str = ""
     # for container and dataclass
@@ -406,6 +452,9 @@ class PFLExprInfo:
     # TODO should it be sent to frontend?
     _metadata: Union[Undefined, Any] = undefined
     _meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
+    _force_meta_infer: bool = False
+    _static_type_infer: Optional[Callable[..., Any]] = None
+    _constexpr_data: Union[Undefined, Any] = undefined
     def to_dict(self):
         childs = [c.to_dict() for c in self.childs]
         res: dict[str, Any] = {
@@ -442,7 +491,7 @@ class PFLExprInfo:
             res = str(self.annotype.origin_type.__name__)
         elif self.type == PFLExprType.DATACLASS_OBJECT:
             assert self.annotype is not None
-            res = str(self.annotype.origin_type.__name__) + "()"
+            res = str(self.annotype.origin_type.__name__) #  + "()"
         elif self.type == PFLExprType.UNION:
             child_reprs = [str(c) for c in self.childs]
             res = f"{' | '.join(child_reprs)}"
@@ -464,8 +513,8 @@ class PFLExprInfo:
             res = f"({args}) => {self.return_type}"
         else:
             res = _BASE_TYPE_TO_STRING[self.type]
-        if self.mapped:
-            res += f"<{self.mapped}>"
+        # if self.mapped:
+        #     res += f"<{self.mapped}>"
 
         if self.has_optional:
             res += " | null"
@@ -483,7 +532,8 @@ class PFLExprInfo:
                       is_type: bool = False,
                       allow_union: bool = False,
                       allow_type_var: bool = False,
-                      parse_cache: Optional[PFLParseCache] = None) -> Self:
+                      parse_cache: Optional[PFLParseCache] = None,
+                      proxy_dcls: Optional[Type[DataclassType]] = None) -> Self:
         # nested union/typevar isn't supported
         if annotype.origin_type in BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
             res = cls(BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE[annotype.origin_type])
@@ -500,7 +550,11 @@ class PFLExprInfo:
                     "Union only supported in function argument and return anno."
                 )
         elif annotype.is_number_type():
+            # here we support user subclassed base type
             res = cls(PFLExprType.NUMBER)
+            origin_type = annotype.origin_type
+            if not annotype.is_union_type() and issubclass(origin_type, (int, float)) and origin_type not in [int, float]:
+                res.is_basetype_subclassed = True 
         elif annotype.is_union_type():
             if allow_union:
                 res = cls(PFLExprType.UNION, [
@@ -529,10 +583,12 @@ class PFLExprInfo:
                 annotype.origin_type)
             res.mapped = item.mapped_name
             res.is_temp = item.is_temp
+            if is_type:
+                res.proxy_dcls = proxy_dcls
         elif annotype.is_tuple_type():
             res = cls(PFLExprType.TUPLE, [
                 PFLExprInfo.from_annotype(
-                    parse_type_may_optional_undefined(x), is_type)
+                    parse_type_may_optional_undefined(x), is_type, allow_type_var=True)
                 for x in annotype.child_types
             ])
         elif annotype.is_any_type():
@@ -553,6 +609,9 @@ class PFLExprInfo:
         res.annotype = annotype
         res.has_optional = annotype.is_optional
         res.has_undefined = annotype.is_undefined
+        if not is_type and get_parse_context() is not None:
+            builtin_proxy = get_parse_cache_checked().cached_try_get_proxy_dcls_by_mapped_type(annotype.origin_type)
+            res.proxy_dcls = cast(Type[DataclassType], builtin_proxy.dcls) if builtin_proxy is not None else None
         return res
 
     @classmethod
@@ -577,7 +636,8 @@ class PFLExprInfo:
                 assert self_type is not None 
                 annotype = self_type
             else:
-                annotype = parse_type_may_optional_undefined(param.annotation, self_type=self_type)
+                anno = param.annotation
+                annotype = parse_type_may_optional_undefined(anno, self_type=self_type)
             
             arg = PFLExprInfo.from_annotype(annotype,
                                             is_type=False,
@@ -700,7 +760,7 @@ class PFLExprInfo:
                     return dataclasses.replace(self)
                 else:
                     return dataclasses.replace(other)
-        assert self == other, f"can't merge {self} and {other}, they are not same type."
+        assert self.is_equal_type(other), f"can't merge {self} and {other}, they are not same type."
         return dataclasses.replace(self)
 
     def check_support_compare_op(self, msg: str = ""):
@@ -715,6 +775,14 @@ class PFLExprInfo:
             return False
         if tgt.type == PFLExprType.ANY:
             return True
+        if tgt.type == PFLExprType.TUPLE and self.type == PFLExprType.TUPLE:
+            if tgt.annotype is not None:
+                if tgt.annotype.is_homogeneous:
+                    return all(c.is_convertable(tgt.childs[0]) for c in self.childs)
+                else:
+                    if len(tgt.childs) != len(self.childs):
+                        return False
+                    return all(c.is_convertable(tgt_child) for c, tgt_child in zip(self.childs, tgt.childs))
         if tgt.type == PFLExprType.NUMBER or tgt.type == PFLExprType.BOOL:
             return self.type == PFLExprType.NUMBER or self.type == PFLExprType.BOOL
         elif tgt.type == PFLExprType.ARRAY or tgt.type == PFLExprType.OBJECT:
@@ -758,6 +826,21 @@ class PFLExprInfo:
             return not isinstance(self.metadata, Undefined)
         else:
             return isinstance(self.metadata, ty)
+
+    def has_constexpr_data(self):
+        return not isinstance(self._constexpr_data, Undefined)
+
+    def get_constexpr_checked(self, ty: Type[_T]) -> _T:
+        res = self._constexpr_data
+        assert isinstance(self._constexpr_data, ty), f"constexpr type {type(self._constexpr_data)} is not {ty}"
+        return cast(_T, res)
+
+    @property
+    def constexpr_data_checked(self):
+        res = self._constexpr_data
+        if isinstance(res, Undefined):
+            raise ValueError("constexpr_data is not set")
+        return res
 
     @metadata.setter
     def metadata(self, value: Union[Undefined, Any]):
@@ -818,6 +901,24 @@ class PFLExprInfo:
             ], return_type=ret)
 
     
+    def _parse_dataclass_ctor(self):
+        if self.proxy_dcls is not None:
+            fn = inspect.getattr_static(self.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
+            assert isinstance(fn, staticmethod)
+            func_st = get_parse_cache_checked().cached_parse_func(fn.__func__)
+            assert func_st.return_type is not None, "func return type must be annotated"
+            return func_st.childs, func_st.return_type
+        else:
+            assert self.annotype is not None
+            func_arg_types: list[PFLExprInfo] = []
+            for k, f in self.annotype.get_dataclass_field_annotated_types().items():
+                finfo = PFLExprInfo.from_annotype(f, is_type=False)
+                finfo.arg_name = k
+                func_arg_types.append(finfo)
+            ret_type = dataclasses.replace(self, type=PFLExprType.DATACLASS_OBJECT,
+                                    childs=[],
+                                    return_type=None)
+            return func_arg_types, ret_type
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
     # since js don't support keyword, we don't need to care about kw.
@@ -839,8 +940,13 @@ class PFLStdlibFuncMeta:
     # for type meta infer, e.g. calc all static ndarray shape and dtype
     # to generate cpp code.
     meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None
+    # currently only at least one argument has metadata, meta_infer will be called.
+    # if some argument has constexpr data, meta_infer can't be called.
+    force_meta_infer: bool = False
     # used to simplify std annotation code
     take_overloads_fn: Optional[Callable] = None
+    # if any stdlib func define this, we will use this to infer type instead of annotation.
+    static_type_infer: Optional[Callable[..., Any]] = None
 
     
 T_callable = TypeVar("T_callable", bound=Callable[..., Optional[PFLMetaInferResult]])
@@ -895,9 +1001,6 @@ class PFLCompileFuncMeta:
     # used by debugger/simulator.
     inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None
     is_template: bool = False
-    # anno_transform: (infered_anno, original_anno) -> new_anno
-    # used for convert third-party annotations such as tl.constexpr in triton.jit
-    anno_transform: Optional[Callable[[PFLExprInfo, Any], PFLExprInfo]] = None 
 
 @dataclasses.dataclass
 class PFLCompilable:
@@ -943,7 +1046,9 @@ def get_compilable_meta(fn: Callable) -> Optional[PFLCompileFuncMeta]:
         return None
     return meta
 
-def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None) -> Callable[[T_base_callable], T_base_callable]:
+def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None,
+                       static_type_infer: Optional[Callable[..., Any]] = None,
+                       force_meta_infer: bool = False) -> Callable[[T_base_callable], T_base_callable]:
     def wrapper(fn_wrapped: T_base_callable) -> T_base_callable:
         fn_unwrapped = unwrap_fn_static_cls_property(fn_wrapped)
 
@@ -957,12 +1062,36 @@ def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_inf
         else:
             meta_infer_set_first_arg = None
         if prev_meta is None:
-            prev_meta = PFLStdlibFuncMeta(take_overloads_fn=take_overloads_fn, meta_infer=meta_infer_set_first_arg)
+            prev_meta = PFLStdlibFuncMeta(take_overloads_fn=take_overloads_fn, meta_infer=meta_infer_set_first_arg,
+                                          static_type_infer=static_type_infer, force_meta_infer=force_meta_infer)
             setattr(fn_wrapped, PFL_STDLIB_FUNC_META_ATTR, prev_meta)
         else:
             if take_overloads_fn_ is not None:
                 prev_meta.take_overloads_fn = take_overloads_fn_
             if meta_infer_set_first_arg is not None:
                 prev_meta.meta_infer = meta_infer_set_first_arg
+            if static_type_infer is not None:
+                prev_meta.static_type_infer = static_type_infer
+            prev_meta.force_meta_infer = force_meta_infer
+
         return cast(T_base_callable, fn_wrapped)
     return wrapper
+
+def evaluate_annotation_expr(annotation: Union[ast.expr, str]):
+    if not isinstance(annotation, str):
+        ann_str = ast.unparse(annotation)
+    else:
+        ann_str = annotation
+    ann_fref = ForwardRef(ann_str,
+                            is_argument=True,
+                            is_class=False)
+    if sys.version_info < (3, 9):
+        ann_res = ann_fref._evaluate(
+            get_parse_context_checked().anno_evaluate_globals,
+            {})
+    else:
+        ann_res = ann_fref._evaluate(
+            get_parse_context_checked().anno_evaluate_globals,
+            {},
+            recursive_guard=set())  # type: ignore
+    return ann_res

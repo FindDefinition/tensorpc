@@ -109,7 +109,7 @@ class Undefined:
         # for python 3.11
         return 0
 
-    def bool(self):
+    def __bool__(self):
         return False
 
 # DON'T MODIFY THIS VALUE!!!
@@ -264,6 +264,8 @@ class AnnotatedType:
     is_optional: bool = False
     is_undefined: bool = False
     raw_type: Optional[Any] = None
+    # currently only used for tuple type
+    is_homogeneous: bool = False
 
     def is_any_type(self) -> bool:
         return self.origin_type is Any
@@ -383,14 +385,22 @@ class AnnotatedType:
     def get_dataclass_fields_and_annotated_types(
             self) -> dict[str, tuple["AnnotatedType", Field]]:
         assert self.is_dataclass_type()
-        type_hints = get_type_hints_with_cache(self.origin_type,
+        return self.get_dataclass_fields_and_annotated_types_static(self.origin_type)
+
+    @staticmethod
+    def get_dataclass_fields_and_annotated_types_static(
+            type: Any) -> dict[str, tuple["AnnotatedType", Field]]:
+        assert inspect.isclass(type) and dataclasses.is_dataclass(type), \
+            f"type must be a dataclass, but get {type}"
+        type_hints = get_type_hints_with_cache(type,
                                                include_extras=True)
         res: dict[str, tuple["AnnotatedType", Field]] = {}
-        for field in dataclasses.fields(self.origin_type):
+        for field in dataclasses.fields(type):
             field_type = type_hints[field.name]
             field_annotype = parse_type_may_optional_undefined(field_type)
             res[field.name] = (field_annotype, field)
         return res
+
 
     @staticmethod
     def get_any_type():
@@ -421,6 +431,7 @@ def parse_type_may_optional_undefined(
         return AnnotatedType(ann_type, [], ann_meta, False,
                                  False, ann_type)
     # check ann_type is Union
+    assert not isinstance(ann_type, str), "you must evaluate your annotation"
     ty_origin = get_origin(ann_type)
     if ty_origin is not None:
         if origin_is_union(ty_origin):
@@ -454,6 +465,14 @@ def parse_type_may_optional_undefined(
                                  is_undefined, raw_type)
         else:
             ty_args = get_args(ann_type)
+            if ty_origin is tuple or ty_origin is Tuple:
+                # tuple type, we need to check if it is homogeneous
+                if len(ty_args) == 2 and ty_args[1] is Ellipsis:
+                    # Tuple[T, ...] is a homogeneous tuple type
+                    ty_args = [ty_args[0]]
+                    return AnnotatedType(ty_origin, ty_args, ann_meta,
+                                         raw_type=raw_type,
+                                         is_homogeneous=True)
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, list(ty_args), ann_meta, raw_type=raw_type)
@@ -627,6 +646,8 @@ def _main():
         print(at, at.is_list_type(), at.is_sequence_type(),
               at.is_mapping_type(), at.is_dict_type())
 
+def _main_test():
+    print(parse_type_may_optional_undefined(tuple[int, ...]))
 
 if __name__ == "__main__":
-    _main()
+    _main_test()

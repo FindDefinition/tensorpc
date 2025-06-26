@@ -22,7 +22,7 @@ from tensorpc.core.tree_id import UniqueTreeId
 from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, PFL_LOGGER, PFLInlineRunEnv, StaticEvalConfig, PFLCompilable, PFLCompileFuncMeta, PFLErrorFormatContext, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
                    enter_parse_context, get_compilable_meta, get_eval_cfg_in_parse_ctx, get_parse_context, get_parse_context_checked, param_fn,
-                   varparam_fn, PFLStdlibFuncMeta)
+                   varparam_fn, PFLStdlibFuncMeta, evaluate_annotation_expr)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLArray, PFLAssign, PFLAstNodeBase, PFLAstStmt,
                       PFLASTType, PFLAttribute, PFLAugAssign, PFLBinOp,
@@ -32,7 +32,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLUnaryOp, PFLWhile, UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk,
                       PFLAstParseError, PFLEvalError)
 
-from .pfl_reg import ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem, compiler_print_type, compiler_print_metadata
+from .pfl_reg import ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem, compiler_isinstance, compiler_print_type, compiler_print_metadata
 
 _ALL_SUPPORTED_AST_TYPES = {
     ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare, ast.Call, ast.Name,
@@ -145,12 +145,28 @@ class ReturnInfo:
     complete: bool 
     all_return_stmts: list[PFLReturn]
 
+
+_SUPPORTED_PYTHON_BUILTINS = {
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "range": range,
+    "list": list,
+    "dict": dict,
+    "print": print,
+    "len": len,
+    "min": min,
+    "max": max,
+    "abs": abs,
+    "isinstance": isinstance,
+}
+
 class MapAstNodeToStdlib(ast.NodeTransformer):
     """map every ast name/attribute to a stdlib item.
     we don't map function args (annotations) because they will be 
     parsed after anno evaluation.
     """
-    def __init__(self, func_globals: dict[str, Any], error_ctx: PFLErrorFormatContext, backend: str = "js"):
+    def __init__(self, func_globals: dict[str, Any], error_ctx: PFLErrorFormatContext, backend: str = "js", var_preproc: Optional[Callable[[Any], Any]] = None):
         super().__init__()
         self.func_globals = {
             **func_globals
@@ -159,6 +175,7 @@ class MapAstNodeToStdlib(ast.NodeTransformer):
             if k not in func_globals:
                 self.func_globals[k] = v
         self.backend = backend
+        self.var_preproc = var_preproc
 
         self._node_to_std_item: dict[ast.AST, StdRegistryItem] = {}
         self._node_to_compilable: dict[ast.AST, PFLCompilable] = {}
@@ -197,11 +214,13 @@ class MapAstNodeToStdlib(ast.NodeTransformer):
                 if hasattr(cur_obj, part):
                     cur_obj = getattr(cur_obj, part)
                 else:
-                    return node
+                    return self.generic_visit(node)
+        if self.var_preproc is not None:
+            cur_obj = self.var_preproc(cur_obj)
+        # print(type(cur_obj), cur_obj)
         if isinstance(cur_obj, type) or inspect.ismodule(cur_obj) or inspect.isfunction(cur_obj) or inspect.isclass(cur_obj) or inspect.isbuiltin(cur_obj):
             item = STD_REGISTRY.get_item_by_dcls(cur_obj, self.backend)
             if item is not None:
-                # print(ast.unparse(cur_node), item.mapped_name)
                 self._node_to_std_item[node] = item
                 # don't access child nodes
                 return node
@@ -261,22 +280,6 @@ def _register_temp_dcls_to_std(args: list[AnnotatedArg], backend: str, global_di
                                     is_temp=True)
 
 
-def _evaluate_annotation_expr(annotation: ast.expr):
-    ann_str = ast.unparse(annotation)
-    ann_fref = ForwardRef(ann_str,
-                            is_argument=True,
-                            is_class=False)
-    if sys.version_info < (3, 9):
-        ann_res = ann_fref._evaluate(
-            get_parse_context_checked().anno_evaluate_globals,
-            {})
-    else:
-        ann_res = ann_fref._evaluate(
-            get_parse_context_checked().anno_evaluate_globals,
-            {},
-            recursive_guard=set())  # type: ignore
-    return ann_res
-
 def _get_module_code_by_fn(func: Callable):
     mod = inspect.getmodule(func)
     assert mod is not None, "module_code_getter must be provided if func isn't a module function"
@@ -289,12 +292,18 @@ class PFLParser:
             parse_cfg: Optional[PFLParseConfig] = None,
             func_code_getter: Callable[[Any], tuple[list[str], int]] = inspect.getsourcelines,
             module_code_getter: Callable[[Any], str] = _get_module_code_by_fn,
-            func_unwrapper: Callable[[Any], Callable] = unwrap_fn_static_cls_property):
+            func_unwrapper: Callable[[Any], Callable] = unwrap_fn_static_cls_property,
+            var_preproc: Optional[Callable[[Any], Any]] = None,
+            anno_transform: Optional[Callable[[PFLExprInfo, Any], PFLExprInfo]] = None):
         self._backend = backend
         self._parse_cfg = parse_cfg
         self._func_code_getter = func_code_getter
         self._module_code_getter = module_code_getter
         self._func_unwrapper = func_unwrapper
+        # anno_transform: (infered_anno, original_anno) -> new_anno
+        # used for convert third-party annotations such as tl.constexpr in triton.jit
+        self._anno_transform = anno_transform
+        self._var_preproc = var_preproc
 
         self._all_compiled: dict[str, PFLFunc] = {}
         self._current_compiling: set[str] = set()
@@ -491,12 +500,47 @@ class PFLParser:
                 func = self._parse_expr_to_df_ast(expr.func, scope)
                 # check is compile-time function
                 if func.st.raw_func in ALL_COMPILE_TIME_FUNCS:
-                    assert len(args) == 1 and len(kw_keys) == 0, "compile-time functions only support one argument"
                     if func.st.raw_func is compiler_print_type:
+                        assert len(args) == 1 and len(kw_keys) == 0, "compiler_print_type only support one argument"
                         args_str = ", ".join(str(a.st) for a in args)
                         PFL_LOGGER.warning(args_str)
-                    res = args[0]
-                    expr = expr.args[0]
+                        res = args[0]
+                        expr = expr.args[0]
+                    elif func.st.raw_func is compiler_isinstance:
+                        # TODO currently int and float are treated as function.
+                        if not ctx.cfg.allow_isinstance:
+                            raise PFLAstParseError(
+                                "isinstance is disabled in config, you need to enable it in parse config.",
+                                expr)
+                        type_to_check = args[0].st
+                        type_candidates_expr = args[1]
+                        if type_candidates_expr.st.type == PFLExprType.TUPLE:
+                            type_candidates = type_candidates_expr.st.childs
+                            assert len(type_candidates) > 0, "type_candidates must not be empty"
+                        else:
+                            type_candidates = [type_candidates_expr.st]
+                        compare_res: list[bool] = []
+                        # TODO better compare
+                        if type_to_check.proxy_dcls is not None:
+                            for c in type_candidates:
+                                if c.proxy_dcls is not None:
+                                    compare_res.append(issubclass(type_to_check.proxy_dcls, c.proxy_dcls))
+                                else:
+                                    compare_res.append(False)
+                        else:
+                            for c in type_candidates:
+                                assert c.type == PFLExprType.DATACLASS_TYPE
+                                if type_to_check.type == PFLExprType.DATACLASS_OBJECT:
+                                    compare_res.append(issubclass(type_to_check.get_origin_type_checked(), c.get_origin_type_checked()))
+                                else:
+                                    compare_res.append(False)
+                        res = PFLConstant(PFLASTType.CONSTANT,
+                                        source_loc,
+                                        value=any(compare_res))
+                        res.check_and_infer_type()
+                    else:
+                        raise NotImplementedError(
+                            f"compile-time function {func.st.raw_func} not implemented")
                 else:
                     # TODO support pfl function (PFLFunc)
                     parse_cfg = get_parse_context_checked().cfg
@@ -536,6 +580,7 @@ class PFLParser:
         block: list[PFLAstStmt] = []
         # block = PFLFunc(PFLASTType.BLOCK, -1, -1, "", [], [])
         return_info = ReturnInfo(complete=False, all_return_stmts=[])
+        
         for stmt in body:
             source_loc = (stmt.lineno, stmt.col_offset, stmt.end_lineno, stmt.end_col_offset)
 
@@ -570,7 +615,7 @@ class PFLParser:
                         assert isinstance(target, PFLName)
                         target.is_new = is_new_var
                     elif isinstance(tgt, ast.Tuple) and value is not None:
-                        assert value.type == PFLASTType.TUPLE, "value must be tuple"
+                        assert value.st.type == PFLExprType.TUPLE, "value type must be tuple"
                         assert len(tgt.elts) == len(value.st.childs), "tuple length must be same"
                         is_new_vars: list[bool] = []
                         for i, elt in enumerate(tgt.elts):
@@ -603,10 +648,14 @@ class PFLParser:
                         block.append(node)
                     else:
                         assert value is not None
-                        ann_res = _evaluate_annotation_expr(stmt.annotation)
-                        target.st = PFLExprInfo.from_annotype(
-                            parse_type_may_optional_undefined(ann_res),
-                            is_type=False)
+                        anno_in_ast = evaluate_annotation_expr(stmt.annotation)
+                        assert anno_in_ast is not None, "annotation must be evaluated to a valid type"
+                        if self._anno_transform is not None:
+                            anno_st = self._anno_transform(value.st, anno_in_ast)
+                        else:
+                            anno_st = PFLExprInfo.from_annotype(
+                                parse_type_may_optional_undefined(anno_in_ast))
+                        target.st = anno_st
                         node = PFLAnnAssign(PFLASTType.ANN_ASSIGN,
                                         source_loc,
                                         target=target,
@@ -628,7 +677,21 @@ class PFLParser:
                     if isinstance(target, PFLName):
                         scope[target.id] = target.st
                 elif isinstance(stmt, ast.If):
+                    ctx = get_parse_context_checked()
                     test = self._parse_expr_to_df_ast(stmt.test, scope)
+                    if test.is_const and ctx.cfg.inline_constexpr_if:
+                        # TODO we can't do constexpr inline when a dependency
+                        # isn't a template function.
+                        const_data = test.st.constexpr_data_checked
+                        if bool(const_data):
+                            res_nodes, rinfo = self._parse_block_to_pfl_ast(stmt.body, scope)
+                        else:
+                            res_nodes, rinfo = self._parse_block_to_pfl_ast(stmt.orelse, scope)
+                        return_info.all_return_stmts.extend(rinfo.all_return_stmts)
+                        block.extend(res_nodes)
+                        if rinfo.complete:
+                            return_info.complete = True
+                        continue
                     private_scope_if = scope.copy()
                     ifbody, if_rinfo = self._parse_block_to_pfl_ast(stmt.body, private_scope_if)
                     private_scope_else = scope.copy()
@@ -777,31 +840,28 @@ class PFLParser:
         arg_dict_from_call: Optional[dict[str, PFLExprInfo]] = None
         if arg_infos_from_call is not None:
             arg_dict_from_call = self._map_call_args_to_func_def(arg_infos_from_call[0], arg_infos_from_call[1], stmt)
-        print(external_arg_annos)
-
         for i, arg in enumerate(stmt.args.args):
             arg_loc = (arg.lineno, arg.col_offset, arg.end_lineno, arg.end_col_offset)
             anno_in_ast = None
             if arg.annotation is not None:
-                anno_in_ast = _evaluate_annotation_expr(arg.annotation)
+                anno_in_ast = evaluate_annotation_expr(arg.annotation)
             anno_st = None
             anno_in_ast_st = None
             if external_arg_annos is not None:
                 if arg.arg in external_arg_annos:
-                    ext_anno = external_arg_annos[arg.arg]
                     ext_anno = PFLExprInfo.from_annotype(
-                            parse_type_may_optional_undefined(ext_anno))
-                    if func_meta is not None and func_meta.anno_transform is not None and anno_in_ast is not None:
-                        anno_st = func_meta.anno_transform(ext_anno, anno_in_ast)
+                            parse_type_may_optional_undefined(external_arg_annos[arg.arg]))
+                    if self._anno_transform is not None and anno_in_ast is not None:
+                        anno_st = self._anno_transform(ext_anno, anno_in_ast)
                     else:
                         anno_st = ext_anno
             elif arg_dict_from_call is not None:
                 if arg.arg in arg_dict_from_call:
                     anno_st_from_call = arg_dict_from_call[arg.arg]
                     if anno_in_ast is not None:
-                        if func_meta is not None and func_meta.anno_transform is not None:
+                        if self._anno_transform is not None:
                             # user should validate in anno_transform
-                            anno_st = func_meta.anno_transform(anno_st_from_call, anno_in_ast)
+                            anno_st = self._anno_transform(anno_st_from_call, anno_in_ast)
                         else:
                             # validate by parser 
                             anno_in_ast_st = PFLExprInfo.from_annotype(
@@ -849,7 +909,7 @@ class PFLParser:
         )
         func_node = PFLFunc(PFLASTType.FUNC, source_loc, name=stmt.name, args=args, st=func_node_st, body=funbody)
         if stmt.returns is not None:
-            ann_res = _evaluate_annotation_expr(stmt.returns)
+            ann_res = evaluate_annotation_expr(stmt.returns)
             st = PFLExprInfo.from_annotype(
                     parse_type_may_optional_undefined(ann_res))
             if ret_sts:
@@ -895,7 +955,7 @@ class PFLParser:
         module_code = self._module_code_getter(func)
         code = "\n".join(func_code_lines)
         tree = ast.parse(code)
-        transformer = MapAstNodeToStdlib(func.__globals__, PFLErrorFormatContext(func_code_lines), backend=backend)
+        transformer = MapAstNodeToStdlib(func.__globals__, PFLErrorFormatContext(func_code_lines), backend=backend, var_preproc=self._var_preproc)
         tree = ast.fix_missing_locations(transformer.visit(tree))
         # find funcdef
         func_node: Optional[ast.FunctionDef] = None
@@ -976,7 +1036,7 @@ class PFLParser:
         tree = ast.parse(expr_str, mode="eval")
         node_to_std_item = {}
         if var_scope is not None:
-            transformer = MapAstNodeToStdlib(var_scope, PFLErrorFormatContext(expr_str_lines), backend=backend)
+            transformer = MapAstNodeToStdlib(var_scope, PFLErrorFormatContext(expr_str_lines), backend=backend, var_preproc=self._var_preproc)
             tree = ast.fix_missing_locations(transformer.visit(tree))
             node_to_std_item = transformer._node_to_std_item
             # tree = ast.fix_missing_locations(
@@ -1007,23 +1067,6 @@ class PFLParser:
         return res, scope
 
 
-
-_SUPPORTED_PYTHON_BUILTINS = {
-    "int": int,
-    "float": float,
-    "bool": bool,
-    "range": range,
-    "list": list,
-    "dict": dict,
-    "print": print,
-    "len": len,
-    "min": min,
-    "max": max,
-    "abs": abs,
-}
-
-
-
 def parse_func_to_pfl_ast(
         func: Callable,
         scope: Optional[dict[str, PFLExprInfo]] = None,
@@ -1032,9 +1075,12 @@ def parse_func_to_pfl_ast(
         func_code_getter: Callable[[Any], tuple[list[str], int]] = inspect.getsourcelines,
         module_code_getter: Callable[[Any], str] = _get_module_code_by_fn,
         func_unwrapper: Callable[[Any], Callable] = unwrap_fn_static_cls_property,
+        var_preproc: Optional[Callable[[Any], Any]] = None,
+        anno_transform: Optional[Callable[[PFLExprInfo, Any], PFLExprInfo]] = None,
         all_compiled: Optional[dict[str, PFLFunc]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None) -> PFLFunc:
-    parser = PFLParser(backend, parse_cfg, func_code_getter, module_code_getter, func_unwrapper)
+    parser = PFLParser(backend, parse_cfg, func_code_getter, module_code_getter, 
+        func_unwrapper, var_preproc, anno_transform)
     if all_compiled is not None:
         parser._all_compiled = all_compiled
     return parser.parse_func_to_pfl_ast(func, scope, external_anno)
@@ -1047,13 +1093,17 @@ def parse_func_to_pfl_library(
         func_code_getter: Callable[[Any], tuple[list[str], int]] = inspect.getsourcelines,
         module_code_getter: Callable[[Any], str] = _get_module_code_by_fn,
         func_unwrapper: Callable[[Any], Callable] = unwrap_fn_static_cls_property,
+        var_preproc: Optional[Callable[[Any], Any]] = None,
+        anno_transform: Optional[Callable[[PFLExprInfo, Any], PFLExprInfo]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None) -> PFLLibrary:
     """Parse func and its dependencies to a PFL library.
     this function will parse whole file instead of func code only to ast. 
     if your func is dynamic generated, you need to use `tempfile_in_linecache` to add your dynamic code to linecache.
     """
     all_compiled: dict[str, PFLFunc] = {}
-    parse_func_to_pfl_ast(func, scope, backend, parse_cfg, func_code_getter, module_code_getter, func_unwrapper, all_compiled, external_anno)
+    parse_func_to_pfl_ast(func, scope, backend, parse_cfg, func_code_getter,
+         module_code_getter, func_unwrapper, var_preproc, 
+         anno_transform, all_compiled, external_anno)
     # TODO: better modules 
     all_modules: dict[str, PFLModule] = {}
     for k, v in all_compiled.items():

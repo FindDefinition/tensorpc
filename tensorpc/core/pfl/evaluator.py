@@ -11,6 +11,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (Undefined, is_undefined, undefined)
 from tensorpc.core.event_emitter.single import SingleAsyncEventEmitter
 from tensorpc.core.moduleid import get_module_id_of_type
+from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
 
 from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
@@ -99,13 +100,23 @@ class PFLStaticEvaluator:
             expr_node.st.metadata = value.metadata
             return True            
         else:
-            child_nodes = iter_child_nodes(expr_node)
+            if isinstance(expr_node, PFLCall) and isinstance(expr_node.func, PFLAttribute):
+                child_nodes = list(iter_child_nodes(expr_node)) + [expr_node.func.value]
+            else:
+                child_nodes = list(iter_child_nodes(expr_node))
+            # child_nodes_types = [type(x) for x in child_nodes]
             all_success: list[bool] = []
             for n in child_nodes:
                 if isinstance(n, PFLExpr):
                     success = self._eval_expr(n, scope)
                     all_success.append(success)
-            if all_success and not any(all_success):
+            # print("EVAL START", unparse_pfl_ast(expr_node), all_success, child_nodes_types)
+            node_allow_all_child_fail = False
+            if isinstance(expr_node, (PFLArray, PFLTuple)):
+                # list/tuple have length info, so we allow all fail.
+                node_allow_all_child_fail = True
+
+            if all_success and not any(all_success) and not node_allow_all_child_fail:
                 if self.cfg.allow_partial:
                     return False
                 else:
@@ -135,6 +146,8 @@ class PFLStaticEvaluator:
                     res = expr_node.metaeval()
                 else:
                     res = expr_node.consteval()
+                # print("EVAL", unparse_pfl_ast(expr_node), expr_node.st.metadata)
+
             except BaseException as e:
                 traceback.print_exc()
                 raise PFLEvalError(f"eval error {e}", expr_node) from e
@@ -147,7 +160,9 @@ class PFLStaticEvaluator:
         for k, v in scope.items():
             if isinstance(v, PFLExprInfo):
                 v = v.metadata
-            assert k in name_to_args
+            if k not in name_to_args:
+                # we don't raise error here because we may need to reuse the test data generation code.
+                continue
             info = dataclasses.replace(name_to_args[k].st)
             info.metadata = v
             arg_st = name_to_args[k].st
@@ -283,10 +298,9 @@ class PFLStaticEvaluator:
                 elif isinstance(stmt, PFLAugAssign):
                     self._eval_expr(stmt.value, scope)
                     if isinstance(stmt.target, PFLName):
-                        assert stmt.target.id in scope, \
-                            f"undefined name {stmt.target.id} in scope {scope.keys()}"
-                        target_st = scope[stmt.target.id]
-                        stmt.target.st.metadata = target_st.metadata
+                        if stmt.target.id in scope:
+                            target_st = scope[stmt.target.id]
+                            stmt.target.st.metadata = target_st.metadata
                 elif isinstance(stmt, PFLIf):
                     private_scope_if = scope.copy()
                     private_scope_else = scope.copy()
@@ -570,15 +584,20 @@ class PFLAsyncRunner:
                 res = await self._run_func(func_st.compiled_uid, kwargs)
             else:
                 func_val = await self._run_expr(expr.func, scope)
-                assert inspect.isfunction(func_val) or inspect.ismethod(func_val), f"expect function, but got {type(func_val)}"
-                arg_values = []
-                # compiled pfl function don't have vaargs
-                matched = expr._match_arg_sts_to_sig(func_st.childs, func_st.childs[-1].is_vaargs)
-                for arg_st, exprs in matched:
-                    for arg_expr in exprs:
-                        arg_value = await self._run_expr(arg_expr, scope)
-                        arg_values.append(arg_value)
-                res = func_val(*arg_values) 
+                if expr.func.st.proxy_dcls is not None:
+                    func_val = inspect.getattr_static(expr.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
+                # assert inspect.isfunction(func_val) or inspect.ismethod(func_val) or (inspect.isclass(func_val) and dataclasses.is_dataclass(func_val)), f"expect function, but got {type(func_val)}"
+                args = []
+                kwargs = {}
+                for arg_expr in expr.args:
+                    arg_expr_val = await self._run_expr(arg_expr, scope)
+                    args.append(arg_expr_val)
+                if not is_undefined(expr.keys):
+                    assert not is_undefined(expr.vals)
+                    for key_expr, value_expr in zip(expr.keys, expr.vals):
+                        value_value = await self._run_expr(value_expr, scope)
+                        kwargs[key_expr] = value_value
+                res = func_val(*args, **kwargs) 
             return res 
         elif isinstance(expr, PFLIfExp):
             body = await self._run_expr(expr.body, scope)

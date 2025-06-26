@@ -6,6 +6,8 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 import inspect
 import dataclasses
 
+from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
+
 
 @dataclasses.dataclass
 class StdRegistryItem:
@@ -16,6 +18,9 @@ class StdRegistryItem:
     backend: Optional[str] = "js"
     is_temp: bool = False
     is_func: bool = False
+    is_builtin: bool = False
+    # if a dataclass can't be created from auto-generated dataclass __init__ in pfl, we must set this.
+    disable_dcls_ctor: bool = False
     namespace_aliases: dict[str, Type[DataclassType]] = dataclasses.field(
         default_factory=dict)
     # used to register some system std function used in decorator (disable type check)
@@ -37,6 +42,7 @@ class StdRegistry:
         mapped_name: Optional[str] = None,
         mapped: Optional[Union[ModuleType, Type, Callable]] = None,
         backend: Optional[str] = "js",
+        disable_dcls_ctor: bool = False,
         _internal_disable_type_check: bool = False,
     ):
 
@@ -78,7 +84,45 @@ class StdRegistry:
                 mapped=mapped,
                 backend=backend,
                 is_func=inspect.isfunction(func),
+                disable_dcls_ctor=disable_dcls_ctor,
                 namespace_aliases=namespace_aliases,
+                _internal_disable_type_check=_internal_disable_type_check,
+            )
+
+            return cast(T, func)
+
+        if func is None:
+            return wrapper
+        else:
+            return wrapper(func)
+
+    def register_builtin_proxy(
+        self,
+        func=None,
+        *,
+        mapped_name: Optional[str] = None,
+        mapped: Optional[Type] = None,
+        backend: Optional[str] = "js",
+        _internal_disable_type_check: bool = False,
+    ):
+
+        def wrapper(func: T) -> T:
+            assert inspect.isclass(func) and dataclasses.is_dataclass(func), "builtin only support class (dataclass)"
+            init_fn = inspect.getattr_static(func, PFL_BUILTIN_PROXY_INIT_FN, None)
+            assert init_fn is not None and isinstance(init_fn, staticmethod), "your builtin proxy class must have a __pfl_proxy_init__ staticmethod."
+            assert mapped_name is not None
+            key_ = mapped_name
+            assert (
+                key_, backend
+            ) not in self.global_dict, f"Duplicate registration for {key_} with backend {backend}"
+
+            self.global_dict[(key_, backend)] = StdRegistryItem(
+                dcls=func,
+                mapped_name=mapped_name,
+                mapped=mapped,
+                backend=backend,
+                is_func=False,
+                is_builtin=True,
                 _internal_disable_type_check=_internal_disable_type_check,
             )
 
@@ -123,19 +167,35 @@ class StdRegistry:
         mapped_type: Any,
         backend: str = "js",
         external: Optional[dict[tuple[str, Optional[str]],
-                                StdRegistryItem]] = None
+                                StdRegistryItem]] = None,
+        _builtin_only: bool = False
     ) -> Optional[StdRegistryItem]:
         if external is not None:
             check_items = {**self.global_dict, **external}
         else:
             check_items = self.global_dict
         for _, item in check_items.items():
+            if _builtin_only and not item.is_builtin:
+                continue
             if item.backend is not None and item.backend != backend:
                 continue
             if item.mapped is not None and item.mapped is mapped_type:
                 return item
         return None
 
+    def get_proxy_dcls_by_mapped_type(
+        self,
+        mapped_type: Any,
+        backend: str = "js",
+        external: Optional[dict[tuple[str, Optional[str]],
+                                StdRegistryItem]] = None,
+    ) -> Optional[StdRegistryItem]:
+        return self.get_dcls_item_by_mapped_type(
+            mapped_type,
+            backend=backend,
+            external=external,
+            _builtin_only=True,
+        )
 
 STD_REGISTRY = StdRegistry()
 
@@ -146,6 +206,7 @@ def register_pfl_std(
     mapped_name: Optional[str] = None,
     mapped: Optional[Union[ModuleType, Type, Callable]] = None,
     backend: Optional[str] = "js",
+    disable_dcls_ctor: bool = False,
     _internal_disable_type_check: bool = False,
 ):
     return STD_REGISTRY.register(
@@ -153,21 +214,40 @@ def register_pfl_std(
         mapped_name=mapped_name,
         mapped=mapped,
         backend=backend,
+        disable_dcls_ctor=disable_dcls_ctor,
         _internal_disable_type_check=_internal_disable_type_check)
 
+def register_pfl_builtin_proxy(
+    func=None,
+    *,
+    mapped_name: Optional[str] = None,
+    mapped: Optional[Type] = None,
+    backend: Optional[str] = "js",
+    _internal_disable_type_check: bool = False,
+):
+    return STD_REGISTRY.register_builtin_proxy(
+        func,
+        mapped_name=mapped_name,
+        mapped=mapped,
+        backend=backend,
+        _internal_disable_type_check=_internal_disable_type_check)
 
 # compile-time system functions
 @register_pfl_std(mapped_name="compiler_print_type", backend=None)
-def compiler_print_type(x: Any) -> int:
+def compiler_print_type(x: Any) -> Any:
     raise NotImplementedError("can't be called directly.")
 
 
 @register_pfl_std(mapped_name="compiler_print_metadata", backend=None)
-def compiler_print_metadata(x: Any) -> int:
+def compiler_print_metadata(x: Any) -> Any:
     raise NotImplementedError("can't be called directly.")
 
+@register_pfl_std(mapped_name="compiler_isinstance", backend=None, mapped=isinstance)
+def compiler_isinstance(x: Any, cls: Any) -> bool:
+    raise NotImplementedError("can't be called directly.")
 
 ALL_COMPILE_TIME_FUNCS = {
     compiler_print_type,
     compiler_print_metadata,
+    compiler_isinstance,
 }

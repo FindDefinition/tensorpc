@@ -3,7 +3,7 @@ from typing import Optional, Union
 import dataclasses
 import numpy as np
 
-from tensorpc.apps.ppcl.tsim.core import NP_DTYPE_TO_PPCL
+from tensorpc.apps.ppcl.tsim.core import DTypeEnum
 from tensorpc.core.pfl.pfl_ast import BinOpType
 from .tensor import SimTensor, get_may_tensor_dtype
 
@@ -12,10 +12,11 @@ class _ExtendBinOpType(enum.IntEnum):
     MINIMUM = 1
 
 def where(cond: SimTensor, x: Union[int, float, bool, SimTensor], y: Union[int, float, bool, SimTensor]):
+    x_dtype = get_may_tensor_dtype(x)
+    y_dtype = get_may_tensor_dtype(y)
+    assert x_dtype == y_dtype, f"where(, x, y) dtype of x, y must be same, get {x_dtype.name} and {y_dtype.name}."
+
     if cond.storage is None:
-        x_dtype = get_may_tensor_dtype(x)
-        y_dtype = get_may_tensor_dtype(y)
-        assert x_dtype == y_dtype, f"where(, x, y) dtype of x, y must be same, get {x_dtype.name} and {y_dtype.name}."
         return dataclasses.replace(cond, dtype=x_dtype)
     if isinstance(x, SimTensor):
         assert x.storage is not None 
@@ -27,14 +28,18 @@ def where(cond: SimTensor, x: Union[int, float, bool, SimTensor], y: Union[int, 
         y_data = y.storage.data 
     else:
         y_data = y 
-    res_data = np.where(cond.storage.data, x_data, y_data)
+    # print("WHERE DEBUG", x_data, y_data)
+
+    res_data = np.where(cond.storage.data, x_data, y_data).astype(x_dtype.to_numpy_dtype())
     res_storage = dataclasses.replace(cond.storage, data=res_data)
-    return dataclasses.replace(cond, dtype=NP_DTYPE_TO_PPCL[res_data.dtype.type], shape=list(res_data.shape), storage=res_storage)
+    return dataclasses.replace(cond, dtype=DTypeEnum.from_numpy_dtype(res_data.dtype), shape=list(res_data.shape), storage=res_storage)
 
 def _extend_bin_op(type: _ExtendBinOpType, x: Union[int, float, bool, SimTensor], y: Union[int, float, bool, SimTensor]):
     tgt_simten: Optional[SimTensor] = None
     if isinstance(x, SimTensor):
         if x.storage is None:
+            if isinstance(y, SimTensor):
+                assert y.storage is None, "If x is SimTensor without storage, y must also be SimTensor without storage."
             # use add for dtype and shape inference
             return x._binary_base(y, BinOpType.ADD, False, False)
         tgt_simten = x
@@ -43,6 +48,8 @@ def _extend_bin_op(type: _ExtendBinOpType, x: Union[int, float, bool, SimTensor]
         x_data = x 
     if isinstance(y, SimTensor):
         if y.storage is None:
+            if isinstance(x, SimTensor):
+                assert x.storage is None, "If y is SimTensor without storage, x must also be SimTensor without storage."
             # use add for dtype and shape inference
             return y._binary_base(x, BinOpType.ADD, True, False)
         y_data = y.storage.data 
@@ -59,7 +66,7 @@ def _extend_bin_op(type: _ExtendBinOpType, x: Union[int, float, bool, SimTensor]
             # np maximum return scalar if all operand is scalar
             res_data = np.array(res_data)
         res_storage = dataclasses.replace(tgt_simten.storage, data=res_data)
-        return dataclasses.replace(tgt_simten, dtype=NP_DTYPE_TO_PPCL[res_data.dtype.type], shape=list(res_data.shape), storage=res_storage)
+        return dataclasses.replace(tgt_simten, dtype=DTypeEnum.from_numpy_dtype(res_data.dtype), shape=list(res_data.shape), storage=res_storage)
     else:
         return res_data.item()
 

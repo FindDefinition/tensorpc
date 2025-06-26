@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 import enum
 from functools import partial
-from typing import Any, Optional, Type, Union, cast, overload
+from typing import TYPE_CHECKING, Any, Optional, Type, Union, cast, overload
 import dataclasses
 import numpy as np 
 from tensorpc.core import pfl
@@ -10,7 +10,8 @@ import contextvars
 from typing_extensions import Self
 
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
-
+if TYPE_CHECKING:
+    from .memory import SimMemoryStorage
 
 class NumpyReduceType(enum.IntEnum):
     SUM = 0
@@ -84,6 +85,30 @@ class DTypeEnum(enum.IntEnum):
 
     def bit_size(self) -> int:
         return _DTYPE_TO_NUM_BITS[self]
+
+    def byte_size(self) -> int:
+        assert self.bit_size() % 8 == 0
+        return self.bit_size() // 8
+
+    @classmethod
+    def from_numpy_dtype(cls, np_dtype: np.dtype) -> 'DTypeEnum':
+        """
+        Convert a numpy dtype to a DTypeEnum.
+        """
+        if np_dtype not in NP_DTYPE_TO_PPCL:
+            raise ValueError(f"Unsupported numpy dtype: {np_dtype}")
+        return NP_DTYPE_TO_PPCL[np_dtype]
+
+    def to_numpy_dtype(self) -> np.dtype:
+        """
+        Convert a DTypeEnum to a numpy dtype.
+        """
+        dtype_mapping = get_sim_dtype_mapping()
+        if self in dtype_mapping:
+            return dtype_mapping[self]
+        if self not in PPCL_TO_NP_DTYPE:
+            raise ValueError(f"Unsupported DTypeEnum: {self}")
+        return PPCL_TO_NP_DTYPE[self]
 
 _DTYPE_TO_DTYPE_CLS = {
     DTypeEnum.float64: DTypeClassEnum.floating,
@@ -174,19 +199,19 @@ _DTYPE_CLS_TO_PROMOTION_PRIORITY_DICT = {
 
 
 NP_DTYPE_TO_PPCL = {
-    np.float32: DTypeEnum.float32,
-    np.float64: DTypeEnum.float64,
-    np.int8: DTypeEnum.int8,
-    np.int16: DTypeEnum.int16,
-    np.int32: DTypeEnum.int32,
-    np.int64: DTypeEnum.int64,
-    np.float16: DTypeEnum.float16,
+    np.dtype(np.float32): DTypeEnum.float32,
+    np.dtype(np.float64): DTypeEnum.float64,
+    np.dtype(np.int8): DTypeEnum.int8,
+    np.dtype(np.int16): DTypeEnum.int16,
+    np.dtype(np.int32): DTypeEnum.int32,
+    np.dtype(np.int64): DTypeEnum.int64,
+    np.dtype(np.float16): DTypeEnum.float16,
 
-    np.uint8: DTypeEnum.uint8,
-    np.uint16: DTypeEnum.uint16,
-    np.uint32: DTypeEnum.uint32,
-    np.uint64: DTypeEnum.uint64,
-    np.bool_: DTypeEnum.bool_,
+    np.dtype(np.uint8): DTypeEnum.uint8,
+    np.dtype(np.uint16): DTypeEnum.uint16,
+    np.dtype(np.uint32): DTypeEnum.uint32,
+    np.dtype(np.uint64): DTypeEnum.uint64,
+    np.dtype(np.bool_): DTypeEnum.bool_,
 }
 
 PPCL_TO_NP_DTYPE: dict[DTypeEnum, np.dtype] = {v: k for k, v in NP_DTYPE_TO_PPCL.items()}
@@ -198,21 +223,43 @@ def _calcuate_dtype_priority(dtype: DTypeEnum) -> int:
     dtype_priority = dtype_priority_dict[dtype]
     return cls_priority + dtype_priority
 
+def _get_default_sim_dtype_mapping() -> dict[DTypeEnum, np.dtype]:
+    """
+    Returns the default dtype mapping for tensor simulation.
+    This is used to override the dtype run in numpy.
+    """
+    return {
+        DTypeEnum.float8e5: np.dtype(np.float32),
+        DTypeEnum.float8e5b16: np.dtype(np.float32),
+        DTypeEnum.float8e4nv: np.dtype(np.float32),
+        DTypeEnum.float8e4b8: np.dtype(np.float32),
+        DTypeEnum.float8e4b15: np.dtype(np.float32),
+        DTypeEnum.float16: np.dtype(np.float32),
+        DTypeEnum.bfloat16: np.dtype(np.float32),
+    }
+
 @dataclasses.dataclass 
 class TensorSimConfig:
     meta_only: bool = False
     default_int_dtype: DTypeEnum = DTypeEnum.int64
     default_float_dtype: DTypeEnum = DTypeEnum.float32
     record_memory: bool = False
+    # used to override dtype runned in numpy.
+    # e.g. {DTypeEnum.float8: np.float32} can be used
+    # to run float8 as float32 in numpy.
+    dtype_mapping: dict[DTypeEnum, np.dtype] = dataclasses.field(
+        default_factory=_get_default_sim_dtype_mapping)
 
 class TensorSimContext:
     def __init__(self, grid_id: Sequence[int], grid_size: Sequence[int], 
             simd_group_id: Optional[Sequence[int]] = None, simd_group_size: Optional[Sequence[int]] = None, 
-            cfg: Optional[TensorSimConfig] = None):
+            cfg: Optional[TensorSimConfig] = None, global_mem: Optional["SimMemoryStorage"] = None):
         self.grid_size = grid_size
         self.simd_group_size = simd_group_size
         self.grid_id = grid_id
         self.simd_group_id = simd_group_id
+        # required for ptr of ptr.
+        self.global_mem = global_mem
 
         if cfg is None:
             cfg = TensorSimConfig()
@@ -226,13 +273,14 @@ _TENSOR_SIM_CONTEXT: contextvars.ContextVar[
 @contextlib.contextmanager
 def enter_tensorsim_context(grid_id: Sequence[int], grid_size: Sequence[int], 
             simd_group_id: Optional[Sequence[int]] = None, simd_group_size: Optional[Sequence[int]] = None, 
-            cfg: Optional[TensorSimConfig] = None):
+            cfg: Optional[TensorSimConfig] = None, global_mem: Optional["SimMemoryStorage"] = None):
     ctx = TensorSimContext(
         grid_id=grid_id,
         grid_size=grid_size,
         simd_group_id=simd_group_id,
         simd_group_size=simd_group_size,
-        cfg=cfg
+        cfg=cfg,
+        global_mem=global_mem,
     )
     token = _TENSOR_SIM_CONTEXT.set(ctx)
     try:
@@ -278,3 +326,10 @@ def get_default_base_dtype(type: Union[Type[int], Type[float], Type[bool]]):
             return DTypeEnum.float32
         return ctx.cfg.default_float_dtype
 
+def get_sim_dtype_mapping():
+    ctx = _TENSOR_SIM_CONTEXT.get()
+    if ctx is None:
+        return {}
+    if ctx.cfg.dtype_mapping is None:
+        return {}
+    return ctx.cfg.dtype_mapping

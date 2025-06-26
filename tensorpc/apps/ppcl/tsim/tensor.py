@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 import enum
 from functools import partial
+import io
 from typing import Any, Optional, Type, Union, cast, overload
 import dataclasses
 import numpy as np 
@@ -10,7 +11,7 @@ import contextvars
 from typing_extensions import Self
 
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
-from tensorpc.apps.ppcl.tsim.core import DTypeEnum, PPCL_TO_NP_DTYPE, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType, NP_DTYPE_TO_PPCL
+from tensorpc.apps.ppcl.tsim.core import DTypeEnum, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType
 
 @dataclasses.dataclass
 class SimTensorStorage:
@@ -19,7 +20,23 @@ class SimTensorStorage:
     # then load from shared memory.
     # both global indices and shared indices will be stored here.
     indices: dict[str, np.ndarray] = dataclasses.field(default_factory=dict)
-    
+
+    def __repr__(self):
+        if self.data.dtype == np.bool_ and self.data.ndim == 2 and self.data.shape[0] <= 128 and self.data.shape[1] <= 128:
+            ss = io.StringIO()
+            for i, row in enumerate(self.data):
+                row_str = f"{i:03d}"
+                print(f"[{row_str}] ", end="", file=ss)
+                for bit in row:
+                    print(int(bit), end="", file=ss)  # Print 0 or 1 without a newline
+                print(file=ss)  # Print a newline after each row
+            return f"{self.__class__.__name__}:\n{ss.getvalue()}"
+
+        return f"{self.__class__.__name__}:\n{self.data}"
+
+    def clone(self) -> Self:
+        return dataclasses.replace(self, data=self.data.copy(), indices={k: v.copy() for k, v in self.indices.items()}) 
+
     def __post_init__(self):
         assert not isinstance(self.data, np.number)
 
@@ -40,18 +57,22 @@ class SimTensorStorage:
                     none_cnt += 1
 
             new_storage_inds = {}
-            for k, indices in new_storage.indices.items():
+            for k in new_storage.indices.keys():
+                indices, element_shape = self.get_unflatten_inds(k)
+
                 new_slices = [slice(None)] * (indices.ndim - self.data.ndim)
                 if ellipsis_found:
                     new_inds = (*inds, *new_slices) 
                 else:
                     new_inds = (*inds, ..., *new_slices) 
-                new_storage_inds[k] = indices[new_inds]
+                new_storage_inds[k] = indices[new_inds].reshape(-1, *element_shape)
             new_storage.indices = new_storage_inds
         else:
-            new_storage.indices = {
-                k: x[inds] for k, x in new_storage.indices.items()
-            }
+            new_storage_inds = {}
+            for k, indices in new_storage.indices.items():
+                indices, element_shape = self.get_unflatten_inds(k)
+                new_storage_inds[k] = indices[inds].reshape(-1, *element_shape)
+            new_storage.indices = new_storage_inds
         return new_storage
 
     def setitem(self, inds: Any, value: Union[Self, int, float, bool]):
@@ -73,7 +94,8 @@ class SimTensorStorage:
                 if item is None:
                     none_cnt += 1
 
-            for k, indices in self.indices.items():
+            for k in self.indices.keys():
+                indices, element_shape = self.get_unflatten_inds(k)
                 new_slices = [slice(None)] * (indices.ndim - self.data.ndim)
                 if ellipsis_found:
                     new_inds = (*inds, *new_slices) 
@@ -81,31 +103,76 @@ class SimTensorStorage:
                     new_inds = (*inds, ..., *new_slices) 
                 if isinstance(value, SimTensor):
                     assert value.storage is not None 
-                    self.indices[k][new_inds] = value.storage.indices[k]
+                    indices[new_inds] = value.storage.indices[k]
                 else:
-                    self.indices[k][new_inds] = -1
+                    indices[new_inds] = -1
+                self.indices[k] = indices.reshape(-1, *element_shape)
         else:
-            for k, indices in self.indices.items():
+            for k in self.indices.keys():
+                indices, element_shape = self.get_unflatten_inds(k)
                 if isinstance(value, SimTensor):
                     assert value.storage is not None 
-                    self.indices[k][inds] = value.storage.indices[k]
+                    indices[inds] = value.storage.indices[k]
                 else:
-                    self.indices[k][inds] = -1
+                    indices[inds] = -1
+                self.indices[k] = indices.reshape(-1, *element_shape)
 
-    def broadcast(self, new_data: np.ndarray, other_storage: Self) -> Self:
-        new_storage = dataclasses.replace(self, data=new_data) 
-        assert len(self.indices) == len(other_storage.indices), \
-            "Cannot broadcast storage with different number of indices"
-        new_storage.indices = {}
-        for k, indices in self.indices.items():
-            other_indices = other_storage.indices[k]
-            if indices.ndim < other_indices.ndim:
-                indices = indices[tuple([...] + [None] * (other_indices.ndim - indices.ndim))]
-            elif indices.ndim > other_indices.ndim:
-                other_indices = other_indices[tuple([...] + [None] * (indices.ndim - other_indices.ndim))]
-            res_indices = np.broadcast(indices, other_indices)
-            new_storage.indices[k] = (cast(np.ndarray, res_indices))
+    @staticmethod 
+    def get_reshaped_shape(data_shape: Sequence[int], new_shape: Sequence[int]) -> Sequence[int]:
+        """
+        Calculate the new shape after reshaping.
+        If -1 is found, it will be replaced with the product of the remaining dimensions.
+        """
+        new_shape_list = list(new_shape)
+        found_idx = -1
+        total_prod = 1
+        total_prod_no_minus_one = 1
+        for i, dim in enumerate(new_shape_list):
+            if dim == -1:
+                if found_idx >= 0:
+                    raise ValueError("Only one -1 is allowed in new shape")
+                found_idx = i
+            else:
+                total_prod_no_minus_one *= dim
+            total_prod *= dim 
+        if found_idx >= 0:
+            assert total_prod_no_minus_one > 0, "don't support reshape with zero fornow."
+            assert total_prod % total_prod_no_minus_one == 0, \
+                f"Cannot reshape tensor with shape {data_shape} to {new_shape_list}, "
+            new_shape_list[found_idx] = total_prod // total_prod_no_minus_one
+        return new_shape_list
+
+    def reshape(self, shape: Sequence[int]):
+        new_shape_list = self.get_reshaped_shape(self.data.shape, shape)
+        new_data = self.data.reshape(new_shape_list)
+        return dataclasses.replace(self, data=new_data)
+
+    @staticmethod 
+    def get_permuted_shape(data_shape: Sequence[int], new_order: Sequence[int]) -> Sequence[int]:
+        """
+        Calculate the new shape after permuting the dimensions.
+        """
+        assert len(new_order) == len(data_shape)
+        return [data_shape[i] for i in new_order]
+
+    def permute(self, new_order: Sequence[int]):
+        assert len(new_order) == self.data.ndim
+        new_data = self.data.transpose(new_order)
+        new_inds = {}
+        for k in self.indices.keys():
+            indices, element_shape = self.get_unflatten_inds(k)
+            new_indices = indices.transpose(list(new_order) + list(range(len(new_order), len(new_order) + len(element_shape))))
+            new_inds[k] = new_indices.reshape(-1, *element_shape)
+        new_storage = dataclasses.replace(self, data=new_data, indices=new_inds)
         return new_storage
+
+    def get_unflatten_inds(self, k: str) -> tuple[np.ndarray, Sequence[int]]:
+        """
+        Get the unflattened indices for a given key.
+        """
+        indices = self.indices[k]
+        element_shape = indices.shape[1:]
+        return indices.reshape(*self.data.shape, *element_shape), element_shape
 
     def reduce(self, new_data: np.ndarray, axes: list[int], keepdims: bool) -> Self:
         new_storage = dataclasses.replace(self, data=new_data) 
@@ -120,7 +187,8 @@ class SimTensorStorage:
                 new_shape.append(dim)
                 permute_inds.append(i)
         old_ndim = self.data.ndim
-        for k, indices in self.indices.items():
+        for k in self.indices.keys():
+            indices, element_shape = self.get_unflatten_inds(k)
             permute_inds_cur = permute_inds.copy()
             pure_inds_ndim = self.data.ndim - indices.ndim
             permute_inds_cur.extend(c + old_ndim for c in range(pure_inds_ndim))
@@ -128,8 +196,14 @@ class SimTensorStorage:
             new_indices = indices.transpose(permute_inds_cur)
             new_indices_shape = list(new_data.shape) + list(new_indices.shape)[-len(axes) - pure_inds_ndim:]
             new_indices = new_indices.reshape(new_indices_shape) 
-            new_storage.indices[k] = (cast(np.ndarray, new_indices))
+            new_storage.indices[k] = (cast(np.ndarray, new_indices)).reshape(-1, *element_shape)
         new_storage.data = new_data
+        return new_storage
+
+    def concat(self, other_list: list[Self], axis: int) -> Self:
+        new_data = np.concatenate((self.data, *[o.data for o in other_list]), axis=axis)
+        # TODO use full-element-trace instead of indices system. no need to implement indices here.
+        new_storage = dataclasses.replace(self, data=new_data, indices={})
         return new_storage
 
 @dataclasses.dataclass
@@ -143,9 +217,18 @@ class SimTensorBase:
     # if storage is None, only meta inference is supported.
     storage: Optional[SimTensorStorage] = None
 
+    def __repr__(self):
+        shape_str = ",".join(map(str, self.shape))
+        return f"{self.__class__.__name__}([{shape_str}|{DTypeEnum(self.dtype).name}|{self.storage}])"
+
     def get_storage_checked(self) -> SimTensorStorage:
         assert self.storage is not None 
         return self.storage 
+
+    def clone(self) -> Self:
+        new_storage = self.storage.clone() if self.storage is not None else None
+        # memory storage is not cloned, it is shared.
+        return dataclasses.replace(self, storage=new_storage) 
 
     @staticmethod
     def dtype_promotion(*args: int):
@@ -174,7 +257,7 @@ class SimTensorBase:
 
     @staticmethod
     def dtype_to_np(dtype: int) -> np.dtype:
-        return PPCL_TO_NP_DTYPE[DTypeEnum(dtype)]
+        return DTypeEnum(dtype).to_numpy_dtype()
 
     def is_scalar(self) -> bool:
         return len(self.shape) == 0
@@ -265,7 +348,7 @@ class SimTensorBase:
             return dataclasses.replace(self, dtype=dtype)
         if self.dtype == dtype:
             return dataclasses.replace(self)
-        new_data = self.storage.data.astype(PPCL_TO_NP_DTYPE[DTypeEnum(dtype)])
+        new_data = self.storage.data.astype(DTypeEnum(dtype).to_numpy_dtype())
         new_storage = dataclasses.replace(self.storage, data=new_data)
         res = dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=dtype)
         res.storage = new_storage
@@ -277,27 +360,25 @@ class SimTensorBase:
         else:
             new_shape_list = list(new_shape)
         # calc new shape, find -1 first
-        found_idx = -1
-        total_prod = 1
-        total_prod_no_minus_one = 1
-        for i, dim in enumerate(new_shape_list):
-            if dim == -1:
-                if found_idx >= 0:
-                    raise ValueError("Only one -1 is allowed in new shape")
-                found_idx = i
-            else:
-                total_prod_no_minus_one *= dim
-            total_prod *= dim 
-        if found_idx >= 0:
-            assert total_prod_no_minus_one > 0, "don't support reshape with zero fornow."
-            assert total_prod % total_prod_no_minus_one == 0, \
-                f"Cannot reshape tensor with shape {self.shape} to {new_shape_list}, "
-            new_shape_list[found_idx] = total_prod // total_prod_no_minus_one
+        new_shape_list = SimTensorStorage.get_reshaped_shape(self.shape, new_shape_list)
         if self.storage is None:
             return dataclasses.replace(self, shape=list(map(int, new_shape_list)))
-        new_data = self.storage.data.reshape(new_shape)
-        new_storage = dataclasses.replace(self.storage, data=new_data)
-        res = dataclasses.replace(self, shape=list(map(int, new_data.shape)))
+        new_storage = self.storage.reshape(new_shape_list)
+        res = dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)))
+        res.storage = new_storage
+        return res
+
+    def permute(self, new_order: Union[Sequence[int], int], *orders: int) -> Self:
+        if isinstance(new_order, int):
+            new_order_list = [new_order, *orders]
+        else:
+            new_order_list = list(new_order)
+        # calc new shape, find -1 first
+        new_shape_list = SimTensorStorage.get_permuted_shape(self.shape, new_order_list)
+        if self.storage is None:
+            return dataclasses.replace(self, shape=list(map(int, new_shape_list)))
+        new_storage = self.storage.permute(new_order_list)
+        res = dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)))
         res.storage = new_storage
         return res
 
@@ -353,7 +434,7 @@ class SimTensorBase:
                 if op_type == BinOpType.MATMUL:
                     assert len(self.shape) >= 2 and len(other.shape) >= 2
                     new_shape_no_mm = np.broadcast_shapes(self.shape[:-2], other.shape[:-2])
-                    assert self.shape[-1] == other.shape[-2], "matmul shape mismatch"
+                    assert self.shape[-1] == other.shape[-2], f"matmul shape mismatch, {self.shape} != {other.shape}"
                     new_shape = list(new_shape_no_mm) + [self.shape[-2], other.shape[-1]]
                 else:
                     new_shape = np.broadcast_shapes(self.shape, other.shape)
@@ -365,7 +446,7 @@ class SimTensorBase:
                 # TODO : handle scalar dtype
                 if isinstance(other, int):
                     other_dtype = get_default_int_dtype()
-                elif isinstance(other, int):
+                elif isinstance(other, float):
                     other_dtype = get_default_float_dtype()
                 elif isinstance(other, bool):
                     other_dtype = DTypeEnum.bool_
@@ -428,7 +509,7 @@ class SimTensorBase:
                 res = dataclasses.replace(res_replace_tgt, shape=list(map(int, new_data.shape)), dtype=pointer_dtype, storage=new_storage)
             else:
                 new_storage = dataclasses.replace(self.storage, data=new_data, indices={})
-                res = dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=NP_DTYPE_TO_PPCL[new_data.dtype.type])
+                res = dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=DTypeEnum.from_numpy_dtype(new_data.dtype))
                 res.storage = new_storage
             return res
 
@@ -469,9 +550,35 @@ class SimTensorBase:
             raise ValueError(f"Unsupported compare operation: {op_type}")
         assert isinstance(new_data, np.ndarray)
         new_storage = dataclasses.replace(self.storage, data=new_data)
-        res = dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=NP_DTYPE_TO_PPCL[new_data.dtype.type])
+        res = dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=DTypeEnum.from_numpy_dtype(new_data.dtype))
         res.storage = new_storage
         return res
+
+    def concat(self, tensors: Sequence[Self], axis: int = 0) -> Self:
+        """
+        Concatenate a sequence of tensors along a specified axis.
+        """
+        tensors = [self, *tensors]
+        if len(tensors) == 0:
+            raise ValueError("Cannot concatenate an empty sequence of tensors")
+        if axis < 0:
+            axis += len(tensors[0].shape)
+        assert all(isinstance(t, SimTensorBase) for t in tensors), "All inputs must be SimTensor instances"
+        if any(t.storage is None for t in tensors):
+            # meta inference. validate shapes
+            first_shape_no_cat = list(tensors[0].shape)
+            first_shape_no_cat[axis] = 0  # set the concatenation axis to 0
+            total_sum_axis = 0
+            for t in tensors:
+                t_shape_no_cat = list(t.shape)
+                total_sum_axis += t_shape_no_cat[axis]
+                t_shape_no_cat[axis] = 0
+                assert t_shape_no_cat == first_shape_no_cat, "All tensors must have the same shape except axis for concat"
+                assert t.dtype == tensors[0].dtype, "All tensors must have the same dtype for concat"
+            first_shape_no_cat[axis] = total_sum_axis
+            return dataclasses.replace(self, shape=first_shape_no_cat, dtype=tensors[0].dtype, storage=None)
+        new_storage = tensors[0].get_storage_checked().concat([t.get_storage_checked() for t in tensors], axis)
+        return dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)), dtype=tensors[0].dtype, storage=new_storage)
 
 @dataclasses.dataclass
 class SimTensor(SimTensorBase):
@@ -479,6 +586,8 @@ class SimTensor(SimTensorBase):
     A CPU/Meta Tensor that can be used for computing simulation or metadata inference.
     
     """
+    def __repr__(self):
+        return super().__repr__()
 
     def _reduce_meta_only(self, axes: Optional[Sequence[int]] = None, keepdims: bool = False) -> Self:
         if axes is None:
@@ -692,7 +801,26 @@ def zeros(shape: Sequence[int], dtype: int) -> SimTensor:
     if meta_only:
         # only meta inference is supported
         return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=None)
-    data = np.zeros(shape, dtype=PPCL_TO_NP_DTYPE[DTypeEnum(dtype)])
+    data = np.zeros(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
+    storage = SimTensorStorage(data=data)
+    return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
+
+def full(shape: Sequence[int], value: Union[int, float, bool], dtype: int) -> SimTensor:
+    """
+    Create a tensor filled with zeros.
+    """
+    parse_ctx = pfl.get_parse_context()
+    meta_only = False
+    if parse_ctx is not None:
+        meta_only = True 
+    if not meta_only:
+        ctx = get_tensorsim_context()
+        if ctx is not None and ctx.cfg.meta_only:
+            meta_only = True 
+    if meta_only:
+        # only meta inference is supported
+        return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=None)
+    data = np.full(shape, value, dtype=DTypeEnum(dtype).to_numpy_dtype())
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
 
@@ -711,7 +839,7 @@ def ones(shape: Sequence[int], dtype: int) -> SimTensor:
     if meta_only:
         # only meta inference is supported
         return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=None)
-    data = np.ones(shape, dtype=PPCL_TO_NP_DTYPE[DTypeEnum(dtype)])
+    data = np.ones(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
 
@@ -730,7 +858,7 @@ def empty(shape: Sequence[int], dtype: int) -> SimTensor:
     if meta_only:
         # only meta inference is supported
         return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=None)
-    data = np.empty(shape, dtype=PPCL_TO_NP_DTYPE[DTypeEnum(dtype)])
+    data = np.empty(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
 
@@ -768,336 +896,10 @@ def arange(start: int, stop: Optional[int] = None, step: int = 1, dtype: int = D
     if stop is None:
         stop = start
         start = 0
-    data = np.arange(start, stop, step, dtype=PPCL_TO_NP_DTYPE[DTypeEnum(dtype)])
+    data = np.arange(start, stop, step, dtype=DTypeEnum(dtype).to_numpy_dtype())
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, data.shape)), dtype=dtype, storage=storage)
 
-@dataclasses.dataclass(kw_only=True)
-class SimMemoryStorage(SimTensorStorage):
-    name: str
-    def _boundry_check(self, pointer: Union["SimPointerTensor", "SimPointerScalarBase"], mask: Optional[SimTensor] = None):
-        if pointer.storage is None:
-            return 
-        if mask is not None:
-            if mask.storage is None:
-                return None 
-            assert mask.is_boolean(), "Mask must be boolean tensor"
-            # check mask shape is broadcastable with pointer shape
-            np.broadcast_shapes(mask.shape, pointer.shape)
-            assert mask.ndim <= pointer.ndim
-            mask_shape_rev = mask.shape[::-1]
-            pointer_shape_rev = pointer.shape[::-1]
-            # pointer can't be broadcasted.
-            for j in range(mask.ndim):
-                assert mask_shape_rev[j] <= pointer_shape_rev[j]
-
-        data_raw = self.data.view(pointer.dtype_to_np(pointer.dtype)).reshape(-1, pointer.num_element)
-        if mask is not None and mask.storage is not None:
-            pointer_data = pointer.storage.data[mask.storage.data]
-        else:
-            pointer_data = pointer.storage.data
-        pointer_data_max = pointer_data.max()
-        pointer_data_min = pointer_data.min()
-        if pointer_data_min < 0 or pointer_data_max >= data_raw.shape[0]:
-            raise IndexError(f"Pointer data {pointer_data}({pointer_data_max}) out of bounds for memory size {data_raw.shape[0]}(shape={self.data.shape})")
-
-
-    def load(self, pointer: Union["SimPointerTensor", "SimPointerScalarBase"], mask: Optional[Union[SimTensor, bool]] = None, other: Optional[Union[SimTensor, float, int, bool]] = None) -> SimTensor:
-        if pointer.storage is None:
-            assert not isinstance(pointer, SimPointerScalarBase)
-            return SimTensor(shape=pointer.shape, dtype=pointer.dtype)
-        if PPCL_TO_NP_DTYPE[DTypeEnum(pointer.dtype)] != self.data.dtype:
-            raise NotImplementedError
-        if mask is not None:
-            if isinstance(mask, bool):
-                mask_ten = zeros([], DTypeEnum.bool_)
-                mask_ten.get_storage_checked().data[:] = mask 
-                mask = mask_ten
-            mask = broadcast_to(mask, pointer.shape)
-        self._boundry_check(pointer, mask)
-        output = empty([*pointer.shape, pointer.num_element], pointer.dtype)
-        output_data = output.get_storage_checked().data
-        data_raw = self.data.view(pointer.dtype_to_np(pointer.dtype)).reshape(-1, pointer.num_element)
-        pointer_data = pointer.storage.data.reshape(-1)
-        loaded_indices = pointer.storage.data[..., None] * pointer.num_element + np.arange(pointer.num_element, dtype=np.int32)
-        if mask is None:
-            output_data[:] = data_raw[pointer_data].reshape(*pointer.shape, pointer.num_element)
-        else:
-            mask_view = mask.get_storage_checked().data.reshape(-1)
-            output_data.reshape(-1, pointer.num_element)[mask_view] = data_raw[pointer_data[mask_view]]
-            if other is not None:
-                if isinstance(other, SimTensor):
-                    output_data.reshape(-1, pointer.num_element)[~mask_view] = other.get_storage_checked().data.reshape(-1, pointer.num_element)[~mask_view]
-                else:
-                    output_data.reshape(-1, pointer.num_element)[~mask_view] = other
-            loaded_indices.reshape(-1, pointer.num_element)[~mask_view] = -1
-        if pointer.num_element == 1:
-            loaded_indices = loaded_indices[..., 0]
-            output = output[..., 0]
-        res_indices: dict[str, np.ndarray] = output.get_storage_checked().indices
-        for k, inds in self.indices.items():
-            pure_inds_shape = inds.shape[len(self.data.shape):]
-            inds = inds.reshape(-1, *pure_inds_shape)
-            if mask is None:
-                inds = inds[pointer_data]
-            else:
-                mask_view = mask.get_storage_checked().data.reshape(-1)
-
-                new_inds = np.full((*pointer.shape, pointer.num_element, *pure_inds_shape), -1, dtype=np.int32)
-                new_inds_flatten = new_inds.reshape(-1, *pure_inds_shape)
-                new_inds_flatten[mask_view] = inds[pointer_data[mask_view]]
-                inds = new_inds
-            if pointer.num_element == 1:
-                inds = inds.reshape(*pointer.shape, *pure_inds_shape)
-            else:
-                inds = inds.reshape(*pointer.shape, pointer.num_element, *pure_inds_shape)
-            res_indices[k] = (inds)
-        res_indices[self.name] = (loaded_indices)
-        return output
-
-
-    def store(self, pointer: Union["SimPointerTensor", "SimPointerScalarBase"], value: Union[SimTensor, int, float], mask: Optional[Union[SimTensor, bool]] = None):
-        assert pointer.num_element == 1, "Pointer must be a single element pointer for now"
-        if pointer.storage is None:
-            return 
-        if PPCL_TO_NP_DTYPE[DTypeEnum(pointer.dtype)] != self.data.dtype:
-            raise NotImplementedError
-        if isinstance(value, SimTensor):
-            # WARNING: only write indices when value is Tensor.
-            # otherwise unchanged.
-            if value.storage is None:
-                return 
-            if not self.indices:
-                # lazy create indices based on first store value
-                for k, value_inds in value.storage.indices.items():
-                    pure_inds_shape = value_inds.shape[len(value.shape):]
-                    self.indices[k] = (np.full([*self.data.shape, *pure_inds_shape], -1, dtype=np.int32)) 
-            else:
-                # validate indices
-                if len(self.indices) != len(value.storage.indices):
-                    raise ValueError("Cannot store value with different number of indices")
-                for k, value_inds in value.storage.indices.items():
-                    pure_inds_shape = value_inds.shape[len(value.shape):]
-                    pure_this_shape = self.indices[k].shape[len(self.data.shape):]
-                    if pure_inds_shape != pure_this_shape:
-                        raise ValueError(f"Indices shape mismatch: {pure_inds_shape} vs {pure_this_shape}")
-        
-        if isinstance(mask, bool):
-            mask_ten = zeros([], DTypeEnum.bool_)
-            mask_ten.get_storage_checked().data[:] = mask 
-            mask = mask_ten
-        if not isinstance(value, SimTensor):
-            value_ten = zeros([], get_default_base_dtype(type(value)))
-            value_ten.get_storage_checked().data[:] = value 
-            value = value_ten
-        assert value.storage is not None 
-        self._boundry_check(pointer, mask)
-        data_raw = self.data.view(pointer.dtype_to_np(pointer.dtype)).reshape(-1)
-        pointer_data = pointer.storage.data.reshape(-1)
-        stored_data_raw = value.storage.data.reshape(-1)
-        if mask is None:
-            data_raw[pointer_data] = stored_data_raw
-        else:
-            mask_view = mask.get_storage_checked().data.reshape(-1)
-            data_raw[pointer_data[mask_view]] = stored_data_raw[mask_view]
-        for k, inds in self.indices.items():
-            value_inds = value.storage.indices[k]
-            inds = inds.reshape(-1, *(inds.shape[len(self.data.shape):]))
-            if mask is None:
-                inds[pointer_data] = value_inds.reshape(-1)
-            else:
-                mask_view = mask.get_storage_checked().data.reshape(-1)
-                inds[pointer_data[mask_view]] = value_inds.reshape(-1)[mask_view]
-
-
-def create_sim_memory(name: str, data: np.ndarray):
-    return SimMemoryStorage(data, name=name)
-
-@dataclasses.dataclass
-class SimPointerTensor(SimTensorBase):
-    # pointer tensor is always int64*, dtype is element type.
-    # pointer of pointer is unsupported currently.
-    # num_element: for vector load, only used when we directly target to raw backend, e.g. CUDA.
-    num_element: int = 1
-    memory_storage: Optional[SimMemoryStorage] = None
-    def __post_init__(self):
-        if self.storage is not None:
-            assert self.storage.data.dtype == np.int64, "Pointer tensor storage must be of int64 type"
-
-    def to_meta_tensor(self):
-        return dataclasses.replace(self, storage=None, memory_storage=None)
-
-    def is_pointer(self) -> bool:
-        return True
-
-    def get_memory_storage_checked(self) -> SimMemoryStorage:
-        if self.memory_storage is None:
-            raise ValueError("Pointer tensor does not have a memory storage")
-        return self.memory_storage
-
-    def load(self, mask: Optional[Union[bool, SimTensor]] = None, other: Optional[Union[SimTensor, float, int, bool]] = None) -> SimTensor:
-        if self.memory_storage is None:
-            # create a meta tensor from self
-            return SimTensor(shape=self.shape, dtype=self.dtype, storage=None)
-        return self.memory_storage.load(self, mask, other)
-
-    def store(self, value: Union[SimTensor, int, float], mask: Optional[Union[bool, SimTensor]] = None):
-        if self.memory_storage is None:
-            return 
-        return self.memory_storage.store(self, value, mask)
-
-    def __add__(self, other: Union[SimTensor, int]) -> Self: 
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, False)
-        assert isinstance(res, SimPointerTensor)
-        return res
-    def __iadd__(self, other: Union[SimTensor, int]) -> Self: 
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, False, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __radd__(self, other: Union[SimTensor, int]) -> Self:
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __sub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, False)
-        assert isinstance(res, SimPointerTensor)
-        return res
-    def __isub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, False, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-    def __rsub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-@dataclasses.dataclass
-class SimPointerScalarBase(SimTensorBase):
-    # pointer tensor is always int64*, dtype is element type.
-    # pointer of pointer is unsupported currently.
-    num_element: int = 1
-    memory_storage: Optional[SimMemoryStorage] = None
-    def __post_init__(self):
-        assert self.is_scalar()
-        if self.storage is not None:
-            assert self.storage.data.dtype == np.int64, "Pointer tensor storage must be of int64 type"
-
-    def to_meta_tensor(self):
-        return dataclasses.replace(self, storage=None, memory_storage=None)
-
-    def is_pointer(self) -> bool:
-        return True
-
-    def get_memory_storage_checked(self) -> SimMemoryStorage:
-        if self.memory_storage is None:
-            raise ValueError("Pointer tensor does not have a memory storage")
-        return self.memory_storage
-
-    def __add__(self, other: Union[SimTensor, int]) -> Self: 
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, False)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __iadd__(self, other: Union[SimTensor, int]) -> Self: 
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, False, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __radd__(self, other: Union[SimTensor, int]) -> Self:
-        res = self._binary_base(cast(Self, other), BinOpType.ADD, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __sub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, False)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __isub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, False, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-    def __rsub__(self, other: Union[SimTensor, int]) -> Self:
-        res =  self._binary_base(cast(Self, other), BinOpType.SUB, True)
-        assert isinstance(res, SimPointerTensor)
-        return res
-
-
-@dataclasses.dataclass
-class SimPointerScalarFloat(SimPointerScalarBase):
-    def load(self, mask: Optional[bool] = None, other: Optional[Union[float, int]] = None) -> float:
-        if self.memory_storage is None or self.storage is None:
-            raise ValueError("can't load scalar meta")
-        res = self.memory_storage.load(self, mask, other)
-        assert res.is_scalar()
-        assert res.storage is not None
-        return res.storage.data.item()
-
-    def store(self, value: Union[float, int], mask: Optional[bool] = None):
-        if self.memory_storage is None:
-            return 
-        return self.memory_storage.store(self, value, mask)
-
-@dataclasses.dataclass
-class SimPointerScalarInt(SimPointerScalarBase):
-    def load(self, mask: Optional[bool] = None, other: Optional[Union[float, int]] = None) -> int:
-        if self.memory_storage is None or self.storage is None:
-            raise ValueError("can't load scalar meta")
-        res = self.memory_storage.load(self, mask, other)
-        assert res.is_scalar()
-        assert res.storage is not None
-        return res.storage.data.item()
-
-    def store(self, value: Union[float, int], mask: Optional[bool] = None):
-        if self.memory_storage is None:
-            return 
-        return self.memory_storage.store(self, value, mask)
-
-def create_pointer_tensor_meta(dtype: int, shape: list[int], num_element: int = 1) -> SimPointerTensor:
-    """ Create a pointer tensor with a single scalar value.
-    """
-    return SimPointerTensor(shape=shape, dtype=dtype, num_element=num_element, storage=None)
-
-def create_pointer_scalar_meta(dtype: int, num_element: int = 1) -> Union[SimPointerScalarInt, SimPointerScalarFloat]:
-    """ Create a pointer tensor with a single scalar value.
-    """
-    if DTypeEnum(dtype).is_floating_type():
-        return SimPointerScalarFloat(shape=[], dtype=dtype, num_element=num_element)
-    else:
-        return SimPointerScalarInt(shape=[], dtype=dtype, num_element=num_element)
-
-def create_pointer_tensor(dtype: int, ptr: Union[np.ndarray, int], memory: SimMemoryStorage, num_element: int = 1) -> SimPointerTensor:
-    """ Create a pointer tensor with a single scalar value.
-    """
-    if not isinstance(ptr, np.ndarray):
-        assert ptr >= 0
-    assert memory is not None, "Memory storage must be provided for pointer tensors in sim mode"
-    if isinstance(ptr, np.ndarray):
-        assert ptr.dtype == np.int64
-        data = ptr
-    else:
-        data = np.array(ptr, dtype=np.int64)
-    storage = SimTensorStorage(data=data)
-    ptr_dtype_np = PPCL_TO_NP_DTYPE[DTypeEnum(dtype)]
-    assert ptr_dtype_np == memory.data.dtype.type, "Pointer tensor dtype must match memory storage dtype"
-    return SimPointerTensor(shape=list(data.shape), dtype=dtype, num_element=num_element, storage=storage, memory_storage=memory)
-
-def create_pointer_scalar(dtype: int, ptr: int, memory: SimMemoryStorage, num_element: int = 1) -> Union[SimPointerScalarInt, SimPointerScalarFloat]:
-    """ Create a pointer tensor with a single scalar value.
-    """
-    assert ptr >= 0
-    assert memory is not None, "Memory storage must be provided for pointer tensors in sim mode"
-    data = np.array(ptr, dtype=np.int64)
-    storage = SimTensorStorage(data=data)
-    ptr_dtype_np = PPCL_TO_NP_DTYPE[DTypeEnum(dtype)]
-    assert ptr_dtype_np == memory.data.dtype.type, "Pointer tensor dtype must match memory storage dtype"
-    if DTypeEnum(dtype).is_floating_type():
-        return SimPointerScalarFloat(shape=[], dtype=dtype, num_element=num_element, storage=storage, memory_storage=memory)
-    else:
-        return SimPointerScalarInt(shape=[], dtype=dtype, num_element=num_element, storage=storage, memory_storage=memory)
 
 def get_may_tensor_dtype(x: Union[int, float, bool, SimTensor]):
     if isinstance(x, bool):
@@ -1109,4 +911,24 @@ def get_may_tensor_dtype(x: Union[int, float, bool, SimTensor]):
     else:
         return DTypeEnum(x.dtype)
 
+
+def from_numpy(arr: np.ndarray) -> SimTensor:
+    """
+    Create a SimTensor from a numpy array.
+    """
+    dtype = DTypeEnum.from_numpy_dtype(arr.dtype)
+    assert isinstance(arr, np.ndarray), "Input must be a numpy array"
+    parse_ctx = pfl.get_parse_context()
+    meta_only = False
+    if parse_ctx is not None:
+        meta_only = True 
+    if not meta_only:
+        ctx = get_tensorsim_context()
+        if ctx is not None and ctx.cfg.meta_only:
+            meta_only = True 
+    if meta_only:
+        # only meta inference is supported
+        return SimTensor(shape=list(map(int, arr.shape)), dtype=dtype, storage=None)
+    storage = SimTensorStorage(data=arr)
+    return SimTensor(shape=list(map(int, arr.shape)), dtype=dtype, storage=storage)
 
