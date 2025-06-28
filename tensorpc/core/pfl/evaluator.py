@@ -129,9 +129,9 @@ class PFLStaticEvaluator:
                         all_compiled = self._library.all_compiled
                         assert func_st.compiled_uid in all_compiled
                         compiled_node = all_compiled[func_st.compiled_uid]
-                        func_arg_sts = compiled_node.st.childs
-                        last_is_vaargs = func_arg_sts[-1].is_vaargs
-                        matched = expr_node._match_arg_sts_to_sig(func_arg_sts, last_is_vaargs)
+                        func_args = compiled_node.st.get_func_info_checked().args
+                        last_is_vaargs = func_args[-1].is_vaargs
+                        matched = expr_node._match_arg_sts_to_sig(func_args, last_is_vaargs)
                         func_scope = {}
                         for func_arg_st, args in matched:
                             # TODO validate vaargs type
@@ -573,8 +573,9 @@ class PFLAsyncRunner:
             func_st = expr.func.st
             if func_st.compiled_uid is not None:
                 kwargs = {}
+                finfo = func_st.get_func_info_checked()
                 # compiled pfl function don't have vaargs
-                matched = expr._match_arg_sts_to_sig(func_st.childs, False)
+                matched = expr._match_arg_sts_to_sig(finfo.args, False)
                 for arg_st, exprs in matched:
                     assert arg_st.arg_name is not None 
                     assert len(exprs) <= 1

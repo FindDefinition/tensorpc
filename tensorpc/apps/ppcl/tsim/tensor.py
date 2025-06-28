@@ -42,6 +42,8 @@ class SimTensorStorage:
 
     def getitem(self, inds: Any) -> Self:
         new_data = self.data[inds]
+        if isinstance(new_data, np.number):
+            new_data = np.array(new_data)
         new_storage = dataclasses.replace(self, data=new_data)
         # handle indices
         if isinstance(inds, tuple):

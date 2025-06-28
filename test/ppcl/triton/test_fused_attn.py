@@ -20,29 +20,22 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
     stage = 3 if is_causal else 1
     sm_scale = 0.5
     torch.manual_seed(20)
+    
+    # q = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
+    # k = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
+    # v = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
+    # dref = torch.randn_like(q, dtype=torch.float16, device="cuda").float().cpu()
 
     q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
     k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
     v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
+    dref = torch.randn_like(q)
+
     M = torch.empty((BATCH, H, N_CTX), dtype=torch.float32)
     M_np = M.detach().numpy()
-    ref_dtype = torch.float32
-    q = q.to(ref_dtype)
-    k = k.to(ref_dtype)
-    v = v.to(ref_dtype)
-    M = torch.tril(torch.ones((N_CTX, N_CTX)))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-    if is_causal:
-        p[:, :, M == 0] = float("-inf")
-    p = torch.softmax(p.float(), dim=-1)
-    p = p.to(ref_dtype)
-    # p = torch.exp(p)
-    ref = torch.matmul(p, v) # .half()
-
-    # ref = torch.nn.functional.scaled_dot_product_attention(
-    #     q, k, v, dropout_p=0.0, is_causal=is_causal, scale=sm_scale
-    # )
-    dref = torch.randn_like(ref, dtype=torch.float32)
+    ref = torch.nn.functional.scaled_dot_product_attention(
+        q, k, v, dropout_p=0.0, is_causal=is_causal, scale=sm_scale
+    )
     ref.backward(dref)
     dref_np = dref.detach().numpy()
     dq_np = q.grad.numpy()
@@ -93,7 +86,6 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         runner.run_kernel_in_executor(
             _attn_fwd.fn, grid_size=fwd_grid, global_mem=global_mem_fwd, **fwd_kwargs)
         M_np = global_mem_fwd.memory_blocks["M"].get_data_view_checked().copy()
-        print(q)
         BLK_SLICE_FACTOR = 2
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
@@ -103,12 +95,10 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * H)
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
         grid = (N_CTX // BLOCK_N1, 1, BATCH * H)
-
         test_kwargs: dict[str, Any] = {
             "sm_scale": sm_scale,
-            "arg_k": arg_k.detach().numpy(),
             "Q": q_np,
-            "K": k_np,
+            "K": arg_k.detach().numpy(),
             "V": v_np,
             "DO": dref_np,
             "DQ": np.empty_like(dq_np),
@@ -116,10 +106,10 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
             "DV": np.empty_like(dv_np),
             "M": M_np,
             "D": delta_np,
-            "stride_z": q_np.strides[0] // q_np.itemsize,
-            "stride_h": q_np.strides[1] // q_np.itemsize,
-            "stride_tok": q_np.strides[2] // q_np.itemsize,
-            "stride_d": q_np.strides[3] // q_np.itemsize,
+            "stride_z": q.stride(0),
+            "stride_h": q.stride(1),
+            "stride_tok": q.stride(2),
+            "stride_d": q.stride(3),
             "H": H,
 
             "N_CTX": N_CTX,
@@ -131,10 +121,9 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
             "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
         }
         ref_kwargs = {
-            "DK": dk_np,
-
-            "DQ": dq_np,
             "DV": dv_np,
+            "DK": dk_np,
+            "DQ": dq_np,
         }
         return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo(grid, ref_kwargs))
 
@@ -164,20 +153,14 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
     else:
         offsetv_y = offset_y + lo
     # loop over k, v and update accumulator
-    # print("INNER", start_m, "STAGE", STAGE, "RANGE", lo, hi, BLOCK_N)
     for start_n in tl.range(lo, hi, BLOCK_N, warp_specialize=warp_specialize):
-        # print("  START N", start_n, offsetk_y, offsetv_y)
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = desc_k.load([offsetk_y, 0]).T
         qk = tl.dot(q, k)
 
         if STAGE == 2:
-            # print(STAGE, STAGE & 2, "ASFASFS")
-
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            # print("DTYPE-X", qk.dtype, (qk * qk_scale).dtype, tl.where(mask, 0.0, -1.0e6).dtype)
-            # print(mask)
             qk = qk * qk_scale + tl.where(mask, 0.0, -1.0e6)
             m_ij = tl.maximum(m_i, tl.max(qk, 1))
             qk -= m_ij[:, None]

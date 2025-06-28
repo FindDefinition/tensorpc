@@ -19,7 +19,7 @@ from tensorpc.core.funcid import (clean_source_code,
 from tensorpc.core.moduleid import get_module_id_of_type, get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, PFL_LOGGER, PFLInlineRunEnv, StaticEvalConfig, PFLCompilable, PFLCompileFuncMeta, PFLErrorFormatContext, PFLMetaInferResult, PFLParseConfig,
+from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, PFL_LOGGER, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLInlineRunEnv, StaticEvalConfig, PFLCompilable, PFLCompileFuncMeta, PFLErrorFormatContext, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
                    enter_parse_context, get_compilable_meta, get_eval_cfg_in_parse_ctx, get_parse_context, get_parse_context_checked, param_fn,
                    varparam_fn, PFLStdlibFuncMeta, evaluate_annotation_expr)
@@ -495,18 +495,23 @@ class PFLParser:
                     kw_sts[kw.arg] = val_expr.st
                 arg_infos_from_call = ([a.st for a in args], kw_sts)
                 ctx = get_parse_context_checked()
+                # TODO support template func here.
+                # we need to assign a unique id for each specialized function
                 if expr.func in ctx.node_to_compilable:
                     self._parse_dep_func(expr.func, arg_infos_from_call)
                 func = self._parse_expr_to_df_ast(expr.func, scope)
                 # check is compile-time function
-                if func.st.raw_func in ALL_COMPILE_TIME_FUNCS:
-                    if func.st.raw_func is compiler_print_type:
+                raw_func = None 
+                if func.st.func_info is not None:
+                    raw_func = func.st.func_info.raw_func
+                if raw_func in ALL_COMPILE_TIME_FUNCS:
+                    if raw_func is compiler_print_type:
                         assert len(args) == 1 and len(kw_keys) == 0, "compiler_print_type only support one argument"
                         args_str = ", ".join(str(a.st) for a in args)
                         PFL_LOGGER.warning(args_str)
                         res = args[0]
                         expr = expr.args[0]
-                    elif func.st.raw_func is compiler_isinstance:
+                    elif raw_func is compiler_isinstance:
                         # TODO currently int and float are treated as function.
                         if not ctx.cfg.allow_isinstance:
                             raise PFLAstParseError(
@@ -540,7 +545,7 @@ class PFLParser:
                         res.check_and_infer_type()
                     else:
                         raise NotImplementedError(
-                            f"compile-time function {func.st.raw_func} not implemented")
+                            f"compile-time function {raw_func} not implemented")
                 else:
                     # TODO support pfl function (PFLFunc)
                     parse_cfg = get_parse_context_checked().cfg
@@ -877,7 +882,6 @@ class PFLParser:
                         parse_type_may_optional_undefined(anno_in_ast))
             assert anno_st is not None, f"can't get annotation of arg {arg.arg} from both func def and external."
             st = anno_st
-            st.arg_name = arg.arg
             arg_obj = PFLArg(PFLASTType.ARG, arg_loc, arg=arg.arg, st=st)
             if arg.annotation is not None:
                 arg_obj.annotation = ast.unparse(arg.annotation)
@@ -902,10 +906,13 @@ class PFLParser:
                 assert rstmt_st.is_equal_type(first_rstmt_st), \
                     f"all return stmts must have same type, but got {rstmt_st} and {first_rstmt_st}"
                 ret_sts.append(rstmt_st)
+        func_node_finfo = PFLExprFuncInfo(
+            [PFLExprFuncArgInfo(a.arg, a.st) for a in args],
+            ret_sts[0],
+        )
         func_node_st = PFLExprInfo(
-            type=PFLExprType.FUNCTION, 
-            childs=[a.st for a in args],
-            return_type=ret_sts[0]
+            type=PFLExprType.FUNCTION,
+            func_info=func_node_finfo
         )
         func_node = PFLFunc(PFLASTType.FUNC, source_loc, name=stmt.name, args=args, st=func_node_st, body=funbody)
         if stmt.returns is not None:

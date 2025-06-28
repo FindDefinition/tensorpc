@@ -138,6 +138,7 @@ class PFLParseConfig:
     # if the test value is constexpr, we can only parse one branch to avoid
     # type error. keep in mind that new variables created in the branch
     # are visible in parent block.
+    # WARNING: inline if is only available in function marked with "template"
     inline_constexpr_if: bool = True
 
 @dataclasses.dataclass
@@ -380,9 +381,11 @@ def get_parse_cache_checked():
         raise ValueError("not in parse context")
     return ctx.cache
 
+
 def get_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx
+
 
 def get_eval_cfg_in_parse_ctx():
     ctx = _PFLPARSE_CONTEXT.get()
@@ -390,28 +393,108 @@ def get_eval_cfg_in_parse_ctx():
         return None 
     return ctx.eval_cfg
 
+
 def has_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx is not None
 
+
 @dataclasses.dataclass(eq=False)
-class PFLFuncExprInfo:
-    arg_name: Optional[str] = None
-    return_type: Optional["PFLExprInfo"] = None
+class PFLExprFuncArgInfo:
+    arg_name: str
+    type: 'PFLExprInfo'
     default: Union[Undefined, Any] = undefined
     is_vaargs: bool = False
+
+    def typevar_substitution(self, typevar_map: Mapping[TypeVar, "PFLExprInfo"]) -> Self:
+        # we assume new type don't contains typevar.
+        return dataclasses.replace(self, type=self.type.typevar_substitution(typevar_map))
+
+    def __repr__(self) -> str:
+        return f"{self.arg_name}={self.type}"
+
+@dataclasses.dataclass(eq=False)
+class PFLExprFuncInfo:
+    args: list[PFLExprFuncArgInfo] = dataclasses.field(default_factory=list)
+    return_type: Optional["PFLExprInfo"] = None
     is_method: bool = False
     is_property: bool = False
     raw_func: Optional[Callable] = None
-    # indicate this function is a compiled function, not stdlib function.
-    # we need to get inside when evaluation
-    compiled_uid: Optional[str] = None
     # overload: when you define a function with overloads, the signature of origin function
     # will be ignored, and the overloads will be used instead.
     # keep in mind that if your f has three overloads, the first overload will be saved in main PFLExprInfo.
     # other overloads will be saved in `overloads`.
-    overloads: Optional[list["PFLExprInfo"]] = None
+    overloads: Optional[list["PFLExprFuncInfo"]] = None
 
+    def __repr__(self) -> str:
+        args_str = []
+        for arg in self.args:
+            if arg.is_vaargs:
+                args_str.append(f"...{arg}")
+            else:
+                args_str.append(str(arg.type))
+        args = ", ".join(args_str)
+        res = f"({args}) => {self.return_type}"
+        return res
+
+    def typevar_substitution(self, typevar_map: Mapping[TypeVar, "PFLExprInfo"]) -> Self:
+        # we assume new type don't contains typevar.
+        ret = self.return_type 
+        if ret is not None:
+            ret = ret.typevar_substitution(typevar_map)
+        return dataclasses.replace(self, args=[c.typevar_substitution(typevar_map) for c in self.args], return_type=ret)
+
+    @classmethod
+    def from_signature(cls,
+                       sig: inspect.Signature,
+                       ignore_self: bool = False,
+                       self_type: Optional[AnnotatedType] = None,
+                       overload_sigs: Optional[list[inspect.Signature]] = None,
+                       raw_func: Optional[Callable] = None) -> Self:
+        # res = cls(PFLExprType.FUNCTION)
+        res = cls()
+        res.raw_func = raw_func
+        if overload_sigs is not None:
+            res.overloads = [cls.from_signature(
+                s, ignore_self=ignore_self, self_type=self_type) for s in overload_sigs]
+        cnt = 0
+        for param in sig.parameters.values():
+            if ignore_self and cnt == 0 and param.name == "self":
+                res.is_method = True
+                continue
+            assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
+            if param.annotation is Self:
+                assert self_type is not None 
+                annotype = self_type
+            else:
+                anno = param.annotation
+                annotype = parse_type_may_optional_undefined(anno, self_type=self_type)
+            
+            arg_type = PFLExprInfo.from_annotype(annotype,
+                                            is_type=False,
+                                            allow_union=True,
+                                            allow_type_var=True)
+            arg = PFLExprFuncArgInfo(param.name, arg_type)
+            res.args.append(arg)
+            if param.default is not inspect.Parameter.empty:
+                arg.default = param.default
+            arg.is_vaargs = param.kind == inspect.Parameter.VAR_POSITIONAL
+            cnt += 1
+        if sig.return_annotation is not inspect.Parameter.empty:
+            if sig.return_annotation is not None:
+                if sig.return_annotation is Self:
+                    assert self_type is not None 
+                    annotype = self_type 
+                else:
+                    ret_anno = sig.return_annotation
+                    annotype = parse_type_may_optional_undefined(
+                        ret_anno, self_type=self_type)
+                res.return_type = PFLExprInfo.from_annotype(annotype,
+                                                            is_type=False,
+                                                            allow_type_var=True)
+            else:
+                res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+        return res
 
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
@@ -419,10 +502,6 @@ class PFLExprInfo:
     childs: list['PFLExprInfo'] = dataclasses.field(default_factory=list)
     has_optional: bool = False
     has_undefined: bool = False
-     # for base type (int, float, etc)
-     # user may need to add methods to base type. we will check
-     # methods of user subclassed type when call method.
-    is_basetype_subclassed: bool = False
     proxy_dcls: Optional[Any] = None
     disable_dcls_ctor: bool = False
     # for custom dataclass
@@ -430,22 +509,11 @@ class PFLExprInfo:
     # for container and dataclass
     annotype: Optional[AnnotatedType] = None
     anno_metadatas_ext: list[Any] = dataclasses.field(default_factory=list)
-    # for function
-    arg_name: Optional[str] = None
-    return_type: Optional["PFLExprInfo"] = None
-    default: Union[Undefined, Any] = undefined
-    is_vaargs: bool = False
-    is_method: bool = False
-    is_property: bool = False
-    raw_func: Optional[Callable] = None
+    # when this expr is type or function, this may be set. (dataclass ctor is lazy-parsed).
+    func_info: Optional[PFLExprFuncInfo] = None
     # indicate this function is a compiled function, not stdlib function.
     # we need to get inside when evaluation
     compiled_uid: Optional[str] = None
-    # overload: when you define a function with overloads, the signature of origin function
-    # will be ignored, and the overloads will be used instead.
-    # keep in mind that if your f has three overloads, the first overload will be saved in main PFLExprInfo.
-    # other overloads will be saved in `overloads`.
-    overloads: Optional[list["PFLExprInfo"]] = None
     # for dataclass in function arg
     is_temp: bool = False
     # for meta call (type validation, shape inference, etc)
@@ -466,8 +534,6 @@ class PFLExprInfo:
             res["has_optional"] = self.has_optional
         if self.has_undefined:
             res["has_undefined"] = self.has_undefined
-        if self.is_vaargs:
-            res["is_vaargs"] = self.is_vaargs
         if self.mapped:
             res["mapped"] = self.mapped
         if not isinstance(self.metadata, Undefined):
@@ -503,14 +569,8 @@ class PFLExprInfo:
         elif self.type == PFLExprType.GENERIC_TYPE:
             res = f"~T"
         elif self.type == PFLExprType.FUNCTION:
-            args_str = []
-            for arg in self.childs:
-                if arg.is_vaargs:
-                    args_str.append(f"...{arg}")
-                else:
-                    args_str.append(str(arg))
-            args = ", ".join(args_str)
-            res = f"({args}) => {self.return_type}"
+            assert self.func_info is not None 
+            res = str(self.func_info)
         else:
             res = _BASE_TYPE_TO_STRING[self.type]
         # if self.mapped:
@@ -525,6 +585,10 @@ class PFLExprInfo:
     def get_origin_type_checked(self):
         assert self.annotype is not None
         return self.annotype.origin_type
+
+    def get_func_info_checked(self) -> PFLExprFuncInfo:
+        assert self.func_info is not None, "func_info is None"
+        return self.func_info
 
     @classmethod
     def from_annotype(cls,
@@ -552,9 +616,6 @@ class PFLExprInfo:
         elif annotype.is_number_type():
             # here we support user subclassed base type
             res = cls(PFLExprType.NUMBER)
-            origin_type = annotype.origin_type
-            if not annotype.is_union_type() and issubclass(origin_type, (int, float)) and origin_type not in [int, float]:
-                res.is_basetype_subclassed = True 
         elif annotype.is_union_type():
             if allow_union:
                 res = cls(PFLExprType.UNION, [
@@ -614,6 +675,7 @@ class PFLExprInfo:
             res.proxy_dcls = cast(Type[DataclassType], builtin_proxy.dcls) if builtin_proxy is not None else None
         return res
 
+
     @classmethod
     def from_signature(cls,
                        sig: inspect.Signature,
@@ -621,57 +683,10 @@ class PFLExprInfo:
                        self_type: Optional[AnnotatedType] = None,
                        overload_sigs: Optional[list[inspect.Signature]] = None,
                        raw_func: Optional[Callable] = None) -> Self:
-        res = cls(PFLExprType.FUNCTION)
-        res.raw_func = raw_func
-        if overload_sigs is not None:
-            res.overloads = [PFLExprInfo.from_signature(
-                s, ignore_self=ignore_self, self_type=self_type) for s in overload_sigs]
-        cnt = 0
-        for param in sig.parameters.values():
-            if ignore_self and cnt == 0 and param.name == "self":
-                res.is_method = True
-                continue
-            assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
-            if param.annotation is Self:
-                assert self_type is not None 
-                annotype = self_type
-            else:
-                anno = param.annotation
-                annotype = parse_type_may_optional_undefined(anno, self_type=self_type)
-            
-            arg = PFLExprInfo.from_annotype(annotype,
-                                            is_type=False,
-                                            allow_union=True,
-                                            allow_type_var=True)
-            res.childs.append(arg)
-            if param.default is not inspect.Parameter.empty:
-                arg.default = param.default
-            arg.is_vaargs = param.kind == inspect.Parameter.VAR_POSITIONAL
-            arg.arg_name = param.name
-            cnt += 1
-        if sig.return_annotation is not inspect.Parameter.empty:
-            if sig.return_annotation is not None:
-                if sig.return_annotation is Self:
-                    assert self_type is not None 
-                    annotype = self_type 
-                else:
-                    ret_anno = sig.return_annotation
-                    annotype = parse_type_may_optional_undefined(
-                        ret_anno, self_type=self_type)
-                res.return_type = PFLExprInfo.from_annotype(annotype,
-                                                            is_type=False,
-                                                            allow_type_var=True)
-            else:
-                res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+        res_info = PFLExprFuncInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, overload_sigs=overload_sigs)
+        res_info.raw_func = raw_func
+        res = cls(PFLExprType.FUNCTION, func_info=res_info)
         return res
-
-    # def __eq__(self, other):
-    #     assert isinstance(other, PFLExprInfo)
-    #     return self.is_equal_type(other)
-
-    # def __ne__(self, other):
-    #     assert isinstance(other, PFLExprInfo)
-    #     return other.is_equal_type(self)
 
     def is_equal_type(self, other):
         if not isinstance(other, PFLExprInfo):
@@ -893,12 +908,12 @@ class PFLExprInfo:
                 raise ValueError(
                     f"can't find typevar {self.annotype.origin_type} in typevar_map: {typevar_map}")
         else:
-            ret = self.return_type 
-            if ret is not None:
-                ret = ret.typevar_substitution(typevar_map)
+            fn_info: Optional[PFLExprFuncInfo] = None 
+            if self.func_info is not None:
+                fn_info = self.func_info.typevar_substitution(typevar_map)
             return dataclasses.replace(self, childs=[
                 c.typevar_substitution(typevar_map) for c in self.childs
-            ], return_type=ret)
+            ], func_info=fn_info)
 
     
     def _parse_dataclass_ctor(self):
@@ -906,19 +921,23 @@ class PFLExprInfo:
             fn = inspect.getattr_static(self.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
             assert isinstance(fn, staticmethod)
             func_st = get_parse_cache_checked().cached_parse_func(fn.__func__)
-            assert func_st.return_type is not None, "func return type must be annotated"
-            return func_st.childs, func_st.return_type
+            assert func_st.func_info is not None 
+            assert func_st.func_info.return_type is not None, "func return type must be annotated"
+            return func_st.func_info.args, func_st.func_info.return_type
         else:
             assert self.annotype is not None
-            func_arg_types: list[PFLExprInfo] = []
-            for k, f in self.annotype.get_dataclass_field_annotated_types().items():
-                finfo = PFLExprInfo.from_annotype(f, is_type=False)
-                finfo.arg_name = k
-                func_arg_types.append(finfo)
+            func_args: list[PFLExprFuncArgInfo] = []
+            for k, (a, f) in self.annotype.get_dataclass_fields_and_annotated_types().items():
+                finfo_type = PFLExprInfo.from_annotype(a, is_type=False)
+                arg = PFLExprFuncArgInfo(k, finfo_type)
+                if f.default is not None:
+                    arg.default = f.default
+                arg.arg_name = k
+                func_args.append(arg)
             ret_type = dataclasses.replace(self, type=PFLExprType.DATACLASS_OBJECT,
                                     childs=[],
                                     return_type=None)
-            return func_arg_types, ret_type
+            return func_args, ret_type
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
     # since js don't support keyword, we don't need to care about kw.
