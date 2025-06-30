@@ -581,33 +581,32 @@ class PFLContinue(PFLAstStmt):
 @dataclasses.dataclass(kw_only=True)
 class PFLBoolOp(PFLExpr):
     op: BoolOpType
-    left: PFLExpr
-    right: PFLExpr
+    values: list[PFLExpr]
 
     def check_and_infer_type(self):
-        assert self.left.st.support_bool_op()
-        assert self.right.st.support_bool_op()
+        for v in self.values:
+            assert v.st.support_bool_op()
         self.st = PFLExprInfo(PFLExprType.BOOL)
-        self.is_const = PFLExpr.all_constexpr(self.left, self.right)
+        self.is_const = PFLExpr.all_constexpr(*self.values)
         if self.is_const == True:
-            self.st._constexpr_data = self.run(self.left.st._constexpr_data, self.right.st._constexpr_data)
+            self.st._constexpr_data = self.run(*[v.st._constexpr_data for v in self.values])
         return self
 
     def consteval(self):
-        operands = self._get_consteval_operands(self.left, self.right)
+        operands = self._get_consteval_operands(*self.values)
         if operands is not None:
             if self.op == BoolOpType.AND:
-                self.st.metadata = operands[0] and operands[1]
+                self.st.metadata = all(operands)
             else:
-                self.st.metadata = operands[0] or operands[1]
+                self.st.metadata = any(operands)
             return True
         return False
 
-    def run(self, left: Any, right: Any) -> Any:
+    def run(self, *values: Any) -> Any:
         if self.op == BoolOpType.AND:
-            return left and right
+            return all(values)
         else:
-            return left or right
+            return any(values)
 
 @dataclasses.dataclass(kw_only=True)
 class PFLUnaryOp(PFLExpr):
@@ -1871,7 +1870,7 @@ def unparse_pfl_expr(expr: PFLExpr) -> str:
             op = "and"
         else:
             op = "or"
-        return f"({unparse_pfl_expr(expr.left)} {op} {unparse_pfl_expr(expr.right)})"
+        return "(" + f" {op} ".join(unparse_pfl_expr(value) for value in expr.values) + ")"
     elif isinstance(expr, PFLBinOp):
         return f"({unparse_pfl_expr(expr.left)} {_PFL_UNPARSE_BIN_TYPE_TO_OP[expr.op]} {unparse_pfl_expr(expr.right)})"
     elif isinstance(expr, PFLUnaryOp):

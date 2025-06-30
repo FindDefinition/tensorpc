@@ -446,8 +446,7 @@ class PFLParser:
                 res = PFLBoolOp(PFLASTType.BOOL_OP,
                                 source_loc,
                                 op=op,
-                                left=values[0],
-                                right=values[1])
+                                values=values)
                 res.check_and_infer_type()
             elif isinstance(expr, ast.BinOp):
                 op = _AST_BINOP_TO_PFL_BINOP[type(expr.op)]

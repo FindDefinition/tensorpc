@@ -13,7 +13,7 @@ from typing_extensions import Annotated
 import numpy as np
 import tensorpc.core.datamodel as D
 from tensorpc.dock.components.plus.tensorutil import TensorContainer
-from tensorpc.dock.components.three.event import PointerEvent
+from tensorpc.dock.components.three.event import KeyboardHoldEvent, PointerEvent
 from tensorpc.core.pfl.pfl_std import Math, MathUtil
 
 @dataclasses.dataclass
@@ -73,11 +73,32 @@ def _img_move_pfl(root: Model, data: PointerEvent):
     root.linePosX = x
     root.linePosY = y
 
+def _keyhold_handler_dfdsl(root: Model, data: KeyboardHoldEvent):
+    is_smove = data.code == "KeyW" or data.code == "KeyS" or data.code == "KeyA" or data.code == "KeyD"
+    if is_smove:
+        dx = 0
+        dy = 0
+        if data.code == "KeyW":
+            dy = -data.deltaTime
+        elif data.code == "KeyS":
+            dy = data.deltaTime
+        elif data.code == "KeyA":
+            dx = -data.deltaTime
+        else:
+            dx = data.deltaTime
+        dx *= 0.002 * root.scale 
+        dy *= 0.002 * root.scale
+        root.scrollValueX = MathUtil.clamp(root.scrollValueX + dx, 0.0, 1.0)
+        root.scrollValueY = MathUtil.clamp(root.scrollValueY + dy, 0.0, 1.0)
 
 class TensorPanel(mui.FlexBox):
     def __init__(self):
         # ten can be torch or numpy.
         image = three.Image()
+        base_event_plane = three.Mesh([
+            three.PlaneGeometry(1.0, 1.0),
+            three.MeshBasicMaterial().prop(transparent=True),
+        ]).prop(position=(0, 0, -2.1))
 
         # line = three.Line([(0, 0, 0), (1, 1, 1)]).prop(color="red", lineWidth=2, variant="aabb")
         line = three.Group([
@@ -93,14 +114,17 @@ class TensorPanel(mui.FlexBox):
         self._cam_ctrl = three.CameraControl().prop(makeDefault=True)
 
         viewport_group = three.HudGroup([
-            img_group
+            img_group,
         ]).prop(top=0, left=0, padding=5, width="100%", height="100%", alignContent=False, alwaysPortal=False, borderWidth=2, borderColor="aqua")
+        scrollbar_plane_group = three.HudGroup([
+            base_event_plane
+        ]).prop(top=0, left=0, width="100%", height="100%", childWidth=1, childHeight=1, position=(0, 0, -2), alignContent="stretch")
 
         line_minimap = three.Group([
             three.Line([(-0.0, 0.0, 0.0), ]).prop(color="blue", lineWidth=2, variant="aabb", aabbSizes=(1, 1, 1))
         ])
         minimap_event_plane = three.Mesh([
-            three.PlaneGeometry(1.0, 1000.0),
+            three.PlaneGeometry(1.0, 1),
             three.MeshBasicMaterial().prop(transparent=True, opacity=0.0),
         ]).prop(position=(0, 0, -0.2))
 
@@ -112,6 +136,7 @@ class TensorPanel(mui.FlexBox):
         cam = three.OrthographicCamera(near=0.1, far=1000, children=[
             viewport_group,  
             minimap_group,
+            scrollbar_plane_group,
         ]).prop(position=(0, 0, 10))
         # cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000, children=[
         #     # viewport_group,  
@@ -132,15 +157,18 @@ class TensorPanel(mui.FlexBox):
         viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
         # image.event_move.add_frontend_draft_change(draft, "hover")
         # image.event_leave.add_frontend_draft_set_none(draft, "hover")
-        image.event_wheel.add_frontend_handler(_wheel_handler_pfl)
+        base_event_plane.event_wheel.add_frontend_handler(_wheel_handler_pfl)
         image.event_move.add_frontend_handler(_img_move_pfl)
         image.event_leave.add_frontend_draft_set_none(draft, "linePosX")
+        image.event_leave.add_frontend_draft_set_none(draft, "linePosY")
 
         image.bind_fields(image="image", scale="image.shape[0]")
 
         viewport_group.bind_fields(childWidthScale="scale", childHeightScale=f"scale", scrollValueY="scrollValueY", scrollValueX="scrollValueX")
         img_group.bind_fields_unchecked_dict({
-            "scale-x": "scale * layout.innerSizeX / (where(image.shape[1] == `0`, layout.innerSizeX, image.shape[1]))",
+            # "scale-x": "scale * layout.innerSizeX / (where(image.shape[1] == `0`, layout.innerSizeX, image.shape[1]))",
+            "scale-x": "scale * layout.innerSizeY / (where(image.shape[0] == `0`, layout.innerSizeY, image.shape[0]))",
+
             "scale-y": "scale * layout.innerSizeY / (where(image.shape[0] == `0`, layout.innerSizeY, image.shape[0]))",
         })
         line_minimap.bind_fields_unchecked_dict({
@@ -160,6 +188,8 @@ class TensorPanel(mui.FlexBox):
         minimap_event_plane.event_up.add_frontend_draft_change(draft, "isMinimapDown", "`false`")
         minimap_event_plane.event_click.add_frontend_handler(_minimap_cllick_pfl)
         line_cond.bind_fields(condition="$.linePosX != `null`")
+        canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD", "KeyZ", "KeyX"])
+        canvas.event_keyboard_hold.add_frontend_handler(_keyhold_handler_dfdsl)
 
         dm.init_add_layout([
             canvas.prop(flex=1),

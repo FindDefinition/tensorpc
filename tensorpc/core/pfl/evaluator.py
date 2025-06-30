@@ -555,12 +555,11 @@ class PFLAsyncRunner:
                     res[kk] = vv
             return res
         elif isinstance(expr, PFLBoolOp):
-            left = await self._run_expr(expr.left, scope)
-            right = await self._run_expr(expr.right, scope)
+            values = [await self._run_expr(v, scope) for v in expr.values]
             if expr.op == BoolOpType.AND:
-                res = left and right
+                res = all(values)
             else:
-                res = left or right
+                res = any(values)
             return res
         elif isinstance(expr, (PFLBinOp, PFLCompare)):
             left = await self._run_expr(expr.left, scope)
