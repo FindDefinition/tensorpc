@@ -347,10 +347,7 @@ def to_protobuf_stream_gen(data_list: List[Any],
     num_args = len(data_list)
     for arg_idx, arg in enumerate(data_list):
         if isinstance(arg, np.ndarray):
-            if not arg.flags['C_CONTIGUOUS']:
-                data_bytes = arg.tobytes()
-            else:
-                data_bytes = None
+            data_bytes = None
             order = NPBYTEORDER_TO_PB_MAP[arg.dtype.byteorder]
             data_dtype = arraybuf_pb2.dtype(
                 type=NPDTYPE_TO_PB_MAP[arg.dtype],
@@ -379,6 +376,8 @@ def to_protobuf_stream_gen(data_list: List[Any],
         if num_chunk == 0:
             num_chunk = 1  # avoid empty string raise error
         if isinstance(arg, np.ndarray):
+            if not arg.flags['C_CONTIGUOUS']:
+                arg = np.ascontiguousarray(arg)
             arg_view = arg.view(np.uint8).reshape(-1)
             for i in range(num_chunk):
                 buf = rpc_message_pb2.RemoteCallStream(

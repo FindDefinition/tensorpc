@@ -507,7 +507,9 @@ class TritonSim:
     def _bkpt_handle_local_tensor_panel_local(self, k: str, draft: TritonSimModel, bkpt: PFLBreakpoint):
         for stack in bkpt.stack[::-1]:
             if k in stack.scope:
-                local_key = f"{stack.node.uid}-{k}"
+                func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
+
+                local_key = f"{func_uid_no_suffix}-{k}"
                 ten = bkpt.scope[k]
                 assert isinstance(ten, (tritonstd.Tensor, tritonstd.PointerTensor))
                 if isinstance(ten, tritonstd.Tensor):
@@ -580,7 +582,7 @@ class TritonSim:
         for i, op in enumerate(io_ops):
             node = mui.JsonLikeNode(
                 id=UniqueTreeIdForTree.from_parts([str(i)]),
-                name=f"{op.name}->{pfl.unparse_pfl_ast(op.ast_node.args[0])}",
+                name=f"{op.name}",
                 type=mui.JsonLikeType.Object.value,
                 typeStr="Load" if op.is_load else "Store",
                 value=str(op.shape)
@@ -634,7 +636,9 @@ class TritonSim:
         if self._cur_observed_local_tensor_key is not None:
             func_uid, obj_key = self._cur_observed_local_tensor_key
             for stack in bkpt.stack:
-                if stack.node.uid == func_uid and obj_key in stack.scope:
+                stack_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
+                func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(func_uid)
+                if stack_uid_no_suffix == func_uid_no_suffix and obj_key in stack.scope:
                     obj = stack.scope[obj_key]
                     if isinstance(obj, tritonstd.Tensor):
                         await self._create_local_tensor_panel(func_uid, obj_key, obj.shape)
@@ -742,8 +746,6 @@ class TritonSim:
                     lineno = lineno_mapped
             func_uid, node = self._runner.find_nearest_node_by_line_col(lineno, col - 1)
             if node is not None and func_uid is not None:
-                func_uid_parts = UniqueTreeId(func_uid).parts
-                func_id = ".".join(func_uid_parts[0].split("::")[1:])
                 if not isinstance(node, pfl.PFLName):
                     return 
                 if not node.st.has_metadata(tritonstd.Tensor, ):
@@ -760,14 +762,17 @@ class TritonSim:
     async def _create_local_tensor_panel(self, func_uid: str, obj_name: str, shape: list[int]):
         assert self._runner is not None
         await self.tree.clear_custom_layout()
+        func_uid_parts = UniqueTreeId(func_uid).parts
+        func_local_qname = ".".join(func_uid_parts[0].split("::")[1:])
+        func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(func_uid)
         async with self.dm.draft_update() as draft:
             draft.local_matrices.clear()
-            obj_key = f"{func_uid}-{obj_name}"
+            obj_key = f"{func_uid_no_suffix}-{obj_name}"
             mat = LocalMatrix.from_shape(obj_name, shape)
             mat_layout_shape = mat.get_vis_wh()
             draft.local_matrices[obj_key] = LocalMemoryModel(matrix=mat,
                 minimap=plus.hud.MinimapModel(mat_layout_shape[0], mat_layout_shape[1]))
-            key = f"{func_uid}-{obj_name}"
+            key = f"{func_local_qname}-{obj_name}"
             container = LocalMemContainer(key, draft.local_matrices[obj_key], use_view=True)
             container.prop(border="1px solid blue")
             container.panel._event_plane.event_move.add_frontend_handler_v2(self.dm, partial(TritonSimModel._on_hover_pfl, key=obj_key))
@@ -783,6 +788,10 @@ class TritonSim:
         ]).prop(width="100%", height="100%", overflow="hidden"))
 
 
+    def _remove_spec_suffix_of_func_uid(self, func_uid: str) -> str:
+        parts = UniqueTreeId(func_uid).parts
+        return parts[0] 
+
     async def hover_query(self, hqevent: mui.MonacoHoverQueryEvent) -> Optional[mui.MonacoHover]:
         if self._runner is None:
             return 
@@ -793,9 +802,8 @@ class TritonSim:
             lineno_mapped = self._runner._mapper_new_to_old.bisect_mapped_lineno(lineno)
             if lineno_mapped != -1:
                 lineno = lineno_mapped
-        
         func_uid, node = self._runner.find_nearest_node_by_line_col(lineno, col - 1)
-        if node is not None and isinstance(node, (pfl.PFLExpr, pfl.PFLArg)):
+        if func_uid is not None and node is not None and isinstance(node, (pfl.PFLExpr, pfl.PFLArg)):
             node_expr = pfl.unparse_pfl_ast(node)
             loc = node.get_source_loc_checked()
             msg =f"### {node_expr}\n`{node.st}`"
@@ -804,7 +812,7 @@ class TritonSim:
             if self._runner.runner.is_paused():
                 stack = self._runner.runner.get_state().stack
                 for s in stack:
-                    if s.node.uid == func_uid:
+                    if self._remove_spec_suffix_of_func_uid(s.node.uid) == self._remove_spec_suffix_of_func_uid(func_uid):
                         if isinstance(node, pfl.PFLName) and node.id in s.scope:
                             val = s.scope[node.id]
                             msg += f"\n\n**Value in stack**: \n`{val}`"
