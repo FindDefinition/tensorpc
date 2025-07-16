@@ -62,18 +62,21 @@ class StdRegistry:
                 for attr, cls in inspect.get_annotations(func).items():
                     if cls is ClassVar:
                         value = getattr(func, attr)
-                        assert inspect.isclass(
+                        if inspect.isclass(
                             value
-                        ) and dataclasses.is_dataclass(
-                            value
-                        ), "classvar (used as namespace alias) must be a dataclass class"
-                        registered_item = self.get_item_by_dcls(value)
-                        if registered_item is None:
-                            raise ValueError(
-                                f"ClassVar {attr} of {func.__name__} must be registered as a std object."
-                            )
-                        namespace_aliases[attr] = cast(Type[DataclassType],
-                                                       registered_item.dcls)
+                        ):
+                            assert inspect.isclass(
+                                value
+                            ) and dataclasses.is_dataclass(
+                                value
+                            ), "classvar (used as namespace alias) must be a dataclass class"
+                            registered_item = self.get_item_by_dcls(value)
+                            if registered_item is None:
+                                raise ValueError(
+                                    f"ClassVar {attr} of {func.__name__} must be registered as a std object."
+                                )
+                            namespace_aliases[attr] = cast(Type[DataclassType],
+                                                        registered_item.dcls)
             assert mapped_name is not None
             key_ = mapped_name
             assert (

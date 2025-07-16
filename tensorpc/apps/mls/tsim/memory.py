@@ -697,6 +697,9 @@ class SimTensorBlockPointer:
         )
 
     def advance(self, offsets: list[int]) -> Self:
+        if self.base.storage is None:
+            # meta advance 
+            return dataclasses.replace(self) 
         assert len(offsets) == len(self.shape), "Offsets must match shape length"
         new_offset = [self.offset[i] + offsets[i] for i in range(len(self.offset))]
         return dataclasses.replace(self, offset=new_offset)
@@ -771,12 +774,13 @@ def create_tensor_block_pointer(
 def create_tensor_block_pointer_meta(
     base: SimPointerScalar,
     ndim: int,
+    block_shape: list[int],
 ) -> SimTensorBlockPointer:
     """Create a tensor block pointer."""
     assert base.storage is None, "Base pointer must be a meta pointer"
     shape = [1] * ndim
     strides = [1] * ndim
-    block_shape = [1] * ndim
+    assert len(block_shape) == ndim, "Block shape must match ndim"
     offset = [0] * ndim
     return SimTensorBlockPointer(
         base=base, shape=shape, strides=strides, block_shape=block_shape, offset=offset

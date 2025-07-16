@@ -429,6 +429,23 @@ class TritonSim:
 
         await self._runner.run_single_block(grid_idxes)
 
+    async def _init_sim_info(self):
+        assert self._runner is not None 
+        async with self.dm.draft_update() as draft:
+            draft.grid_size_x_range = (0, self._runner.grid_size[0] - 1, 1)
+            draft.grid_size_y_range = (0, self._runner.grid_size[1] - 1, 1)
+            draft.grid_size_z_range = (0, self._runner.grid_size[2] - 1, 1)
+            draft.grid_idx_x = 0
+            draft.grid_idx_y = 0
+            draft.grid_idx_z = 0
+        sim_info = self._runner.runner.triton_sim_info
+        gmem = sim_info.global_mem
+        assert gmem is not None 
+        mat_dict: dict[str, np.ndarray] = {}
+        for k, block in gmem.memory_blocks.items():
+            mat_dict[k] = block.get_data_view_checked()
+        await self._global_mem.set_matrix_dict(mat_dict)
+
     async def _handle_editor_save(self, ev: mui.MonacoSaveEvent):
         assert self._runner is not None, "Runner must be initialized before saving"
         prev_is_paused = self._runner.runner.is_paused()
@@ -439,6 +456,8 @@ class TritonSim:
         # print(1)
         with open(self._runner._path, "w", encoding="utf-8") as f:
             f.write(ev.value)
+        await self._init_sim_info()
+
         if prev_is_paused:
             decors = ev.decorationsRanges
             if decors is not None:
@@ -474,20 +493,7 @@ class TritonSim:
 
             await self.editor.write(item.content, path, "python")
             await self.editor.set_line_number(data.selections[0].start.line)
-            async with self.dm.draft_update() as draft:
-                draft.grid_size_x_range = (0, self._runner.grid_size[0] - 1, 1)
-                draft.grid_size_y_range = (0, self._runner.grid_size[1] - 1, 1)
-                draft.grid_size_z_range = (0, self._runner.grid_size[2] - 1, 1)
-                draft.grid_idx_x = 0
-                draft.grid_idx_y = 0
-                draft.grid_idx_z = 0
-            sim_info = self._runner.runner.triton_sim_info
-            gmem = sim_info.global_mem
-            assert gmem is not None 
-            mat_dict: dict[str, np.ndarray] = {}
-            for k, block in gmem.memory_blocks.items():
-                mat_dict[k] = block.get_data_view_checked()
-            await self._global_mem.set_matrix_dict(mat_dict)
+            await self._init_sim_info()
 
     async def _handle_slider_change(self, value: Any, axis: int):
         if self._runner is None:

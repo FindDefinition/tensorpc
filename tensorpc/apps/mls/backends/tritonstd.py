@@ -556,6 +556,9 @@ class TensorDescriptor:
 class BlockPointer:
     _wrapped: tsim.SimTensorBlockPointer
 
+    def advance(self, offset: Union[list[int], tuple[int, ...]]) -> Self:
+        return self.__class__(self._wrapped.advance(list(offset)))
+
 @pfl.register_pfl_std(mapped_name="TritonPointerScalarFloat", backend="triton")
 @dataclasses.dataclass
 class PointerScalarFloat:
@@ -790,9 +793,176 @@ _T_math_fp = TypeVar("_T_math_fp", Tensor, float)
 _T_any = TypeVar("_T_any", Tensor, int, float, PointerTensor, PointerScalarFloat, PointerScalarInt)
 _T_all_tensor = TypeVar("_T_all_tensor", Tensor, PointerTensor)
 
+@pfl.register_pfl_std(mapped_name="tl_math", backend="triton", mapped=tl.math)
+@dataclasses.dataclass
+class triton_std_math:
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def abs(x: _T_math) -> _T_math:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.abs(x._wrapped))
+        else:
+            res = abs(x)
+            if isinstance(x, int):
+                return int(res)
+            else:
+                return res
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def ceil(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.ceil(x._wrapped))
+        else:
+            return math.ceil(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def floor(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.floor(x._wrapped))
+        else:
+            return math.floor(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def cos(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.cos(x._wrapped))
+        else:
+            return math.cos(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def sin(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.sin(x._wrapped))
+        else:
+            return math.sin(x)
+
+    # @staticmethod
+    # def div_rn(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Tensor: ...
+
+    # @staticmethod
+    # def fdiv(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Tensor: ...
+
+    # @staticmethod
+    # def fma(x: Union[Tensor, int, float], y: Union[Tensor, int, float], z: Union[Tensor, int, float]) -> Tensor: ...
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def exp(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.exp(x._wrapped))
+        else:
+            return math.exp(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def exp2(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.exp2(x._wrapped))
+        else:
+            return math.exp2(x)
+
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def log(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.log(x._wrapped))
+        else:
+            return math.log(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def log2(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.log2(x._wrapped))
+        else:
+            return math.log2(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def rsqrt(x: _T_math_fp) -> _T_math_fp: 
+        if isinstance(x, Tensor):
+            return Tensor(tsim.rsqrt(x._wrapped))
+        else:
+            return 1.0 / math.sqrt(x)
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def sqrt(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.sqrt(x._wrapped))
+        else:
+            return math.sqrt(x)
+
+    # @staticmethod
+    # def sqrt_rn(x: Union[Tensor, int, float]) -> Tensor: ...
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_global_unary_infer)
+    def sigmoid(x: _T_math_fp) -> _T_math_fp:
+        if isinstance(x, Tensor):
+            return Tensor(tsim.sigmoid(x._wrapped))
+        else:
+            return math.sqrt(x)
+
+
+    @staticmethod
+    def softmax(x: Tensor, axis: Optional[int] = None) -> Tensor:
+        return Tensor(tsim.softmax(x._wrapped, axis))
+
+
+    @staticmethod
+    @overload
+    def _internal_binary_anno(x: Tensor, y: float) -> Tensor: ...
+
+    @staticmethod
+    @overload
+    def _internal_binary_anno(x: float, y: Tensor) -> Tensor: ...
+
+    @staticmethod
+    @overload
+    def _internal_binary_anno(x: float, y: float) -> float: ...
+
+    @staticmethod
+    @overload
+    def _internal_binary_anno(x: Tensor, y: Tensor) -> Tensor: ...
+
+    @staticmethod
+    def _internal_binary_anno(x: Union[Tensor, float], y: Union[Tensor, float]) -> Union[Tensor, float]:
+        raise NotImplementedError("shouldn't be used directly.")
+
+    @staticmethod
+    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
+    def maximum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
+        y_wrapped = y._wrapped if isinstance(y, Tensor) else y
+        res_wrapped = tsim.maximum(x_wrapped, y_wrapped)
+        if isinstance(res_wrapped, SimTensor):
+            return Tensor(res_wrapped)
+        else:
+            return res_wrapped
+
+    @staticmethod
+    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
+    def minimum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
+        y_wrapped = y._wrapped if isinstance(y, Tensor) else y
+        res_wrapped = tsim.minimum(x_wrapped, y_wrapped)
+        if isinstance(res_wrapped, SimTensor):
+            return Tensor(res_wrapped)
+        else:
+            return res_wrapped
+
 @pfl.register_pfl_std(mapped_name="tl", backend="triton", mapped=tl)
 @dataclasses.dataclass
-class triton_std:
+class triton_std(triton_std_math):
+    # we use inherit here to import all methods from triton_std_math
+    # we can also use ClassVar. e.g. abs: ClassVar = staticmethod(triton_std_math.abs)
+
     # # subtypes using ClassVar
     # TensorX: TypeAlias = Tensor
     # PointerTensor: ClassVar[Type["PointerTensor"]] = PointerTensor
@@ -1045,167 +1215,6 @@ class triton_std:
         return Tensor(tsim.where(cond._wrapped, x_wrapped, y_wrapped))
 
     @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def abs(x: _T_math) -> _T_math:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.abs(x._wrapped))
-        else:
-            res = abs(x)
-            if isinstance(x, int):
-                return int(res)
-            else:
-                return res
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def ceil(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.ceil(x._wrapped))
-        else:
-            return math.ceil(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def floor(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.floor(x._wrapped))
-        else:
-            return math.floor(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def cos(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.cos(x._wrapped))
-        else:
-            return math.cos(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def sin(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.sin(x._wrapped))
-        else:
-            return math.sin(x)
-
-    # @staticmethod
-    # def div_rn(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Tensor: ...
-
-    # @staticmethod
-    # def fdiv(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Tensor: ...
-
-    # @staticmethod
-    # def fma(x: Union[Tensor, int, float], y: Union[Tensor, int, float], z: Union[Tensor, int, float]) -> Tensor: ...
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def exp(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.exp(x._wrapped))
-        else:
-            return math.exp(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def exp2(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.exp2(x._wrapped))
-        else:
-            return math.exp2(x)
-
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def log(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.log(x._wrapped))
-        else:
-            return math.log(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def log2(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.log2(x._wrapped))
-        else:
-            return math.log2(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def rsqrt(x: _T_math_fp) -> _T_math_fp: 
-        if isinstance(x, Tensor):
-            return Tensor(tsim.rsqrt(x._wrapped))
-        else:
-            return 1.0 / math.sqrt(x)
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def sqrt(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.sqrt(x._wrapped))
-        else:
-            return math.sqrt(x)
-
-    # @staticmethod
-    # def sqrt_rn(x: Union[Tensor, int, float]) -> Tensor: ...
-
-    @staticmethod
-    @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def sigmoid(x: _T_math_fp) -> _T_math_fp:
-        if isinstance(x, Tensor):
-            return Tensor(tsim.sigmoid(x._wrapped))
-        else:
-            return math.sqrt(x)
-
-
-    @staticmethod
-    def softmax(x: Tensor, axis: Optional[int] = None) -> Tensor:
-        return Tensor(tsim.softmax(x._wrapped, axis))
-
-
-    @staticmethod
-    @overload
-    def _internal_binary_anno(x: Tensor, y: float) -> Tensor: ...
-
-    @staticmethod
-    @overload
-    def _internal_binary_anno(x: float, y: Tensor) -> Tensor: ...
-
-    @staticmethod
-    @overload
-    def _internal_binary_anno(x: float, y: float) -> float: ...
-
-    @staticmethod
-    @overload
-    def _internal_binary_anno(x: Tensor, y: Tensor) -> Tensor: ...
-
-    @staticmethod
-    def _internal_binary_anno(x: Union[Tensor, float], y: Union[Tensor, float]) -> Union[Tensor, float]:
-        raise NotImplementedError("shouldn't be used directly.")
-
-    @staticmethod
-    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
-    def maximum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
-        y_wrapped = y._wrapped if isinstance(y, Tensor) else y
-        res_wrapped = tsim.maximum(x_wrapped, y_wrapped)
-        if isinstance(res_wrapped, SimTensor):
-            return Tensor(res_wrapped)
-        else:
-            return res_wrapped
-
-    @staticmethod
-    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
-    def minimum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
-        y_wrapped = y._wrapped if isinstance(y, Tensor) else y
-        res_wrapped = tsim.minimum(x_wrapped, y_wrapped)
-        if isinstance(res_wrapped, SimTensor):
-            return Tensor(res_wrapped)
-        else:
-            return res_wrapped
-
-    @staticmethod
     def _cast_meta_infer(fn: Callable, x: pfl.PFLExprInfo, dtype: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         dtype_val = dtype.constexpr_data_checked
         if isinstance(dtype_val, pointer_type):
@@ -1354,16 +1363,17 @@ class triton_std:
             return PointerTensor(x._wrapped.stack([y._wrapped], axis=-1))
 
     @staticmethod
-    def _make_block_pointer_meta_infer(base_cls: Union[Type[TensorDescriptor], Type[BlockPointer]], fn, base: pfl.PFLExprInfo, shape: pfl.PFLExprInfo, strides: pfl.PFLExprInfo, block_shape: pfl.PFLExprInfo, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
-        assert base.has_metadata() and shape.has_metadata() and strides.has_metadata() and block_shape.has_metadata(), "base, shape, strides and block_shape must have metadata"
+    def _make_block_pointer_meta_infer(base_cls: Union[Type[TensorDescriptor], Type[BlockPointer]], fn, base: pfl.PFLExprInfo, shape: pfl.PFLExprInfo, strides: pfl.PFLExprInfo, offsets: pfl.PFLExprInfo, block_shape: pfl.PFLExprInfo, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
+        assert base.has_metadata() and shape.has_metadata() and strides.has_metadata() and block_shape.has_metadata() and offsets.has_metadata(), "base, shape, strides and block_shape must have metadata"
         shape_val = shape.metadata_checked # may be list of int or list of undefined.
         strides_val = strides.metadata_checked
         block_shape_val = block_shape.metadata_checked
-        
+        for val in block_shape_val:
+            assert isinstance(val, int), "block_shape must be constexpr"
         assert (
             len(shape_val) == len(strides_val) == len(block_shape_val)
         ), "Shape, strides, block_shape and offset must have the same length"
-        return pfl.PFLMetaInferResult(base_cls(tsim.create_tensor_block_pointer_meta(base.metadata_checked._wrapped, len(shape_val))))
+        return pfl.PFLMetaInferResult(base_cls(tsim.create_tensor_block_pointer_meta(base.metadata_checked._wrapped, len(shape_val), block_shape_val)))
 
     @staticmethod 
     @pfl.configure_std_func(meta_infer=partial(_make_block_pointer_meta_infer, TensorDescriptor))
@@ -1372,8 +1382,12 @@ class triton_std:
 
     @staticmethod 
     @pfl.configure_std_func(meta_infer=partial(_make_block_pointer_meta_infer, BlockPointer))
-    def make_block_ptr(base: Union[PointerScalarFloat, PointerScalarInt], shape: list[int], strides: list[int], block_shape: list[int], order: list[int]) -> BlockPointer:
-        return BlockPointer(tsim.create_tensor_block_pointer(base._wrapped, shape, strides, block_shape))
+    def make_block_ptr(base: Union[PointerScalarFloat, PointerScalarInt], shape: Union[list[int], tuple[int, ...]], 
+            strides: Union[list[int], tuple[int, ...]], 
+            offsets: Union[list[int], tuple[int, ...]], 
+            block_shape: Union[list[int], tuple[int, ...]], 
+            order: Union[list[int], tuple[int, ...]]) -> BlockPointer:
+        return BlockPointer(tsim.create_tensor_block_pointer(base._wrapped, shape, strides, block_shape, offsets))
     
     @staticmethod
     def _static_assert_static_infer(x: pfl.PFLExprInfo):
@@ -1384,6 +1398,9 @@ class triton_std:
     def static_assert(x: bool) -> None:
         assert x 
 
+    @staticmethod 
+    def advance(base: BlockPointer, offset: Union[list[int], tuple[int, ...]]) -> BlockPointer:
+        return base.advance(offset)
 
 T = TypeVar("T")
 

@@ -329,17 +329,7 @@ class SimTensorBase:
 
     @property 
     def T(self) -> Self:
-        if self.storage is None:
-            # only meta inference is supported
-            new_shape = self.shape[::-1]
-            res = dataclasses.replace(self, shape=new_shape)
-            return res
-        else:
-            new_data = self.storage.data.T
-            new_storage = dataclasses.replace(self.storage, data=new_data)
-            res = dataclasses.replace(self, shape=list(map(int, new_data.shape)))
-            res.storage = new_storage
-            return res
+        return self.permute(list(range(self.ndim - 1, -1, -1)))
 
     @property
     def ndim(self) -> int:
