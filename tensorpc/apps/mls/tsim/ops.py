@@ -3,7 +3,7 @@ from typing import Optional, Union
 import dataclasses
 import numpy as np
 
-from tensorpc.apps.ppcl.tsim.core import DTypeEnum
+from tensorpc.apps.mls.tsim.core import DTypeEnum
 from tensorpc.core.pfl.pfl_ast import BinOpType
 from .tensor import SimTensor, get_may_tensor_dtype
 

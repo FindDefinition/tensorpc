@@ -9,7 +9,7 @@ WARNING: PFL is static typed, union isn't supported except None (optional) or fu
 """
 
 
-from . import pfl_std
+from .backends import js
 from .constants import (PFL_COMPILE_META_ATTR, PFL_FUNC_ANNO_META_ATTR,
                         PFL_STDLIB_FUNC_META_ATTR)
 from .core import (PFLCompileFuncMeta, PFLExprInfo, PFLExprType,
@@ -21,7 +21,7 @@ from .evaluator import (PFLAsyncRunner, PFLAsyncRunnerStateType,
                         PFLStaticEvaluator, consteval_expr)
 from .parser import (ast_dump, iter_child_nodes, parse_expr_to_df_ast,
                      parse_func_to_pfl_ast, parse_func_to_pfl_library,
-                     pfl_ast_to_dict)
+                     pfl_ast_to_dict, PFLParser, PFLLibrary)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                       NodeVisitor, PFLAnnAssign, PFLArg, PFLArray, PFLAssign,
                       PFLAstNodeBase, PFLAstStmt, PFLASTType, PFLAttribute,

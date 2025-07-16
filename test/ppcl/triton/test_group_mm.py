@@ -3,9 +3,9 @@ from typing import Annotated, Any, Optional, Union
 
 import numpy as np
 import triton 
-from tensorpc.apps.ppcl import tsim
+from tensorpc.apps.mls import tsim
 from tensorpc.core import pfl
-from tensorpc.apps.ppcl.backends import tritonstd
+from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
 
 def _grouped_matmul_kernel_test_fn() -> pfl.PFLInlineRunEnv:

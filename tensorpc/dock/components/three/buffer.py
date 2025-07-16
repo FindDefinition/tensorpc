@@ -213,7 +213,7 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
         assert transforms.shape[0] <= limit
         assert transforms.ndim == 2 or transforms.ndim == 3
         if transforms.ndim == 2:
-            assert transforms.shape[1] == 3 or transforms.shape[1] == 7
+            assert transforms.shape[1] == 3 or transforms.shape[1] == 2 or transforms.shape[1] == 7
         if transforms.ndim == 3:
             assert transforms.shape[1] == 4 and transforms.shape[2] == 4
         if transforms.dtype != np.float32:

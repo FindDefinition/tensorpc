@@ -33,7 +33,7 @@ from tensorpc.apps.dbg.constants import (
     DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
     TracerConfig,
     TracerType)
-from tensorpc.apps.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
+from tensorpc.core.astex.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
 from tensorpc.apps.dbg.serv_names import serv_names
 from tensorpc.dock.client import list_all_app_in_machine
 from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
@@ -457,7 +457,7 @@ class BackgroundDebugTools:
         dm, app = self._get_bkgd_panel_dm_and_app()
         if dm.model.tracer_state.runtime is not None:
             async with dm.draft_update() as draft:
-                draft.tracer_state.runtime = True # type: ignore
+                draft.tracer_state.runtime.force_stop = True # type: ignore
 
     async def handle_code_selection_msg(self, code_segment: str, path: str,
                                         code_range: Tuple[int, int, int, int]):

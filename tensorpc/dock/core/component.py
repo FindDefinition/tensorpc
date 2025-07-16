@@ -36,9 +36,9 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 
 import grpc
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
+from tensorpc.core import pfl
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.funcid import clean_source_code, remove_common_indent_from_code
-from tensorpc.core.pfl import parse_func_to_pfl_ast, pfl_ast_to_dict
 from tensorpc.core.datamodel.events import DraftChangeEvent
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
@@ -292,6 +292,7 @@ class UIType(enum.IntEnum):
 
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
+    ThreeLineShape = 0x1103
 
     ThreeEffectComposer = 0x1200
     ThreeEffectOutline = 0x1201
@@ -455,6 +456,7 @@ class FrontendEventType(enum.IntEnum):
     EditorChange = 51
     EditorQueryState = 52
     EditorSaveState = 53
+    EditorDecorationsChange = 54
     EditorAction = 55
     EditorCursorSelection = 56
     EditorInlayHintsQuery = 57
@@ -1247,13 +1249,17 @@ class _EventSlotBase(Generic[TEventData]):
                   stop_propagation: Optional[bool] = None,
                   throttle: Optional[NumberType] = None,
                   debounce: Optional[NumberType] = None,
-                  key_codes: Optional[list[str]] = None) -> Self:
+                  key_codes: Optional[list[str]] = None,
+                  set_pointer_capture: bool = False,
+                  release_pointer_capture: bool = False) -> Self:
         self.comp.configure_event_handlers(
             self.event_type,
             stop_propagation,
             throttle,
             debounce,
-            key_codes=key_codes)
+            key_codes=key_codes,
+            set_pointer_capture=set_pointer_capture,
+            release_pointer_capture=release_pointer_capture)
         return self
 
     def set_frontend_draft_change(self, update_ops: list["EventFrontendUpdateOp"]) -> Self:
@@ -1282,10 +1288,33 @@ class _EventSlotBase(Generic[TEventData]):
             ))
         return self
 
-    def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True) -> Self:
+    def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
         """use Python Frontend Language (subset of python) to handle event in frontend directly.
         """
-        func_ast = parse_func_to_pfl_ast(func, backend="js")
+        tail_kws = None
+        if isinstance(func, partial):
+            assert not func.args, "args isn't supported in partial, use keywords instead."
+            tail_kws = func.keywords
+            func = func.func
+        fing_sig = inspect.signature(func)
+        for k, p in fing_sig.parameters.items():
+            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+        tail_args = undefined
+        if tail_kws is not None:
+            bind_args = fing_sig.bind_partial(**tail_kws)
+            bind_args.apply_defaults()
+            cnt = 0
+            tail_args = []
+            for k, p in fing_sig.parameters.items():
+                if cnt >= 2:
+                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                    tail_args.append(bind_args.arguments[k])
+                else:
+                    assert k not in tail_kws, "you can't use partial on first and second argument."
+                cnt += 1
+        else:
+            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
+        func_ast = pfl.parse_func_to_pfl_ast(func, backend="js")
         # clean code since we use code as key.
         func_code_lines = [line.rstrip() for line in func_ast.compile_info.code.splitlines()]
         func_code_lines = clean_source_code(func_code_lines)
@@ -1293,9 +1322,56 @@ class _EventSlotBase(Generic[TEventData]):
         code = remove_common_indent_from_code(code)
         op = EventFrontendUpdateOp(
             attr="",
-            targetPath="",
-            pflAstJson=json.dumps(pfl_ast_to_dict(func_ast)),
+            targetPath=targetPath,
+            pflAstJson=json.dumps(pfl.pfl_ast_to_dict(func_ast)),
             pflCode=code,
+            partialTailArgs=tail_args,
+        )
+        if not use_immer:
+            op.dontUseImmer = True
+        self.comp._append_event_handler_update_op(
+            self.event_type,
+            update_op=op)
+        return self
+
+    def add_frontend_handler_v2(self, dm: "DataModel", func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
+        """use Python Frontend Language (subset of python) to handle event in frontend directly.
+        """
+        assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
+        assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
+        tail_kws = None
+        
+        if isinstance(func, partial):
+            assert not func.args, "args isn't supported in partial, use keywords instead."
+            tail_kws = func.keywords
+            func = func.func
+        assert not inspect.ismethod(func), "use Class.method instead of obj.method"
+        fing_sig = inspect.signature(func)
+        for k, p in fing_sig.parameters.items():
+            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+        tail_args = undefined
+        if tail_kws is not None:
+            bind_args = fing_sig.bind_partial(**tail_kws)
+            bind_args.apply_defaults()
+            cnt = 0
+            tail_args = []
+            for k, p in fing_sig.parameters.items():
+                if cnt >= 2:
+                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                    tail_args.append(bind_args.arguments[k])
+                else:
+                    assert k not in tail_kws, "you can't use partial on first and second argument."
+                cnt += 1
+        else:
+            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
+        
+        func_specs = dm._pfl_library.get_compiled_unit_specs(func)
+        assert len(func_specs) == 1, "func can't be template"
+        op = EventFrontendUpdateOp(
+            attr="",
+            targetPath=targetPath,
+            partialTailArgs=tail_args,
+            pflFuncUid=func_specs[0].uid
         )
         if not use_immer:
             op.dontUseImmer = True
@@ -1444,6 +1520,8 @@ class EventFrontendUpdateOp:
     pflAstJson: Union[Undefined, str] = undefined
     pflCode: Union[Undefined, str] = undefined
     dontUseImmer: Union[Undefined, bool] = undefined
+    partialTailArgs: Union[Undefined, list[Any]] = undefined
+    pflFuncUid: Union[Undefined, str] = undefined
 
 T_child_structure = TypeVar("T_child_structure",
                             default=Any,
@@ -1950,7 +2028,9 @@ class Component(Generic[T_base_props, T_child]):
                                  debounce: Optional[NumberType] = None,
                                  backend_only: Optional[bool] = False,
                                  update_ops: Optional[list[EventFrontendUpdateOp]] = None,
-                                 key_codes: Optional[list[str]] = None):
+                                 key_codes: Optional[list[str]] = None,
+                                set_pointer_capture: bool = False,
+                                release_pointer_capture: bool = False):
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
@@ -1962,6 +2042,8 @@ class Component(Generic[T_base_props, T_child]):
             handlers.stop_propagation = stop_propagation
         handlers.throttle = throttle
         handlers.debounce = debounce
+        handlers.set_pointer_capture = set_pointer_capture
+        handlers.release_pointer_capture = release_pointer_capture
         if backend_only is not None:
             handlers.backend_only = backend_only
         if update_ops is not None:
@@ -3684,6 +3766,11 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property
+    def childs_complex(self):
+        assert isinstance(self._child_structure, MatchCaseChildDef)
+        return self._child_structure
 
     @staticmethod 
     def binary_selection(success_val: Union[ValueType, bool], success: Component, fail: Optional[Component] = None):

@@ -14,7 +14,7 @@
 
 from .core import register_obj_preview_handler, register_obj_layout_handler, ObjectGridItemConfig
 from .grid_preview_layout import GridPreviewLayout
-
+from . import hud
 from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
 from .config import ConfigPanel

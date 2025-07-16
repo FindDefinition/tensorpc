@@ -18,7 +18,8 @@ from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN, PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR, PFL_FUNC_ANNO_META_ATTR
-from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_module_id_of_type, get_qualname_of_type
+from tensorpc.core.tree_id import UniqueTreeId
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem, register_pfl_std
 
@@ -140,6 +141,10 @@ class PFLParseConfig:
     # are visible in parent block.
     # WARNING: inline if is only available in function marked with "template"
     inline_constexpr_if: bool = True
+    # js have cpp-style variable declaration, when we use
+    # tuple assign, assigned variable must all-exist in scope or
+    # not created yet.
+    tuple_assign_must_be_homogeneous: bool = False
 
 @dataclasses.dataclass
 class StaticEvalConfig:
@@ -205,7 +210,7 @@ class PFLParseCache:
     def __init__(self, backend: str, temp_std_items: Optional[dict[Type, StdRegistryItem]] = None):
         self._func_parse_result_cache: dict[Callable, PFLExprInfo] = {}
         self._annotype_cache: dict[Any, AnnotatedType] = {}
-        self._std_item_cache: dict[Type, StdRegistryItem] = {}
+        self._std_item_cache: dict[Type, Optional[StdRegistryItem]] = {}
         if temp_std_items is not None:
             self._std_item_cache.update(temp_std_items)
         self._mapped_proxy_cache: dict[Type, Optional[StdRegistryItem]] = {}
@@ -235,6 +240,8 @@ class PFLParseCache:
             return PFLExprInfo.from_signature(sig, raw_func=func)
         else:
             meta: Optional[PFLStdlibFuncMeta] = getattr(func, PFL_STDLIB_FUNC_META_ATTR, None)
+            compilable_meta: Optional[PFLCompileFuncMeta] = get_compilable_meta(func)
+            
             if meta is not None and meta.take_overloads_fn is not None:
                 overload_fn = meta.take_overloads_fn
             else:
@@ -246,29 +253,32 @@ class PFLParseCache:
             else:
                 sig = inspect.signature(func, eval_str=True)
                 overload_sigs = None
-            return PFLExprInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, overload_sigs=overload_sigs, raw_func=func)
+            res = PFLExprInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, 
+                overload_sigs=overload_sigs, raw_func=func, compilable_meta=compilable_meta)
+            assert res.func_info is not None
+            # generate function uid
+            func_uid_base = get_module_id_of_type(func)
+            res.func_info.func_uid = func_uid_base
+            return res 
 
     def cached_parse_std_item(self, item: StdRegistryItem) -> "PFLExprInfo":
         if item.is_func:
-            return self.cached_parse_func(item.dcls, disable_type_check=item._internal_disable_type_check)
+            res = self.cached_parse_func(item.dcls, disable_type_check=item._internal_disable_type_check)
         elif item.is_builtin:
             assert item.mapped is not None
-            return PFLExprInfo.from_annotype(
+            res = PFLExprInfo.from_annotype(
                 parse_type_may_optional_undefined(item.dcls), is_type=True, parse_cache=self, proxy_dcls=cast(Type[DataclassType], item.dcls))
         else:
             res = PFLExprInfo.from_annotype(
                 parse_type_may_optional_undefined(item.dcls), is_type=True, parse_cache=self)
             res.disable_dcls_ctor = item.disable_dcls_ctor
-            return res 
+        res.is_stdlib = True
+        return res 
 
     def cached_get_std_item(self, dcls: Type[T_dataclass]):
         if dcls in self._std_item_cache:
             return self._std_item_cache[dcls]
         item = STD_REGISTRY.get_item_by_dcls(dcls, self._backend, external=self._temp_dcls_dict)
-        if item is None:
-            raise ValueError(
-                f"can't find your type {get_qualname_of_type(dcls)} from std registry."
-            )
         self._std_item_cache[dcls] = item
         return item
 
@@ -317,21 +327,22 @@ class PFLParseContext(PFLErrorFormatContext):
     def __init__(self,
                  lines: list[str],
                  func_globals: Any,
+                 func_unwrapper: Callable[[Any], Callable],
                  backend: str = "js",
                  temp_std_items: Optional[dict[Type, StdRegistryItem]] = None,
                  cfg: Optional[PFLParseConfig] = None,
                  eval_cfg: Optional[StaticEvalConfig] = None,
-                 node_to_std_item: Optional[dict[ast.AST, StdRegistryItem]] = None,
-                 node_to_compilable: Optional[dict[ast.AST, "PFLCompilable"]] = None):
+                 node_to_constants: Optional[dict[ast.AST, "PFLCompileConstant"]] = None,
+                 compile_req: Optional["PFLCompileReq"] = None,
+                 func_need_to_compile: Optional[list["PFLCompileReq"]] = None,
+                 allow_inline_expand: bool = False):
         super().__init__(lines)
         # local states
+        self.compile_req = compile_req
         self.anno_evaluate_globals = func_globals
-        if node_to_std_item is None:
-            node_to_std_item = {}
-        self.node_to_std_item = node_to_std_item
-        if node_to_compilable is None:
-            node_to_compilable = {}
-        self.node_to_compilable = node_to_compilable
+        if node_to_constants is None:
+            node_to_constants = {}
+        self.node_to_constants = node_to_constants
         self.depend_compilables: list[str] = []
         # global states
         self._backend = backend
@@ -343,17 +354,67 @@ class PFLParseContext(PFLErrorFormatContext):
             eval_cfg = StaticEvalConfig()
         self.eval_cfg = eval_cfg
         self._disable_type_check: bool = False
+        self._func_unwrapper = func_unwrapper
+        if func_need_to_compile is None:
+            func_need_to_compile = []
+        self._func_need_to_compile: list[PFLCompileReq] = func_need_to_compile
+        self._allow_inline_expand = allow_inline_expand
+
+    def get_compile_req_checked(self) -> "PFLCompileReq":
+        if self.compile_req is None:
+            raise ValueError("compile_req is None, please set it before use.")
+        return self.compile_req
 
     @classmethod 
     def from_outer_ctx(cls, ctx: Self, lines: list[str], func_globals: Any, 
-                node_to_std_item: Optional[dict[ast.AST, StdRegistryItem]] = None,
-                 node_to_compilable: Optional[dict[ast.AST, Any]] = None):
+                 node_to_constants: Optional[dict[ast.AST, "PFLCompileConstant"]] = None,
+                 compile_req: Optional["PFLCompileReq"] = None, allow_inline_expand: bool = False):
         assert not ctx._disable_type_check, "not supported inside decorator list"
-        new_ctx = cls(lines, func_globals, ctx._backend, cfg=ctx.cfg, 
-            eval_cfg=ctx.eval_cfg, node_to_std_item=node_to_std_item,
-            node_to_compilable=node_to_compilable)
+        new_ctx = cls(lines, func_globals, ctx._func_unwrapper, ctx._backend, cfg=ctx.cfg, 
+            eval_cfg=ctx.eval_cfg,
+            node_to_constants=node_to_constants,
+            compile_req=compile_req,
+            allow_inline_expand=allow_inline_expand)
+        # cache and func_need_to_compile is shared.
         new_ctx.cache = ctx.cache
+        new_ctx._func_need_to_compile = ctx._func_need_to_compile
         return new_ctx
+
+    @classmethod 
+    def create_root_ctx(cls, backend: str, func_unwrapper: Callable[[Any], Callable], cfg: Optional[PFLParseConfig] = None, func_need_to_compile: Optional[list["PFLCompileReq"]] = None):
+        return cls([], {}, func_unwrapper, backend, cfg=cfg, func_need_to_compile=func_need_to_compile) 
+
+    def get_compile_req(self, func: Callable, info: Optional["PFLExprFuncInfo"], meta: Optional["PFLCompileFuncMeta"], args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None,
+                            self_type: Optional["PFLExprInfo"] = None,
+                            is_prop: bool = False, is_method_def: bool = False,
+                            bound_self: Optional[Any] = None):
+        # args_from_call: used for template compile
+        if meta is None:
+            if info is None or info.compilable_meta is None:
+                meta = PFLCompileFuncMeta([self._backend])
+            else:
+                meta = info.compilable_meta
+        if info is None:
+            func_uid = get_module_id_of_type(func)
+        else:
+            func_uid = info.func_uid
+        func = self._func_unwrapper(func)
+        # always enqueue compile request, compiler will check if it is needed.
+        req = PFLCompileReq(func, func_uid, meta, info, args_from_call,
+            self_type, is_prop, is_method_def, bound_self=bound_self)
+        return req 
+
+    def enqueue_func_compile(self, func: Callable, info: "PFLExprFuncInfo", args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None,
+                            self_type: Optional["PFLExprInfo"] = None,
+                            is_prop: bool = False, is_method_def: bool = False,
+                            bound_self: Optional[Any] = None):
+        req = self.get_compile_req(func, info, None, args_from_call,
+            self_type=self_type,
+            is_prop=is_prop, is_method_def=is_method_def,
+            bound_self=bound_self)
+        self._func_need_to_compile.append(req)
+        self.depend_compilables.append(info.func_uid)
+        return req
 
 _PFLPARSE_CONTEXT: contextvars.ContextVar[
     Optional[PFLParseContext]] = contextvars.ContextVar("PFLParseContext",
@@ -413,6 +474,13 @@ class PFLExprFuncArgInfo:
     def __repr__(self) -> str:
         return f"{self.arg_name}={self.type}"
 
+    def to_dict(self):
+        return {
+            "arg_name": self.arg_name,
+            "type": self.type.to_dict(),
+            "is_vaargs": self.is_vaargs
+        }
+
 @dataclasses.dataclass(eq=False)
 class PFLExprFuncInfo:
     args: list[PFLExprFuncArgInfo] = dataclasses.field(default_factory=list)
@@ -426,16 +494,45 @@ class PFLExprFuncInfo:
     # other overloads will be saved in `overloads`.
     overloads: Optional[list["PFLExprFuncInfo"]] = None
 
+    compilable_meta: Optional["PFLCompileFuncMeta"] = None
+    func_uid: str = ""
+
     def __repr__(self) -> str:
         args_str = []
         for arg in self.args:
             if arg.is_vaargs:
                 args_str.append(f"...{arg}")
             else:
-                args_str.append(str(arg.type))
+                if not isinstance(arg.type._constexpr_data, Undefined):
+                    args_str.append(f"{arg.type}={arg.type._constexpr_data}")
+                else:
+                    args_str.append(str(arg.type))
         args = ", ".join(args_str)
         res = f"({args}) => {self.return_type}"
         return res
+
+    def to_dict(self):
+        args = [arg.to_dict() for arg in self.args]
+        res: dict[str, Any] = {
+            "args": args,
+            "return_type": self.return_type.to_dict() if self.return_type is not None else None,
+            "is_method": self.is_method,
+            "is_property": self.is_property,
+        }
+        return res
+        
+    def is_template(self):
+        if self.compilable_meta is None:
+            return False 
+        return self.compilable_meta.is_template
+
+    def is_always_inline(self):
+        if self.compilable_meta is None:
+            return False 
+        return self.compilable_meta.always_inline
+
+    def need_delayed_processing(self):
+        return self.is_template() or self.is_always_inline()
 
     def typevar_substitution(self, typevar_map: Mapping[TypeVar, "PFLExprInfo"]) -> Self:
         # we assume new type don't contains typevar.
@@ -494,7 +591,10 @@ class PFLExprFuncInfo:
                                                             allow_type_var=True)
             else:
                 res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+        else:
+            res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
         return res
+
 
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
@@ -511,11 +611,14 @@ class PFLExprInfo:
     anno_metadatas_ext: list[Any] = dataclasses.field(default_factory=list)
     # when this expr is type or function, this may be set. (dataclass ctor is lazy-parsed).
     func_info: Optional[PFLExprFuncInfo] = None
-    # indicate this function is a compiled function, not stdlib function.
+    # indicate this function/operator result use a compiled function, not stdlib function.
     # we need to get inside when evaluation
     compiled_uid: Optional[str] = None
+    # currently only used by subscript, requires two functions (__getitem__ and __setitem__)
+    additional_compiled_uid: Optional[str] = None
+    delayed_compile_req: Optional[Any] = None
     # for dataclass in function arg
-    is_temp: bool = False
+    is_stdlib: bool = False
     # for meta call (type validation, shape inference, etc)
     # TODO should it be sent to frontend?
     _metadata: Union[Undefined, Any] = undefined
@@ -528,6 +631,10 @@ class PFLExprInfo:
         res: dict[str, Any] = {
             "type": self.type,
         }
+        if self.compiled_uid is not None:
+            res["compiled_uid"] = self.compiled_uid
+        if self.additional_compiled_uid is not None:
+            res["additional_compiled_uid"] = self.additional_compiled_uid
         if self.childs:
             res["childs"] = childs
         if self.has_optional:
@@ -538,6 +645,10 @@ class PFLExprInfo:
             res["mapped"] = self.mapped
         if not isinstance(self.metadata, Undefined):
             res["metadata"] = self.metadata
+        if self.func_info is not None:
+            res["func_info"] = self.func_info.to_dict()
+        if self.is_stdlib:
+            res["is_stdlib"] = self.is_stdlib
         return res
 
     def __repr__(self) -> str:
@@ -642,8 +753,12 @@ class PFLExprInfo:
                 parse_cache = get_parse_cache_checked()
             item = parse_cache.cached_get_std_item(
                 annotype.origin_type)
-            res.mapped = item.mapped_name
-            res.is_temp = item.is_temp
+            if item is None:
+                # isn't stdlib
+                res.is_stdlib = False
+            else:
+                res.mapped = item.mapped_name
+                res.is_stdlib = True
             if is_type:
                 res.proxy_dcls = proxy_dcls
         elif annotype.is_tuple_type():
@@ -682,9 +797,11 @@ class PFLExprInfo:
                        ignore_self: bool = False,
                        self_type: Optional[AnnotatedType] = None,
                        overload_sigs: Optional[list[inspect.Signature]] = None,
-                       raw_func: Optional[Callable] = None) -> Self:
+                       raw_func: Optional[Callable] = None,
+                       compilable_meta: Optional["PFLCompileFuncMeta"] = None) -> Self:
         res_info = PFLExprFuncInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, overload_sigs=overload_sigs)
         res_info.raw_func = raw_func
+        res_info.compilable_meta = compilable_meta
         res = cls(PFLExprType.FUNCTION, func_info=res_info)
         return res
 
@@ -786,10 +903,10 @@ class PFLExprInfo:
         return self.type in _TYPE_SUPPORT_BINARY_OP
 
     def is_convertable(self, tgt: "PFLExprInfo"):
-        if not tgt.is_optional() and self.is_optional():
-            return False
         if tgt.type == PFLExprType.ANY:
             return True
+        if not tgt.is_optional() and self.is_optional():
+            return False
         if tgt.type == PFLExprType.TUPLE and self.type == PFLExprType.TUPLE:
             if tgt.annotype is not None:
                 if tgt.annotype.is_homogeneous:
@@ -859,6 +976,8 @@ class PFLExprInfo:
 
     @metadata.setter
     def metadata(self, value: Union[Undefined, Any]):
+        from .pfl_ast import PFLAstNodeBase
+        assert not isinstance(value, PFLAstNodeBase)
         if self.annotype is not None:
             var_meta = self.annotype.get_annometa(PFLVariableMeta)
             if var_meta is not None:
@@ -938,6 +1057,7 @@ class PFLExprInfo:
                                     childs=[],
                                     return_type=None)
             return func_args, ret_type
+
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
     # since js don't support keyword, we don't need to care about kw.
@@ -1020,14 +1140,62 @@ class PFLCompileFuncMeta:
     # used by debugger/simulator.
     inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None
     is_template: bool = False
+    always_inline: bool = False
+
+    def need_delayed_processing(self):
+        return self.is_template or self.always_inline
 
 @dataclasses.dataclass
-class PFLCompilable:
+class PFLCompileReq:
     func: Callable
     uid: str
     meta: PFLCompileFuncMeta
+    info: Optional[PFLExprFuncInfo] = None
+    args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None
+    self_type: Optional[Union[PFLExprInfo, AnnotatedType]] = None
+    is_prop: bool = False 
+    is_method_def: bool = False
+    # jit compile may need this.
+    external_anno: Optional[tuple[dict[str, Any], Any]] = None
+    # bounded object if func is a method.
+    # usually used for meta-programming (use self.xxx as constant.)
+    bound_self: Optional[Any] = None
+    # if some arguments are constexpr, we will use this to inline expand if.
+    constexpr_args: Optional[dict[str, Any]] = None
 
+    def __post_init__(self):
+        if self.is_method_def:
+            assert self.self_type is not None 
 
+    def __repr__(self):
+        prefix = "[func]"
+        if self.is_method_def:
+            prefix = "[method]"
+        if self.bound_self is not None:
+            prefix = "[bound-method]"
+        if self.meta.is_template:
+            prefix += "[template]"
+        elif self.meta.always_inline:
+            prefix += "[always-inline]"
+        return f"{prefix} {self.uid}"
+
+    def get_func_compile_uid(self, delayed_info: Optional[PFLExprFuncInfo] = None) -> str:
+        if self.bound_self is None and not self.meta.is_template:
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.NORMAL), "normal"]).uid_encoded
+        if self.bound_self is not None:
+            assert not self.meta.is_template, "currently bound method can't be template"
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.BOUND), hex(id(self.bound_self))]).uid_encoded
+        else:
+            # use signature as template func uid
+            if delayed_info is not None:
+                info = delayed_info
+            else:
+                assert self.info is not None 
+                info = self.info
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.TEMPLATE_SPEC), str(info)]).uid_encoded
+
+    def is_bound_method(self) -> bool:
+        return self.bound_self is not None
 
 @overload
 def mark_pfl_compilable(fn: T) -> T: ...
@@ -1035,24 +1203,25 @@ def mark_pfl_compilable(fn: T) -> T: ...
 @overload
 def mark_pfl_compilable(fn: None = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
-        meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
 
 @register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
 def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
-        meta: Optional[PFLCompileFuncMeta] = None) -> Union[T, Callable[[T], T]]:
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Union[T, Callable[[T], T]]:
     def wrapper(fn_wrapped: T) -> T:
         prev_meta: Optional[PFLCompileFuncMeta] = getattr(fn_wrapped, PFL_COMPILE_META_ATTR, None)
         if meta is not None:
             setattr(fn_wrapped, PFL_COMPILE_META_ATTR, meta)
         else:
             if prev_meta is None:
-                prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template)
+                prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template, always_inline=always_inline)
                 setattr(fn_wrapped, PFL_COMPILE_META_ATTR, prev_meta)
             else:
                 prev_meta.backends = backends
                 prev_meta.inline_run_env_fn = inline_run_env_fn
                 prev_meta.is_template = is_template
+                prev_meta.always_inline = always_inline
         return cast(T, fn_wrapped)
     if fn is None:
         return wrapper
@@ -1114,3 +1283,24 @@ def evaluate_annotation_expr(annotation: Union[ast.expr, str]):
             {},
             recursive_guard=set())  # type: ignore
     return ann_res
+
+class PFLCompileConstantType(enum.IntEnum):
+    BUILTIN_VALUE = 0
+    # global (qual) function, maybe stdlib
+    FUNCTION = 1
+    # dataclass, maybe stdlib
+    DATACLASS_TYPE = 32
+
+@dataclasses.dataclass
+class PFLCompileConstant:
+    type: PFLCompileConstantType
+    value: Any
+    is_stdlib: bool = False 
+    bound_self: Optional[Any] = None
+
+
+class PFLCompilableType(enum.IntEnum):
+    NORMAL = 0
+    BOUND = 1
+    TEMPLATE_SPEC = 2
+

@@ -4,10 +4,14 @@ import dataclasses
 import numpy as np
 from typing_extensions import Self
 
+from tensorpc.core import pfl
+from tensorpc.core.pfl.evaluator import get_pfl_runner_state
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
-from tensorpc.apps.ppcl.tsim.core import (
+from tensorpc.apps.mls.tsim.core import (
     DTypeEnum,
+    TensorSimIoOp,
     get_default_base_dtype,
+    get_tensorsim_context,
 )
 from .tensor import (
     SimTensor,
@@ -82,6 +86,13 @@ def assign_random_memory_block_offset(
         start_with_hole = _align_up(start_with_hole, 128)
     return start
 
+@dataclasses.dataclass
+class _SimPointerMapResult:
+    mapped: np.ndarray
+    block_name: str
+    is_partial: bool
+    all_masked: bool
+    origin_pointer_with_mask: np.ndarray
 
 @dataclasses.dataclass(kw_only=True)
 class SimMemoryStorage(SimTensorStorage):
@@ -93,6 +104,7 @@ class SimMemoryStorage(SimTensorStorage):
         pointer_data_max = pointer_data.max() * pointer_item_size
         pointer_data_min = pointer_data.min() * pointer_item_size
         is_partial: bool = False
+        # no need to use binary search because amount of memory blocks is small.
         for k, desc in self.memory_blocks.items():
             min_in_range = (
                 pointer_data_min >= desc.byte_offset_with_hole
@@ -123,23 +135,41 @@ class SimMemoryStorage(SimTensorStorage):
         mask: Optional[SimTensor] = None,
     ):
         assert pointer.storage is not None
+        origin_with_mask = np.empty_like(pointer.storage.data)
+
         if mask is not None and mask.storage is not None:
             pointer_data = pointer.storage.data[mask.storage.data]
+            origin_with_mask[~mask.storage.data] = -1
         else:
             pointer_data = pointer.storage.data
         
         if pointer_data.size == 0:
-            return pointer_data, "", True, True
+            return _SimPointerMapResult(
+                mapped=np.array([], dtype=np.int64),
+                block_name="",
+                is_partial=True,
+                all_masked=True,
+                origin_pointer_with_mask=origin_with_mask,
+            )
+            # return pointer_data, "", True, True
         offset, k, is_partial = self._map_pointer_data(
             pointer_data, DTypeEnum(pointer.dtype).byte_size()
         )
-        return pointer.storage.data - offset, k, is_partial, False
+        if mask is not None and mask.storage is not None:
+            origin_with_mask[mask.storage.data] = pointer_data - offset
+        return _SimPointerMapResult(
+            mapped=pointer.storage.data - offset,
+            block_name=k,
+            is_partial=is_partial,
+            all_masked=False,
+            origin_pointer_with_mask=origin_with_mask,
+        )
 
     def _boundry_check_and_map_pointers(
         self,
         pointer: Union["SimPointerTensor", "SimPointerScalarBase"],
         mask: Optional[SimTensor] = None,
-    ) -> tuple[np.ndarray, str, bool]:
+    ) -> _SimPointerMapResult:
         assert pointer.storage is not None
         if mask is not None:
             assert mask.storage is not None
@@ -153,10 +183,10 @@ class SimMemoryStorage(SimTensorStorage):
             for j in range(mask.ndim):
                 assert mask_shape_rev[j] <= pointer_shape_rev[j]
 
-        new_pointer_data, block_name, is_partial, all_masked = self._map_pointer(pointer, mask)
-        if not all_masked:
-            assert not is_partial, "your pointer (with mask filtering) is out of range."
-        return new_pointer_data, block_name, all_masked
+        res = self._map_pointer(pointer, mask)
+        if not res.all_masked:
+            assert not res.is_partial, "your pointer (with mask filtering) is out of range."
+        return res
 
     def load(
         self,
@@ -173,9 +203,12 @@ class SimMemoryStorage(SimTensorStorage):
                 mask_ten.get_storage_checked().data[:] = mask
                 mask = mask_ten
             mask = broadcast_to(mask, pointer.shape)
-        mapped_pointer_data, block_name, all_masked = self._boundry_check_and_map_pointers(
+        map_result = self._boundry_check_and_map_pointers(
             pointer, mask
         )
+        mapped_pointer_data = map_result.mapped
+        block_name = map_result.block_name
+        all_masked = map_result.all_masked
         assert not all_masked
         # if all_masked:
         #     # if all masked, return empty tensor
@@ -194,6 +227,16 @@ class SimMemoryStorage(SimTensorStorage):
         loaded_indices = mapped_pointer_data[
             ..., None
         ] * pointer.num_element + np.arange(pointer.num_element, dtype=np.int32)
+        # js don't support int64, so we use int32
+        loaded_indices = loaded_indices.astype(np.int32)
+        runner_ctx = get_pfl_runner_state()
+        tensor_sim_ctx = get_tensorsim_context()
+        if tensor_sim_ctx is not None and runner_ctx is not None:
+            assert isinstance(runner_ctx.cur_expr, pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
+            indices_for_record = loaded_indices.reshape(-1, pointer.num_element).copy()
+            if mask is not None:
+                indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
+            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(True, block_name, indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape))
         if mask is None:
             output_data[:] = data_raw[pointer_data].reshape(
                 *pointer.shape, pointer.num_element
@@ -263,13 +306,24 @@ class SimMemoryStorage(SimTensorStorage):
             mask_ten = zeros([], DTypeEnum.bool_)
             mask_ten.get_storage_checked().data[:] = mask
             mask = mask_ten
-        mapped_pointer_data, block_name, all_masked = self._boundry_check_and_map_pointers(
+        map_result = self._boundry_check_and_map_pointers(
             pointer, mask
         )
+        mapped_pointer_data = map_result.mapped
+        block_name = map_result.block_name
+        all_masked = map_result.all_masked
         if all_masked:
             return 
         block_desc = self.memory_blocks[block_name]
         block_data = block_desc.get_data_view_checked()
+        runner_ctx = get_pfl_runner_state()
+        tensor_sim_ctx = get_tensorsim_context()
+        if tensor_sim_ctx is not None and runner_ctx is not None:
+            assert isinstance(runner_ctx.cur_expr, pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
+            indices_for_record = mapped_pointer_data.reshape(-1, pointer.num_element).copy()
+            if mask is not None:
+                indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
+            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(False, block_name, indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape))
 
         if DTypeEnum(pointer.dtype).to_numpy_dtype() != block_data.dtype:
             raise NotImplementedError

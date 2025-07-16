@@ -12,6 +12,7 @@ import urllib.request
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel import typemetas
+from tensorpc.dock.components.three.geometry import Shape
 from tensorpc.dock.core.component import (UIType, FrontendEventType, ContainerBaseProps)
 from collections.abc import Sequence
 from tensorpc.dock.core import colors
@@ -959,8 +960,8 @@ class Line(Object3dWithEventBase[LineProps]):
     ) -> None:
         super().__init__(UIType.ThreeLine, LineProps)
         if isinstance(points, np.ndarray):
-            assert points.ndim == 2 and points.shape[
-                1] == 3 and points.dtype == np.float32, "must be [N, 3] array"
+            nelem = points.shape[1]
+            assert points.ndim == 2 and (nelem == 3 or nelem == 2) and points.dtype == np.float32, "must be [N, 3]/[N, 2] array"
             self.props.points = points
         else:
             self.props.points = points
@@ -980,6 +981,35 @@ class Line(Object3dWithEventBase[LineProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
+class LineShapeProps(Object3dBaseProps):
+    pathOps: list[tuple[int, list[Union[float, bool]]]] = dataclasses.field(
+        default_factory=list)
+    color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
+    dashed: Union[bool, Undefined] = undefined
+    dashSize: Union[NumberType, Undefined] = undefined
+    gapSize: Union[NumberType, Undefined] = undefined
+    lineWidth: Union[NumberType, Undefined] = undefined
+    transparent: Union[bool, Undefined] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
+    divisions: Union[NumberType, Undefined] = undefined
+
+class LineShape(Object3dWithEventBase[LineShapeProps]):
+
+    def __init__(self, shape: Shape) -> None:
+        super().__init__(UIType.ThreeLineShape, LineShapeProps)
+        self.props.pathOps = shape.ops
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class ContactShadowsProps(Object3dBaseProps):

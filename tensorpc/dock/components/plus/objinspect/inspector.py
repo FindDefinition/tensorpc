@@ -14,7 +14,7 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Sequence, Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
-from typing_extensions import ParamSpec
+from typing_extensions import Literal, ParamSpec
 
 from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
@@ -88,7 +88,8 @@ class ObjectInspector(mui.FlexBox):
                  with_builtins: bool = True,
                  custom_tabs: Optional[List[mui.TabDef]] = None,
                  custom_preview: Optional[ObjectPreviewBase] = None,
-                 horizontal: bool = False) -> None:
+                 horizontal: bool = False,
+                 default_tab_preview: bool = True) -> None:
 
         # self.preview_container = mui.HBox([]).prop(overflow="auto",
         #                                            flex=1,
@@ -134,7 +135,7 @@ class ObjectInspector(mui.FlexBox):
                 tooltip=
                 "custom layout (appctx.inspector.set_custom_layout_sync)"),
         ]
-        default_tab = tab_prefix + "1"
+        default_tab = tab_prefix + "1" if default_tab_preview else tab_prefix + "2"
         if show_terminal:
             tabdefs.append(
                 mui.TabDef("",
@@ -352,6 +353,11 @@ class ObjectInspector(mui.FlexBox):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
         await self.fast_layout_container.set_new_layout([layout])
+
+    async def clear_custom_layout(self):
+        """set object in sync manner, usually used on non-sync code via appctx.
+        """
+        await self.fast_layout_container.set_new_layout([])
 
     def set_custom_layout_sync(
             self,

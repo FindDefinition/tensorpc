@@ -495,18 +495,21 @@ def child_type_generator_with_dataclass(t: type):
     if dataclasses.is_dataclass(t):
         type_hints = get_type_hints_with_cache(t, include_extras=True)
         for field in dataclasses.fields(t):
-            yield from child_type_generator(type_hints[field.name])
+            yield from child_type_generator_with_dataclass(type_hints[field.name])
     else:
         args = get_args(t)
         if is_annotated(t):
-            yield from child_dataclass_type_generator(args[0])
+            yield from child_type_generator_with_dataclass(args[0])
         else:
             for arg in args:
-                yield from child_dataclass_type_generator(arg)
+                yield from child_type_generator_with_dataclass(arg)
 
 def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], None, None]:
-    if dataclasses.is_dataclass(t):
+    if dataclasses.is_dataclass(t) and inspect.isclass(t) :
         yield t
+        type_hints = get_type_hints_with_cache(t, include_extras=True)
+        for field in dataclasses.fields(t):
+            yield from child_dataclass_type_generator(type_hints[field.name])
     else:
         args = get_args(t)
         if is_annotated(t):
@@ -528,8 +531,13 @@ def parse_annotated_function(
 
     specs = inspect.signature(func)
     name_to_parameter = {p.name: p for p in specs.parameters.values()}
+    # print(name_to_parameter, annos.keys())
     anno_args: List[AnnotatedArg] = []
+    anno_args_map: dict[str, AnnotatedArg] = {}
     return_anno: Optional[AnnotatedReturn] = None
+    for name, param in name_to_parameter.items():
+        anno_args.append(AnnotatedArg(name, param, Any))
+        anno_args_map[name] = anno_args[-1]
     for name, anno in annos.items():
         if name == "return":
             anno, annotated_metas = extract_annotated_type_and_meta(anno)
@@ -538,13 +546,14 @@ def parse_annotated_function(
             param = name_to_parameter[name]
             anno, annotated_metas = extract_annotated_type_and_meta(anno)
 
-            arg_anno = AnnotatedArg(name, param, anno, annotated_metas)
-            anno_args.append(arg_anno)
-    for name, param in name_to_parameter.items():
-        if name not in annos and param.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD):
-            anno_args.append(AnnotatedArg(name, param, Any))
+            # arg_anno = AnnotatedArg(name, param, anno, annotated_metas)
+            anno_args_map[name].type = anno
+            anno_args_map[name].annometa = annotated_metas
+    # for name, param in name_to_parameter.items():
+    #     if name not in annos and param.kind in (
+    #             inspect.Parameter.POSITIONAL_ONLY,
+    #             inspect.Parameter.POSITIONAL_OR_KEYWORD):
+    #         anno_args.append(AnnotatedArg(name, param, Any))
     return anno_args, return_anno
 
 

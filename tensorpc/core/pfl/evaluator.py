@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Sequence
 from contextlib import AbstractContextManager, ExitStack
 import contextlib
+import contextvars
 import enum
 import inspect
 import traceback
@@ -10,10 +11,11 @@ from typing_extensions import TypeAlias
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (Undefined, is_undefined, undefined)
 from tensorpc.core.event_emitter.single import SingleAsyncEventEmitter
+from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
 from tensorpc.core.moduleid import get_module_id_of_type
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
 
-from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
+from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLInlineRunEnv, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
                    enter_parse_context, get_parse_context, get_parse_context_checked)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
@@ -115,8 +117,12 @@ class PFLStaticEvaluator:
             if isinstance(expr_node, (PFLArray, PFLTuple)):
                 # list/tuple have length info, so we allow all fail.
                 node_allow_all_child_fail = True
-
-            if all_success and not any(all_success) and not node_allow_all_child_fail:
+            is_compiled_func: bool = False 
+            if isinstance(expr_node, (PFLCall)):
+                is_compiled_func = expr_node.func.st.compiled_uid is not None
+            elif isinstance(expr_node, ( PFLUnaryOp, PFLBinOp, PFLCompare, PFLSubscript)):
+                is_compiled_func = expr_node.st.compiled_uid is not None
+            if all_success and not any(all_success) and not node_allow_all_child_fail and not is_compiled_func:
                 if self.cfg.allow_partial:
                     return False
                 else:
@@ -124,7 +130,7 @@ class PFLStaticEvaluator:
                     raise PFLEvalError(f"Some child of Expr {expr_node_str} eval failed.", expr_node)
             try:
                 if isinstance(expr_node, PFLCall):
-                    func_st = expr_node.st
+                    func_st = expr_node.func.st
                     if func_st.compiled_uid is not None:
                         all_compiled = self._library.all_compiled
                         assert func_st.compiled_uid in all_compiled
@@ -137,11 +143,40 @@ class PFLStaticEvaluator:
                             # TODO validate vaargs type
                             if args:
                                 # may use default here.
-                                func_scope[func_arg_st.arg_name] = args[0]
+                                func_scope[func_arg_st.arg_name] = args[0].st.metadata
                         self._eval_total_tree_node(compiled_node, func_scope)
                         if compiled_node.ret_st is not None:
                             expr_node.st.metadata = compiled_node.ret_st.metadata
                         return True
+                elif isinstance(expr_node, (PFLUnaryOp, PFLBinOp, PFLCompare, PFLSubscript)):
+                    if expr_node.st.compiled_uid is not None:
+                        # compiled unary op.
+                        all_compiled = self._library.all_compiled
+                        assert expr_node.st.compiled_uid in all_compiled
+                        compiled_node = all_compiled[expr_node.st.compiled_uid]
+                        func_args = compiled_node.st.get_func_info_checked().args
+                        func_scope = {}
+                        if isinstance(expr_node, PFLUnaryOp):
+                            val_args = [expr_node.operand.st.metadata]
+                        elif isinstance(expr_node, (PFLBinOp, PFLCompare)):
+                            val_args = [expr_node.left.st.metadata, expr_node.right.st.metadata]
+                            if expr_node.get_is_right_val():
+                                val_args = [val_args[1], val_args[0]] 
+                        elif isinstance(expr_node, (PFLSubscript)):
+                            val_args = [expr_node.value.st.metadata]
+                            if isinstance(expr_node.slice, PFLExpr):
+                                val_args.append(expr_node.slice.st.metadata)
+                            else:
+                                val_args.append(tuple(s.st.metadata for s in expr_node.slice))
+                        else:
+                            raise NotImplementedError   
+                        for func_arg, val in zip(func_args, val_args):
+                            func_scope[func_arg.arg_name] = val
+                        self._eval_total_tree_node(compiled_node, func_scope)
+                        if compiled_node.ret_st is not None:
+                            expr_node.st.metadata = compiled_node.ret_st.metadata
+                        return True
+
                 if self.cfg.prefer_meta_eval:
                     res = expr_node.metaeval()
                 else:
@@ -192,17 +227,15 @@ class PFLStaticEvaluator:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
             parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
         _clear_consteval_result(func_node)
-        code_for_error = self._library.get_module_by_func(func_node.uid).compile_info.code
+        code_for_error = self._library.get_module_by_func_uid(func_node.uid).compile_info.code
         lines = []
         if code_for_error is not None:
             lines = code_for_error.split("\n")
         outer_ctx = get_parse_context() 
-        all_compiled = self._library.all_compiled
         if outer_ctx is not None:
-            assert all_compiled is None
             parse_ctx = PFLParseContext.from_outer_ctx(outer_ctx, lines, {})
         else:
-            parse_ctx = PFLParseContext(lines, {}, backend, cfg=parse_cfg, eval_cfg=self.cfg)
+            parse_ctx = PFLParseContext(lines, {}, unwrap_fn_static_cls_property, backend, cfg=parse_cfg, eval_cfg=self.cfg)
         with enter_parse_context(parse_ctx) as ctx:
             init_scope = self._get_init_scope(func_node, scope)
             try:
@@ -216,7 +249,9 @@ class PFLStaticEvaluator:
     def eval_total_tree(self, func: Union[str, Callable],
                             scope: dict[str, Any],
                             parse_cfg: Optional[PFLParseConfig] = None):
-        func_node = self._library.get_compiled_unit(func)
+        func_nodes = self._library.get_compiled_unit_specs(func)
+        assert len(func_nodes) == 1, "only support evaluate non-template function."
+        func_node = func_nodes[0]
         # perform const fold and meta inference, result is stored in metadata in each static type.
         # WARNING: inplace operation
         backend = self._library.backend
@@ -224,7 +259,10 @@ class PFLStaticEvaluator:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
             parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
         _clear_consteval_result(func_node)
-        code_for_error = self._library.get_module_by_func(func).compile_info.code
+        if isinstance(func, str):
+            code_for_error = self._library.get_module_by_func_uid(func_node.uid).compile_info.code
+        else:
+            code_for_error = self._library.get_module_by_func(func).compile_info.code
         lines = []
         if code_for_error is not None:
             lines = code_for_error.split("\n")
@@ -234,7 +272,7 @@ class PFLStaticEvaluator:
             assert all_compiled is None
             parse_ctx = PFLParseContext.from_outer_ctx(outer_ctx, lines, {})
         else:
-            parse_ctx = PFLParseContext(lines, {}, backend, cfg=parse_cfg, eval_cfg=self.cfg)
+            parse_ctx = PFLParseContext(lines, {}, unwrap_fn_static_cls_property, backend, cfg=parse_cfg, eval_cfg=self.cfg)
         with enter_parse_context(parse_ctx) as ctx:
             init_scope = self._get_init_scope(func_node, scope)
             try:
@@ -382,7 +420,7 @@ class PFLCtrlFor(PFLCtrlBase):
 
 class PFLAsyncRunnerStateType(enum.IntEnum):
     IDLE = 0
-    RUNNING_ON_THE_FLY = 1
+    RUNNING = 1
     DURING_RUNNING_TO = 2
     PAUSE = 3
     NEED_STOP = 4
@@ -394,16 +432,41 @@ class PFLBreakpointDesc:
     one_shot: bool = False
 
 @dataclasses.dataclass
+class PFLAsyncRunnerStack:
+    node: PFLFunc
+    scope: dict[str, Any]
+
+@dataclasses.dataclass
 class PFLBreakpoint:
     node: PFLAstNodeBase
     scope: dict[str, Any]
+    stack: list[PFLAsyncRunnerStack]
 
 @dataclasses.dataclass
 class PFLAsyncRunnerState:
     type: PFLAsyncRunnerStateType
     cur_bkpt: Optional[PFLBreakpoint] = None
     cur_ctrl_points: dict[int, PFLCtrlBase] = dataclasses.field(default_factory=dict)
-    
+    pause_next_line: bool = False
+    stack: list[PFLAsyncRunnerStack] = dataclasses.field(default_factory=list)
+    cur_expr: Optional[PFLExpr] = None
+    cur_call_std_func: Optional[Callable] = None
+
+_PFL_STATE_CONTEXT: contextvars.ContextVar[Optional[PFLAsyncRunnerState]] = contextvars.ContextVar(
+    "PFLAsyncRunnerState", default=None)
+
+def get_pfl_runner_state() -> Optional[PFLAsyncRunnerState]:
+    """Get the current PFL async runner state."""
+    return _PFL_STATE_CONTEXT.get(None)
+
+@contextlib.contextmanager
+def enter_pfl_runner_state(state: PFLAsyncRunnerState):
+    """Context manager to enter a PFL async runner state."""
+    token = _PFL_STATE_CONTEXT.set(state)
+    try:
+        yield state
+    finally:
+        _PFL_STATE_CONTEXT.reset(token)
 
 class PFLEvalStop(Exception):
 
@@ -440,6 +503,7 @@ class PFLAsyncRunner:
         self.event_delete_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
         self.event_ctrl_point_change: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
         self.event_eval_stop: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
+        self.event_eval_start: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
 
 
     async def _run_coro_none(self, fn: Callable[..., _CORO_NONE], *args) -> None:
@@ -451,6 +515,7 @@ class PFLAsyncRunner:
     def clear_runtime_state(self):
         self._state = PFLAsyncRunnerState(PFLAsyncRunnerStateType.IDLE)
         self._event.clear()
+        # TODO should we clear breakpoint here?
         self._breakpoints.clear()
 
     def release_breakpoint(self, stop: bool = False):
@@ -468,7 +533,7 @@ class PFLAsyncRunner:
             self._breakpoints.pop(lineno)
 
     async def _enter_breakpoint(self, node: PFLAstNodeBase, scope: dict[str, Any]):
-        self._state.cur_bkpt = PFLBreakpoint(node, scope)
+        self._state.cur_bkpt = PFLBreakpoint(node, scope, self._state.stack)
         self._state.type = PFLAsyncRunnerStateType.PAUSE
         self._event.clear()
         # call user callback after event set to let user release this bkpt in callback.
@@ -485,7 +550,7 @@ class PFLAsyncRunner:
             self._state.cur_ctrl_points.clear()
             self._breakpoints.clear()
             raise PFLEvalStop("Eval Stop by user.", node)
-        self._state.type = PFLAsyncRunnerStateType.RUNNING_ON_THE_FLY
+        self._state.type = PFLAsyncRunnerStateType.RUNNING
 
     async def _may_pause_by_ctrl_points(self, node: PFLAstNodeBase, scope: dict[str, Any]):
         if not self._state.cur_ctrl_points:
@@ -496,6 +561,11 @@ class PFLAsyncRunner:
         return False
 
     async def _check_enter_breakpoint(self, node: PFLAstNodeBase, scope: dict[str, Any]):
+        if self._state.pause_next_line:
+            self.add_breakpoint(node.source_loc[0])
+            self._state.pause_next_line = False
+        if not self._breakpoints:
+            return 
         if node.source_loc[0] in self._breakpoints:
             bkpt_desc = self._breakpoints[node.source_loc[0]]
             if self._state.cur_ctrl_points:
@@ -518,196 +588,273 @@ class PFLAsyncRunner:
             slice_str = await self._run_expr(node.slice, scope)
         return tgt, slice_str
 
+
     async def _run_expr(self, expr: PFLExpr, scope: dict[str, Any]) -> Any:
-        if isinstance(expr, PFLName):
-            if expr.st.compiled_uid is not None:
-                return self._library.all_compiled[expr.st.compiled_uid]
-            return scope[expr.id]
-        elif isinstance(expr, PFLAttribute):
-            if expr.st.compiled_uid is not None:
-                return self._library.all_compiled[expr.st.compiled_uid]
-            return getattr(await self._run_expr(expr.value, scope), expr.attr)
-        elif isinstance(expr, PFLConstant):
-            return expr.value
-        elif isinstance(expr, PFLSlice):
-            lo_str = None if is_undefined(expr.lo) else await self._run_expr(expr.lo, scope)
-            hi_str = None if is_undefined(expr.hi) else await self._run_expr(expr.hi, scope)
-            step_str = None if is_undefined(expr.step) else await self._run_expr(
-                expr.step, scope)
-            return slice(lo_str, hi_str, step_str)
-        elif isinstance(expr, PFLSubscript):
-            tgt, slice_str = await self._get_subscript_target_slice(expr, scope)
-            return tgt[slice_str]
-        elif isinstance(expr, PFLArray):
-            return [await self._run_expr(elt, scope)
-                                for elt in expr.elts]
-        elif isinstance(expr, PFLTuple):
-            return tuple([await self._run_expr(elt, scope)
-                                for elt in expr.elts])
-        elif isinstance(expr, PFLDict):
-            res = {}
-            for k, v in zip(expr.keys, expr.values):
-                vv: Any = await self._run_expr(v, scope)
-                if k is None:
-                    res.update(vv)
+        prev = self._state.cur_expr
+        self._state.cur_expr = expr
+        try:
+            if isinstance(expr, PFLName):
+                if expr.st.compiled_uid is not None:
+                    return self._library.all_compiled[expr.st.compiled_uid]
+                return scope[expr.id]
+            elif isinstance(expr, PFLAttribute):
+                if expr.st.compiled_uid is not None:
+                    return self._library.all_compiled[expr.st.compiled_uid]
+                return getattr(await self._run_expr(expr.value, scope), expr.attr)
+            elif isinstance(expr, PFLConstant):
+                return expr.value
+            elif isinstance(expr, PFLSlice):
+                lo_str = None if is_undefined(expr.lo) else await self._run_expr(expr.lo, scope)
+                hi_str = None if is_undefined(expr.hi) else await self._run_expr(expr.hi, scope)
+                step_str = None if is_undefined(expr.step) else await self._run_expr(
+                    expr.step, scope)
+                return slice(lo_str, hi_str, step_str)
+            elif isinstance(expr, PFLSubscript):
+                tgt, slice_str = await self._get_subscript_target_slice(expr, scope)
+                if expr.st.compiled_uid is not None:
+                    custom_fn = self._library.all_compiled[expr.st.compiled_uid]
+                    
+                    return await self._run_func(expr.st.compiled_uid, {
+                        custom_fn.args[0].arg: tgt,
+                        custom_fn.args[1].arg: slice_str
+                    })
                 else:
-                    kk = await self._run_expr(v, scope)
-                    res[kk] = vv
-            return res
-        elif isinstance(expr, PFLBoolOp):
-            values = [await self._run_expr(v, scope) for v in expr.values]
-            if expr.op == BoolOpType.AND:
-                res = all(values)
+                    return tgt[slice_str]
+            elif isinstance(expr, PFLArray):
+                return [await self._run_expr(elt, scope)
+                                    for elt in expr.elts]
+            elif isinstance(expr, PFLTuple):
+                return tuple([await self._run_expr(elt, scope)
+                                    for elt in expr.elts])
+            elif isinstance(expr, PFLDict):
+                res = {}
+                for k, v in zip(expr.keys, expr.values):
+                    vv: Any = await self._run_expr(v, scope)
+                    if k is None:
+                        res.update(vv)
+                    else:
+                        kk = await self._run_expr(v, scope)
+                        res[kk] = vv
+                return res
+            elif isinstance(expr, PFLBoolOp):
+                values = [await self._run_expr(v, scope) for v in expr.values]
+                if expr.op == BoolOpType.AND:
+                    res = all(values)
+                else:
+                    res = any(values)
+                return res
+            elif isinstance(expr, (PFLBinOp, PFLCompare)):
+                left = await self._run_expr(expr.left, scope)
+                right = await self._run_expr(expr.right, scope)
+                if expr.st.compiled_uid is not None:
+                    custom_fn = self._library.all_compiled[expr.st.compiled_uid]
+                    if expr.get_is_right_val():
+                        left, right = right, left
+                    return await self._run_func(expr.st.compiled_uid, {
+                        custom_fn.args[0].arg: left,
+                        custom_fn.args[1].arg: right
+                    })
+                else:
+                    return expr.run(left, right)
+            elif isinstance(expr, PFLUnaryOp):
+                left = await self._run_expr(expr.operand, scope)
+                if expr.st.compiled_uid is not None:
+                    custom_fn = self._library.all_compiled[expr.st.compiled_uid]
+                    return await self._run_func(expr.st.compiled_uid, {
+                        custom_fn.args[0].arg: left,
+                    })
+                else:
+                    return expr.run(left)
+            elif isinstance(expr, PFLCall):
+                func_st = expr.func.st
+                if func_st.compiled_uid is not None:
+                    kwargs = {}
+                    finfo = func_st.get_func_info_checked()
+                    # compiled pfl function don't have vaargs
+                    matched = expr._match_arg_sts_to_sig(finfo.args, False)
+                    for arg_st, exprs in matched:
+                        assert arg_st.arg_name is not None 
+                        assert len(exprs) <= 1
+                        for arg_expr in exprs:
+                            arg_value = await self._run_expr(arg_expr, scope)
+                            kwargs[arg_st.arg_name] = (arg_value)
+                    res = await self._run_func(func_st.compiled_uid, kwargs)
+                else:
+                    func_val = await self._run_expr(expr.func, scope)
+                    if expr.func.st.proxy_dcls is not None:
+                        func_val = inspect.getattr_static(expr.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
+                    # assert inspect.isfunction(func_val) or inspect.ismethod(func_val) or (inspect.isclass(func_val) and dataclasses.is_dataclass(func_val)), f"expect function, but got {type(func_val)}"
+                    args = []
+                    kwargs = {}
+                    for arg_expr in expr.args:
+                        arg_expr_val = await self._run_expr(arg_expr, scope)
+                        args.append(arg_expr_val)
+                    if not is_undefined(expr.keys):
+                        assert not is_undefined(expr.vals)
+                        for key_expr, value_expr in zip(expr.keys, expr.vals):
+                            value_value = await self._run_expr(value_expr, scope)
+                            kwargs[key_expr] = value_value
+                    try:
+                        self._state.cur_call_std_func = func_val
+                        res = func_val(*args, **kwargs) 
+                    finally:
+                        self._state.cur_call_std_func = None
+                return res 
+            elif isinstance(expr, PFLIfExp):
+                body = await self._run_expr(expr.body, scope)
+                test = await self._run_expr(expr.test, scope)
+                orelse = await self._run_expr(expr.orelse, scope)
+                return body if test else orelse
             else:
-                res = any(values)
-            return res
-        elif isinstance(expr, (PFLBinOp, PFLCompare)):
-            left = await self._run_expr(expr.left, scope)
-            right = await self._run_expr(expr.right, scope)
-            return expr.run(left, right)
-        elif isinstance(expr, PFLUnaryOp):
-            left = await self._run_expr(expr.operand, scope)
-            return expr.run(left)
-        elif isinstance(expr, PFLCall):
-            func_st = expr.func.st
-            if func_st.compiled_uid is not None:
-                kwargs = {}
-                finfo = func_st.get_func_info_checked()
-                # compiled pfl function don't have vaargs
-                matched = expr._match_arg_sts_to_sig(finfo.args, False)
-                for arg_st, exprs in matched:
-                    assert arg_st.arg_name is not None 
-                    assert len(exprs) <= 1
-                    for arg_expr in exprs:
-                        arg_value = await self._run_expr(arg_expr, scope)
-                        kwargs[arg_st.arg_name] = (arg_value)
-                res = await self._run_func(func_st.compiled_uid, kwargs)
-            else:
-                func_val = await self._run_expr(expr.func, scope)
-                if expr.func.st.proxy_dcls is not None:
-                    func_val = inspect.getattr_static(expr.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
-                # assert inspect.isfunction(func_val) or inspect.ismethod(func_val) or (inspect.isclass(func_val) and dataclasses.is_dataclass(func_val)), f"expect function, but got {type(func_val)}"
-                args = []
-                kwargs = {}
-                for arg_expr in expr.args:
-                    arg_expr_val = await self._run_expr(arg_expr, scope)
-                    args.append(arg_expr_val)
-                if not is_undefined(expr.keys):
-                    assert not is_undefined(expr.vals)
-                    for key_expr, value_expr in zip(expr.keys, expr.vals):
-                        value_value = await self._run_expr(value_expr, scope)
-                        kwargs[key_expr] = value_value
-                res = func_val(*args, **kwargs) 
-            return res 
-        elif isinstance(expr, PFLIfExp):
-            body = await self._run_expr(expr.body, scope)
-            test = await self._run_expr(expr.test, scope)
-            orelse = await self._run_expr(expr.orelse, scope)
-            return body if test else orelse
-        else:
-            raise NotImplementedError(f"Unrecognized PFLExpr type: {type(expr)}")
+                raise NotImplementedError(f"Unrecognized PFLExpr type: {type(expr)}")
+        finally:
+            self._state.cur_expr = prev
 
     async def run_body(self, block_body: list[PFLAstStmt], scope: dict[str, Any]) -> Union[Any, PFLRunnerResult]:
-        for stmt in block_body:
-            if self._breakpoints:
-                await self._check_enter_breakpoint(stmt, scope)
-            try:
-                if isinstance(stmt, PFLExpr):
-                    await self._run_expr(stmt, scope)
-                elif isinstance(stmt, (PFLAssign, PFLAnnAssign)):
-                    if stmt.value is not None:
+        prev_scope = self._state.stack[-1].scope 
+        try:
+            self._state.stack[-1].scope = scope
+            for stmt in block_body:
+                if self._breakpoints or self._state.pause_next_line:
+                    await self._check_enter_breakpoint(stmt, scope)
+                # print("RUN STMT", unparse_pfl_ast(stmt))
+                try:
+                    if isinstance(stmt, PFLExpr):
+                        await self._run_expr(stmt, scope)
+                    elif isinstance(stmt, (PFLAssign, PFLAnnAssign)):
+                        if stmt.value is not None:
+                            value = await self._run_expr(stmt.value, scope)
+                            # when stmt.target is attr or subscript, we need to evaluate more deeper thing.
+                            if isinstance(stmt.target, (PFLAttribute, PFLSubscript)):
+                                assert not is_undefined(stmt.target.is_store) and stmt.target.is_store == True
+                                deep_val = await self._run_expr(stmt.target.value, scope)
+                                if isinstance(stmt.target, (PFLAttribute)):
+                                    setattr(deep_val, stmt.target.attr, value)
+                                else:
+                                    tgt, slice_str = await self._get_subscript_target_slice(stmt.target, scope)
+                                    if stmt.target.st.additional_compiled_uid is not None:
+                                        custom_fn = self._library.all_compiled[stmt.target.st.additional_compiled_uid]
+                                        await self._run_func(stmt.target.st.additional_compiled_uid, {
+                                            custom_fn.args[0].arg: tgt,
+                                            custom_fn.args[1].arg: slice_str,
+                                            custom_fn.args[2].arg: value,
+                                        })
+                                    else:
+                                        tgt[slice_str] = value
+                            elif isinstance(stmt.target, PFLTuple):
+                                for i, elt in enumerate(stmt.target.elts):
+                                    assert isinstance(elt, PFLName)
+                                    scope[elt.id] = value[i]
+                            else:
+                                assert isinstance(stmt.target, PFLName)
+                                scope[stmt.target.id] = value
+                    elif isinstance(stmt, (PFLIf)):
+                        testAndBodyArr = stmt.get_flatten_test_body()
+                        for i in range(len(testAndBodyArr)):
+                            test, body = testAndBodyArr[i]
+                            if test is not None:
+                                test_val = await self._run_expr(test, scope)
+                            else:
+                                test_val = True 
+                            if test_val:
+                                private_scope = scope.copy()
+                                await self.run_body(body, private_scope)
+                                if not is_undefined(stmt._new):
+                                    for v in stmt._new.keys():
+                                        scope[v] = private_scope[v]
+                                for k in scope.keys():
+                                    scope[k] = private_scope[k]
+                                break
+                    elif isinstance(stmt, PFLAugAssign):
                         value = await self._run_expr(stmt.value, scope)
-                        # when stmt.target is attr or subscript, we need to evaluate more deeper thing.
                         if isinstance(stmt.target, (PFLAttribute, PFLSubscript)):
                             assert not is_undefined(stmt.target.is_store) and stmt.target.is_store == True
                             deep_val = await self._run_expr(stmt.target.value, scope)
                             if isinstance(stmt.target, (PFLAttribute)):
-                                setattr(deep_val, stmt.target.attr, value)
+                                val = getattr(deep_val, stmt.target.attr)
+                                new_val = stmt.run(val, value)
+                                setattr(deep_val, stmt.target.attr, new_val)
                             else:
                                 tgt, slice_str = await self._get_subscript_target_slice(stmt.target, scope)
-                                tgt[slice_str] = value
-                        elif isinstance(stmt.target, PFLTuple):
-                            for i, elt in enumerate(stmt.target.elts):
-                                assert isinstance(elt, PFLName)
-                                scope[elt.id] = value[i]
+                                if stmt.target.st.additional_compiled_uid is not None:
+                                    assert stmt.target.st.compiled_uid is not None 
+                                    custom_fn = self._library.all_compiled[stmt.target.st.compiled_uid]
+                                    custom_set_fn = self._library.all_compiled[stmt.target.st.additional_compiled_uid]
+                                    new_val = await self._run_func(stmt.target.st.compiled_uid, {
+                                        custom_fn.args[0].arg: tgt,
+                                        custom_fn.args[1].arg: slice_str,
+                                    })
+                                    await self._run_func(stmt.target.st.additional_compiled_uid, {
+                                        custom_set_fn.args[0].arg: tgt,
+                                        custom_set_fn.args[1].arg: slice_str,
+                                        custom_set_fn.args[2].arg: new_val,
+                                    })
+                                else:
+                                    new_val = stmt.run(tgt[slice_str], value)
+                                    tgt[slice_str] = new_val
                         else:
                             assert isinstance(stmt.target, PFLName)
-                            scope[stmt.target.id] = value
-                elif isinstance(stmt, (PFLIf)):
-                    testAndBodyArr = stmt.get_flatten_test_body()
-                    for i in range(len(testAndBodyArr)):
-                        test, body = testAndBodyArr[i]
-                        if test is not None:
-                            test_val = await self._run_expr(test, scope)
-                        else:
-                            test_val = True 
-                        if test_val:
+                            new_val = stmt.run(scope[stmt.target.id], value)
+                            scope[stmt.target.id] = new_val
+                    elif isinstance(stmt, PFLFor):
+                        iter_obj = await self._run_expr(stmt.iter, scope)
+                        tgt = stmt.target
+                        # TODO support tuple
+                        assert isinstance(tgt, PFLName)
+                        if isinstance(iter_obj, range):
+                            stmt_id = id(stmt)
                             private_scope = scope.copy()
-                            await self.run_body(body, private_scope)
-                            if not is_undefined(stmt._new):
-                                for v in stmt._new:
-                                    scope[v] = private_scope[v]
+                            ctrl = PFLCtrlFor(stmt, enabled=True, step=iter_obj.start, range=iter_obj, stop_in_start=False)
+                            self._state.cur_ctrl_points[stmt_id] = ctrl
+                            if not self.event_new_ctrl_point.is_empty():
+                                await self.event_new_ctrl_point.emit_async(ctrl)
+                            for i in iter_obj:
+                                if ctrl.enabled:
+                                    # print(i, ctrl.step, iter_obj)
+                                    if ctrl.step < i:
+                                        ctrl.step = i
+                                        await self.event_ctrl_point_change.emit_async(ctrl)
+                                    # print("AFTER", i, ctrl.step)
+                                    ctrl.should_pause = ctrl.step == i
+                                    private_scope[tgt.id] = i
+                                    result = await self.run_body(stmt.body, private_scope)
+                                        # ctrl.should_pause = False
+                                else:
+                                    private_scope[tgt.id] = i
+                                    result = await self.run_body(stmt.body, private_scope)
+                                if isinstance(result, PFLRunnerResult):
+                                    if result.type == PFLRunnerResultType.BREAK:
+                                        break 
+                                    elif result.type == PFLRunnerResultType.RETURN:
+                                        return result
+                                    # dont need to handle continue here.
                             for k in scope.keys():
                                 scope[k] = private_scope[k]
-                            break
-                elif isinstance(stmt, PFLAugAssign):
-                    value = await self._run_expr(stmt.value, scope)
-                    if isinstance(stmt.target, (PFLAttribute, PFLSubscript)):
-                        assert not is_undefined(stmt.target.is_store) and stmt.target.is_store == True
-                        deep_val = await self._run_expr(stmt.target.value, scope)
-                        if isinstance(stmt.target, (PFLAttribute)):
-                            val = getattr(deep_val, stmt.target.attr)
-                            new_val = stmt.run(val, value)
-                            setattr(deep_val, stmt.target.attr, new_val)
+                            self._state.cur_ctrl_points.pop(stmt_id)
+                            if not self.event_delete_ctrl_point.is_empty():
+                                await self.event_delete_ctrl_point.emit_async(ctrl)
+                            
+                        elif isinstance(iter_obj, list):
+                            private_scope = scope.copy()
+                            for obj in iter_obj:
+                                private_scope[tgt.id] = obj
+                                result = await self.run_body(stmt.body, private_scope)
+                                if isinstance(result, PFLRunnerResult):
+                                    if result.type == PFLRunnerResultType.BREAK:
+                                        break 
+                                    elif result.type == PFLRunnerResultType.RETURN:
+                                        return result
+                                    # dont need to handle continue here.
+                            for k in scope.keys():
+                                scope[k] = private_scope[k]
                         else:
-                            tgt, slice_str = await self._get_subscript_target_slice(stmt.target, scope)
-                            new_val = stmt.run(tgt[slice_str], value)
-                            tgt[slice_str] = new_val
-                    else:
-                        assert isinstance(stmt.target, PFLName)
-                        new_val = stmt.run(scope[stmt.target.id], value)
-                        scope[stmt.target.id] = new_val
-                elif isinstance(stmt, PFLFor):
-                    iter_obj = await self._run_expr(stmt.iter, scope)
-                    tgt = stmt.target
-                    assert isinstance(tgt, PFLName)
-                    if isinstance(iter_obj, range):
-                        stmt_id = id(stmt)
+                            raise NotImplementedError
+                    elif isinstance(stmt, PFLWhile):
                         private_scope = scope.copy()
-                        ctrl = PFLCtrlFor(stmt, enabled=True, step=iter_obj.start, range=iter_obj, stop_in_start=False)
-                        self._state.cur_ctrl_points[stmt_id] = ctrl
-                        if not self.event_new_ctrl_point.is_empty():
-                            await self.event_new_ctrl_point.emit_async(ctrl)
-                        for i in iter_obj:
-                            if ctrl.enabled:
-                                # print(i, ctrl.step, iter_obj)
-                                if ctrl.step < i:
-                                    ctrl.step = i
-                                    await self.event_ctrl_point_change.emit_async(ctrl)
-                                # print("AFTER", i, ctrl.step)
-                                ctrl.should_pause = ctrl.step == i
-                                private_scope[tgt.id] = i
-                                result = await self.run_body(stmt.body, private_scope)
-                                    # ctrl.should_pause = False
-                            else:
-                                private_scope[tgt.id] = i
-                                result = await self.run_body(stmt.body, private_scope)
-                            if isinstance(result, PFLRunnerResult):
-                                if result.type == PFLRunnerResultType.BREAK:
-                                    break 
-                                elif result.type == PFLRunnerResultType.RETURN:
-                                    return result
-                                # dont need to handle continue here.
-                        for k in scope.keys():
-                            scope[k] = private_scope[k]
-                        self._state.cur_ctrl_points.pop(stmt_id)
-                        if not self.event_delete_ctrl_point.is_empty():
-                            await self.event_delete_ctrl_point.emit_async(ctrl)
-                        
-                    elif isinstance(iter_obj, list):
-                        private_scope = scope.copy()
-                        for obj in iter_obj:
-                            private_scope[tgt.id] = obj
+                        while True:
+                            test_obj = await self._run_expr(stmt.test, private_scope)
+                            if not test_obj:
+                                break 
                             result = await self.run_body(stmt.body, private_scope)
                             if isinstance(result, PFLRunnerResult):
                                 if result.type == PFLRunnerResultType.BREAK:
@@ -717,54 +864,41 @@ class PFLAsyncRunner:
                                 # dont need to handle continue here.
                         for k in scope.keys():
                             scope[k] = private_scope[k]
-                    else:
-                        raise NotImplementedError
-                elif isinstance(stmt, PFLWhile):
-                    private_scope = scope.copy()
-                    while True:
-                        test_obj = await self._run_expr(stmt.test, private_scope)
-                        if not test_obj:
-                            break 
-                        result = await self.run_body(stmt.body, private_scope)
-                        if isinstance(result, PFLRunnerResult):
-                            if result.type == PFLRunnerResultType.BREAK:
-                                break 
-                            elif result.type == PFLRunnerResultType.RETURN:
-                                return result
-                            # dont need to handle continue here.
-                    for k in scope.keys():
-                        scope[k] = private_scope[k]
 
-                elif isinstance(stmt, PFLExprStmt):
-                    await self._run_expr(stmt.value, scope)
-                elif isinstance(stmt, PFLReturn):
-                    if stmt.value is not None:
-                        value = await self._run_expr(stmt.value, scope)
-                        return PFLRunnerResult(PFLRunnerResultType.RETURN, value)
+                    elif isinstance(stmt, PFLExprStmt):
+                        await self._run_expr(stmt.value, scope)
+                    elif isinstance(stmt, PFLReturn):
+                        if stmt.value is not None:
+                            value = await self._run_expr(stmt.value, scope)
+                            return PFLRunnerResult(PFLRunnerResultType.RETURN, value)
+                        else:
+                            return
+                    elif isinstance(stmt, PFLBreak):
+                        return PFLRunnerResult(PFLRunnerResultType.BREAK)
+                    elif isinstance(stmt, PFLContinue):
+                        return PFLRunnerResult(PFLRunnerResultType.CONTINUE)
+                    elif isinstance(stmt, PFLFunc):
+                        # no-op here because we don't support direct func def here.
+                        return 
                     else:
-                        return
-                elif isinstance(stmt, PFLBreak):
-                    return PFLRunnerResult(PFLRunnerResultType.BREAK)
-                elif isinstance(stmt, PFLContinue):
-                    return PFLRunnerResult(PFLRunnerResultType.CONTINUE)
-                elif isinstance(stmt, PFLFunc):
-                    # no-op here because we don't support direct func def here.
-                    return 
-                else:
-                    raise NotImplementedError(f"Unrecognized PFLAstNodeBase type: {type(stmt)}")
-            except PFLEvalStop:
-                raise
-            except PFLEvalError:
-                raise
-            except BaseException as e:
-                raise PFLEvalError(f"stmt eval error.", stmt) from e
+                        raise NotImplementedError(f"Unrecognized PFLAstNodeBase type: {type(stmt)}")
+                except PFLEvalStop:
+                    raise
+                except PFLEvalError:
+                    raise
+                except BaseException as e:
+                    raise PFLEvalError(f"stmt eval error.", stmt) from e
+        finally:
+            self._state.stack[-1].scope = prev_scope
 
     async def _run_func(self, func_uid: str, scope: dict[str, Any]):
         func_node = self._library.all_compiled[func_uid]
-        module = self._library.get_module_by_func(func_uid)
+        module = self._library.get_module_by_func_uid(func_node.uid)
         error_ctx = PFLErrorFormatContext(module.compile_info.code.split("\n"))
         try:
-            res = await self.run_body(func_node.body, {**scope, **self._std_scope})
+            fn_scope = {**scope, **self._std_scope}
+            self._state.stack.append(PFLAsyncRunnerStack(func_node, fn_scope))
+            res = await self.run_body(func_node.body, fn_scope)
         except PFLEvalStop:
             raise
         except PFLEvalError as e:
@@ -772,29 +906,46 @@ class PFLAsyncRunner:
             if error_line:
                 print(error_line)
             raise e
+        finally:
+            self._state.stack.pop()
 
         if isinstance(res, PFLRunnerResult):
             return res.data 
         return res 
 
-    async def run_func(self, func_uid: str, scope: Optional[dict[str, Any]] = None):
+    async def run_func(self, func_uid: str, scope: Optional[dict[str, Any]] = None,
+            external_inline_env: Optional[PFLInlineRunEnv] = None,
+            exit_event: Optional[asyncio.Event] = None):
         func_node = self._library.all_compiled[func_uid]
-        if scope is not None:
-            return await self._run_func(func_uid, scope)
-        else:
-            assert func_node.compile_info.meta is not None 
-            fn_meta = func_node.compile_info.meta
-            assert fn_meta.inline_run_env_fn is not None 
-            inline_run_env = fn_meta.inline_run_env_fn()
-            scope = inline_run_env.kwargs
-            ctxes = inline_run_env.contexts
-            with contextlib.ExitStack() as stack:
-                for ctx in ctxes:
-                    stack.enter_context(ctx)
-                return await self._run_func(func_uid, scope)
-        return await self._run_func(func_uid, scope)
+        try:
+            await self.event_eval_start.emit_async()
 
-    async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None):
+            with enter_pfl_runner_state(self._state):
+                if scope is not None:
+                    return await self._run_func(func_uid, scope)
+                else:
+                    if external_inline_env is None:
+                        assert func_node.compile_info.meta is not None 
+                        fn_meta = func_node.compile_info.meta
+                        assert fn_meta.inline_run_env_fn is not None 
+                        inline_run_env = fn_meta.inline_run_env_fn()
+                    else:
+                        inline_run_env = external_inline_env
+                    scope = inline_run_env.kwargs
+                    ctxes = inline_run_env.contexts
+                    with contextlib.ExitStack() as stack:
+                        for ctx in ctxes:
+                            stack.enter_context(ctx)
+                        return await self._run_func(func_uid, scope)
+                return await self._run_func(func_uid, scope)
+        finally:
+            self.clear_runtime_state()
+            if exit_event is not None:
+                exit_event.set()
+            await self.event_eval_stop.emit_async()
+
+    async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None,
+            external_inline_env: Optional[PFLInlineRunEnv] = None):
         func_node = self._library.all_compiled[func_uid]
         assert self._state.type == PFLAsyncRunnerStateType.IDLE, \
             "You must call clear_runtime_state() before run_until()"
@@ -804,7 +955,7 @@ class PFLAsyncRunner:
         stmt_start_lineno = stmt_should_pause.source_loc[0]
         self.add_breakpoint(stmt_start_lineno, one_shot=False)
         try:
-            return await self.run_func(func_uid, scope)
+            return await self.run_func(func_uid, scope, external_inline_env, exit_event)
         except PFLEvalStop:
             self.clear_runtime_state()
         except:
@@ -812,9 +963,6 @@ class PFLAsyncRunner:
             raise
         finally:
             self.clear_runtime_state()
-            if exit_event is not None:
-                exit_event.set()
-            await self.event_eval_stop.emit_async()
 
     def get_state(self) -> PFLAsyncRunnerState:
         return self._state
@@ -827,3 +975,9 @@ class PFLAsyncRunner:
         self.release_breakpoint()
         self._breakpoints.clear()
         self.add_breakpoint(lineno, one_shot=False)
+
+    async def continue_next_line(self):
+        assert self._state.type == PFLAsyncRunnerStateType.PAUSE
+        self.release_breakpoint()
+        self._breakpoints.clear()
+        self._state.pause_next_line = True

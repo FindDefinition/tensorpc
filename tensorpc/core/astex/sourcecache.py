@@ -276,6 +276,25 @@ class SCDItem:
     diff_opcodes_equal: Optional[List[Tuple[int, int, int, int]]]
     fullname: str
 
+    def bisect_mapped_lineno(self, lineno: int):
+        opcodes = self.diff_opcodes_equal
+        if not opcodes:
+            return -1
+        line_idx = lineno - 1
+        lo = 0
+        hi = len(opcodes) - 1
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            if (opcodes[mid][0] <= line_idx and line_idx < opcodes[mid][1]):
+                # plus 1 because lineno is 1-based
+                return opcodes[mid][2] + line_idx - opcodes[mid][0] + 1
+            if opcodes[mid][0] < line_idx:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
+
+
 class SourceChangeDiffCache:
 
     def __init__(self):
@@ -313,21 +332,18 @@ class SourceChangeDiffCache:
             if entry.diff_opcodes_equal is None:
                 # no diff info, return original lineno
                 return lineno
-            return self._bisect_mapped_lineno(entry.diff_opcodes_equal, lineno)
+            return entry.bisect_mapped_lineno(lineno)
         try:
             success = self.updatecache(filename, module_globals)
             if not success:
-                print("HERE?")
                 return -1
             entry = self.cache[filename]
             if entry.diff_opcodes_equal is None:
                 # no diff info, return original lineno
                 return lineno
-            return self._bisect_mapped_lineno(entry.diff_opcodes_equal, lineno)
+            return entry.bisect_mapped_lineno(lineno)
         except MemoryError:
             self.clearcache()
-            print("HERE?2")
-
             return -1
 
     def checkcache(self, filename=None):
@@ -408,7 +424,23 @@ class SourceChangeDiffCache:
         self.cache[filename] = SCDItem(size, mtime, lines, eq_opcodes, fullname)
         return True
 
-    def _is_junk(self, x: str):
+    @staticmethod
+    def _is_junk(x: str):
         # ignore empty lines and python comment lines
         x_strip = x.strip()
         return len(x_strip) == 0 or x_strip.startswith("#")
+
+    @staticmethod 
+    def get_raw_item_for_mapping(old_lines: List[str], new_lines: List[str]):
+        eq_opcodes = []
+        s = SequenceMatcher(SourceChangeDiffCache._is_junk, old_lines, new_lines)
+        for tag, i1, i2, j1, j2 in s.get_opcodes():
+            if tag == 'equal':
+                eq_opcodes.append((i1, i2, j1, j2))
+        return SCDItem(
+            size=len(new_lines),
+            mtime=None,  # mtime is not available here
+            lines=new_lines,
+            diff_opcodes_equal=eq_opcodes,
+            fullname="",
+        )

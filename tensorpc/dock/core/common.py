@@ -58,6 +58,7 @@ _ONEARG_EDITOR_EVENTS = set([
     FrontendEventType.EditorInlayHintsQuery.value,
     FrontendEventType.EditorHoverQuery.value,
     FrontendEventType.EditorCodelensQuery.value,
+    FrontendEventType.EditorDecorationsChange.value,
 ])
 
 _ONEARG_SPECIAL_EVENTS = set([

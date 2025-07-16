@@ -111,7 +111,9 @@ class EventHandlers:
                  backend_only: bool = False,
                  simple_event: bool = True,
                  update_ops: Optional[list[Any]] = None,
-                 key_codes: Optional[list[str]] = None) -> None:
+                 key_codes: Optional[list[str]] = None,
+                 set_pointer_capture: bool = False,
+                 release_pointer_capture: bool = False) -> None:
 
         self.handlers = handlers
         self.stop_propagation = stop_propagation
@@ -123,6 +125,9 @@ class EventHandlers:
             update_ops = []
         self.update_ops = update_ops
         self.key_codes = key_codes
+        self.set_pointer_capture = set_pointer_capture
+        self.release_pointer_capture = release_pointer_capture
+
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -132,11 +137,16 @@ class EventHandlers:
             res["debounce"] = self.debounce
         if self.throttle is not None:
             res["throttle"] = self.throttle
+        if self.set_pointer_capture:
+            res["setPointerCapture"] = self.set_pointer_capture
+        if self.release_pointer_capture:
+            res["releasePointerCapture"] = self.release_pointer_capture
         if len(self.handlers) == 0:
             res["dontSendToBackend"] = True
         else:
             res["dontSendToBackend"] = False
         if self.update_ops:
+            # TODO parse pfl functions here instead of in __init__.
             res["jmesUpdateOps"] = as_dict_no_undefined(self.update_ops)
         if self.key_codes:
             for code in self.key_codes:

@@ -559,8 +559,7 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentTypeForCanvas]):
 class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
 
     def __init__(
-        self, children: Union[List[ThreeComponentType],
-                              Dict[str, ThreeComponentType]]
+        self, children: ThreeLayoutType
     ) -> None:
         if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
@@ -674,8 +673,7 @@ class GroupProps(Object3dContainerBaseProps):
 class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(
-        self, children: Union[Dict[str, ThreeComponentType],
-                              List[ThreeComponentType]]
+        self, children: ThreeLayoutType
     ) -> None:
         if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
@@ -733,8 +731,7 @@ class HudGroup(O3dContainerWithEventBase[HudGroupProps, ThreeComponentType]):
     should located in z = 0 plane.
     """
     def __init__(
-        self, children: Union[Dict[str, ThreeComponentType],
-                              List[ThreeComponentType]]
+        self, children: ThreeLayoutType
     ) -> None:
         if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}

@@ -130,3 +130,5 @@ tensorpc/secret.yaml
 
 core
 !core/
+
+__version__.py

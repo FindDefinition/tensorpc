@@ -4,12 +4,10 @@ from typing import Annotated, Any, Optional, Union
 import rich
 import numpy as np
 import triton 
-from tensorpc.apps.ppcl import tsim
+from tensorpc.apps.mls import tsim
 from tensorpc.core import pfl
 from tensorpc.core.pfl import compiler_print_type, compiler_print_metadata
-from tensorpc.apps.ppcl.std import Tensor, PointerTensor, ppcl
-from tensorpc.apps.ppcl.core import TensorMeta, DTypeEnum, ConstExprMeta
-from tensorpc.apps.ppcl.backends import tritonstd
+from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
 import dataclasses
 

@@ -5,7 +5,7 @@ from typing import Annotated, Any, Optional, Union
 import numpy as np
 import triton 
 from tensorpc.core import pfl
-from tensorpc.apps.ppcl.backends import tritonstd
+from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
 
 def _matmul_kernel_test_fn(is_persist: bool) -> pfl.PFLInlineRunEnv:
@@ -39,7 +39,7 @@ def _matmul_kernel_test_fn(is_persist: bool) -> pfl.PFLInlineRunEnv:
     ref_kwargs = {
         "c_ptr": c_ref
     }
-    num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
+    num_grid = tritonstd.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * tritonstd.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
     return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs))
@@ -72,13 +72,13 @@ def _matmul_kernel_test_fn_tma(is_persist: bool) -> pfl.PFLInlineRunEnv:
     ref_kwargs = {
         "c_desc": c_ref
     }
-    num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
+    num_grid = tritonstd.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * tritonstd.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
     return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs))
 
 @triton.jit
-@pfl.mark_pfl_compilable
+@pfl.mark_pfl_compilable(is_template=True)
 def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_SMS):
     group_id = tile_id // num_pid_in_group
     first_pid_m = group_id * GROUP_SIZE_M
@@ -185,7 +185,7 @@ def matmul_kernel(
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
     # See above `Pointer Arithmetic` section for details
-    # wtf1 = ppcl.arange(0, BLOCK_SIZE_M)
+    # wtf1 = mls.arange(0, BLOCK_SIZE_M)
     # wtf = wtf1 + pid_m
     # return
     offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M

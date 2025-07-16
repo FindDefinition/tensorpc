@@ -5,7 +5,7 @@ import rich
 import dataclasses
 from tensorpc.core import pfl
 from tensorpc.core.moduleid import get_module_id_of_type, get_qualname_of_type
-import tensorpc.core.pfl.pfl_std as stl 
+import tensorpc.core.pfl.backends.js as stl 
 import numpy as np 
 @dataclasses.dataclass
 class Model:
@@ -40,7 +40,7 @@ def func2(a: float, b: float):
     return f
 
 @pfl.mark_pfl_compilable
-def add(x, y):
+def add(x: int, y: int) -> int:
     return x + y
 
 @pfl.mark_pfl_compilable
@@ -54,18 +54,55 @@ def func3(a: float, b: float):
         d += 1
     return add(d, 3), c
 
+class Foo:
+    def __init__(self):
+        self.val = 5
+
+    def method(self, a: float, b: float):
+        c = stl.Math.pow(a, b)
+        if a > 10:
+            d = 5 
+        else:
+            d = 3
+        for j in range(10):
+            d += 1
+        return add(d, 3 + self.val), c
+
+@dataclasses.dataclass
+class Foo2:
+    val: int = 5
+
+    def method(self, a: float, b: float):
+        c = stl.Math.pow(a, b)
+        if a > 10:
+            d = 5 
+        else:
+            d = 3
+        for j in range(10):
+            d += 1
+        return add(d, 3 + self.val), c
+
 if __name__ == "__main__":
     # pflast, run_scope = parse_expr_to_df_ast("Math().sin(2)")
     # rich.print(ast_dump(pflast))
     # print(consteval_expr(pflast))
     # typing.get_type_hints
-    lib = pfl.parse_func_to_pfl_library(func3, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
-    print(lib.all_compiled.keys())
-    runner = pfl.PFLAsyncRunner(lib)
-    print(asyncio.run(runner.run_func(get_module_id_of_type(func3), {
-        "a": 5,
-        "b": 3
-    })))
+    # lib = pfl.parse_func_to_pfl_library(func3, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
+    # print(lib.all_compiled.keys())
+    # runner = pfl.PFLAsyncRunner(lib)
+    # print(asyncio.run(runner.run_func(get_module_id_of_type(func3), {
+    #     "a": 5,
+    #     "b": 3
+    # })))
+    aa = Foo().method
+    lib2 = pfl.parse_func_to_pfl_library(aa, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
+    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)))
+    aa = Foo2.method
+
+    # breakpoint()
+    lib2 = pfl.parse_func_to_pfl_library(aa, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
+    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)))
+
     # for k, v in all_compiled.items():
     #     print(k, v.ret_st)
     #     rich.print(pfl.ast_dump(v))

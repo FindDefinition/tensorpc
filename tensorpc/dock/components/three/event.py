@@ -49,6 +49,8 @@ class PointerEvent:
     instanceId: Union[Undefined, int] = undefined
     userData: Union[Undefined, Any] = undefined
     wheel: Union[Undefined, _PointerWheel] = undefined
+    # for pointer capture
+    numIntersections: int = 0
 
 @dataclasses.dataclass
 class CameraEvent:

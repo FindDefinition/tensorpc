@@ -6,19 +6,20 @@ import math
 
 import concurrent
 import triton
-from tensorpc.apps.ppcl.tsim import get_tensorsim_context_checked
-from tensorpc.apps.ppcl.tsim.core import get_tensorsim_context
-from tensorpc.apps.ppcl.tsim.tensor import SimTensor
+from tensorpc.apps.mls.tsim import get_tensorsim_context_checked
+from tensorpc.apps.mls.tsim.core import get_tensorsim_context
+from tensorpc.apps.mls.tsim.tensor import SimTensor
 from tensorpc.core import pfl
 from typing_extensions import Self
 import numpy as np 
 import dataclasses 
 from typing import Annotated, Any, Callable, ClassVar, Optional, Type, TypeAlias, TypeVar, Union, cast, get_type_hints, overload
-from tensorpc.apps.ppcl import tsim 
-from tensorpc.apps.ppcl.tsim import DTypeEnum
+from tensorpc.apps.mls import tsim 
+from tensorpc.apps.mls.tsim import DTypeEnum
 import triton.language as tl
 
 from tensorpc.core.annolib import Undefined
+from tensorpc.core.pfl.core import PFLInlineRunEnv
 
 pfl.register_backend("triton", pfl.PFLParseConfig(
     allow_var_union=False,
@@ -142,10 +143,12 @@ class Tensor:
         return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.get_origin_type_checked()(1)))
 
     @staticmethod
-    def _reshape_permute_meta_infer(fn: Callable, x: pfl.PFLExprInfo, shape: pfl.PFLExprInfo, *shapes: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
-        if shape.type == pfl.PFLExprType.NONE_TYPE:
+    def _reshape_permute_meta_infer(fn: Callable, x: pfl.PFLExprInfo, *shapes: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+        if len(shapes) == 0:
             # for triton.trans
             return pfl.PFLMetaInferResult(fn(x.metadata_checked))
+        shape = shapes[0]
+        shapes = shapes[1:]
         if shape.type == pfl.PFLExprType.ARRAY or shape.type == pfl.PFLExprType.TUPLE:
             assert len(shapes) == 0
             assert shape.has_metadata(), "shape must have metadata for reshape operation"
@@ -445,13 +448,16 @@ class Tensor:
 
     @pfl.configure_std_func(meta_infer=_reshape_permute_meta_infer)
     def permute(self, shape: Union[list[int], tuple[int, ...], int], *shapes: int) -> Self: 
-        return self._replace_wrapped(self._wrapped.permute(shape))
+        return self._replace_wrapped(self._wrapped.permute(shape, *shapes))
 
     def split(self) -> "tuple[Tensor, Tensor]": 
         last_dim = self.shape[-1]
+        assert last_dim == 2, "triton split only support last dimension of 2"
         assert last_dim % 2 == 0, "split only support even first dimension"
-        last_dim_div_2 = last_dim // 2
-        return self._replace_wrapped(self._wrapped[..., :last_dim_div_2]), self._replace_wrapped(self._wrapped[..., last_dim_div_2:])
+        # last_dim_div_2 = last_dim // 2
+        # res = self._replace_wrapped(self._wrapped[..., :last_dim_div_2]), self._replace_wrapped(self._wrapped[..., last_dim_div_2:])
+        res = self._replace_wrapped(self._wrapped[..., 0]), self._replace_wrapped(self._wrapped[..., 1])
+        return res
 
 @pfl.register_pfl_std(mapped_name="TritonPointerTensor", backend="triton")
 @dataclasses.dataclass
@@ -534,7 +540,7 @@ class TensorDescriptor:
 
     @staticmethod 
     def _load_infer(fn: Callable, this: pfl.PFLExprInfo, offset: pfl.PFLExprInfo) -> pfl.PFLMetaInferResult:
-        assert this.has_metadata(TensorDescriptor)
+        assert this.has_metadata(TensorDescriptor), f"this must have metadata of TensorDescriptor, got {this.metadata}"
         return pfl.PFLMetaInferResult(this.metadata_checked.load([0, 0]))
 
     @pfl.configure_std_func(meta_infer=_load_infer)
@@ -1329,22 +1335,23 @@ class triton_std:
     @staticmethod
     def split(x: _T_all_tensor) -> tuple[_T_all_tensor, _T_all_tensor]: 
         last_dim = x.shape[-1]
-        assert last_dim % 2 == 0, "split only support even first dimension"
-        last_dim_div_2 = last_dim // 2
+        assert last_dim == 2, "triton split only support last dimension of size 2"
+        # assert last_dim % 2 == 0, "split only support even first dimension"
+        # last_dim_div_2 = last_dim // 2
 
         if isinstance(x, Tensor):
-            return Tensor(x._wrapped[..., :last_dim_div_2]), Tensor(x._wrapped[..., last_dim_div_2:])
+            return Tensor(x._wrapped[..., 0]), Tensor(x._wrapped[..., 1])
         else:
             assert isinstance(x, PointerTensor), "split only support Tensor and PointerTensor type"
-            return PointerTensor(x._wrapped[..., :last_dim_div_2]), PointerTensor(x._wrapped[..., last_dim_div_2:])
+            return PointerTensor(x._wrapped[..., 0]), PointerTensor(x._wrapped[..., 1])
 
     @staticmethod
     def join(x: _T_all_tensor, y: _T_all_tensor) -> _T_all_tensor: 
         if isinstance(x, Tensor) and isinstance(y, Tensor):
-            return Tensor(x._wrapped.concat([y._wrapped], axis=-1))
+            return Tensor(x._wrapped.stack([y._wrapped], axis=-1))
         else:
             assert isinstance(x, PointerTensor) and isinstance(y, PointerTensor), "join only support Tensor and PointerTensor type"
-            return PointerTensor(x._wrapped.concat([y._wrapped], axis=-1))
+            return PointerTensor(x._wrapped.stack([y._wrapped], axis=-1))
 
     @staticmethod
     def _make_block_pointer_meta_infer(base_cls: Union[Type[TensorDescriptor], Type[BlockPointer]], fn, base: pfl.PFLExprInfo, shape: pfl.PFLExprInfo, strides: pfl.PFLExprInfo, block_shape: pfl.PFLExprInfo, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
@@ -1517,6 +1524,10 @@ def mark_triton_compilable(fn: Optional[T] = None, *, inline_run_env_fn: Optiona
 
 
 class TritonKernelRunner(pfl.PFLAsyncRunner):
+    def __init__(self, library: pfl.PFLLibrary, inline_env: PFLInlineRunEnv):
+        super().__init__(library)
+        self.triton_sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+
     async def run_kernel(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
         lib = self._library
         kwargs, _ = _validate_and_convert_triton_kwargs(kwargs, global_mem)
@@ -1525,17 +1536,16 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                 for l in range(grid_size[2]):
                     with tsim.enter_tensorsim_context([j, k, l], grid_size, global_mem=global_mem):
                         kwargs_cloned = kwargs.copy()
-                        for k, v in kwargs_cloned.items():
+                        for key, v in kwargs_cloned.items():
                             if isinstance(v, (PointerTensor, PointerScalarFloat, PointerScalarInt, TensorDescriptor)):
-                                kwargs_cloned[k] = v.clone()
-                        await self.run_func(lib.get_compiled_unit(fn).uid, kwargs_cloned)
+                                kwargs_cloned[key] = v.clone()
+                        await self.run_func(lib.get_compiled_unit_specs(fn)[0].uid, kwargs_cloned)
 
     def _run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, kwargs) -> None:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(self.run_kernel(fn, grid_size, global_mem, **kwargs))
         loop.close()
         return
-
 
     def run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1560,7 +1570,8 @@ def _may_triton_func(fn: Any) -> Any:
         return fn.fn
     return fn
 
-def parse_triton_compilable_to_runner(fn: triton.JITFunction, do_meta_eval: bool = True) -> TritonKernelRunner:
+def parse_triton_compilable_to_runner(fn: triton.JITFunction, do_meta_eval: bool = True, 
+        module_code_getter: Optional[Callable[[Any], str]] = None) -> TritonKernelRunner:
     fn_unwrapped = inspect.unwrap(fn.fn)
     fn_metadata = pfl.get_compilable_meta(fn_unwrapped)
     assert fn_metadata is not None 
@@ -1569,11 +1580,16 @@ def parse_triton_compilable_to_runner(fn: triton.JITFunction, do_meta_eval: bool
     env = inline_run_env_fn()
     external_annos = {k: type(v) for k, v in env.kwargs.items()}
     meta_args = _create_metadata_from_triton_kwargs(env.kwargs)
+    type_hints = get_type_hints(fn_unwrapped)
+    constexpr_args = {}
+    for k, v in type_hints.items():
+        if v is tl.constexpr:
+            constexpr_args[k] = env.kwargs[k]
     lib = pfl.parse_func_to_pfl_library(fn, backend="triton", external_anno=(external_annos, None), func_unwrapper=_may_triton_func,
-        var_preproc=_may_triton_func, anno_transform=_triton_anno_transform)
+        var_preproc=_may_triton_func, anno_transform=_triton_anno_transform, module_code_getter=module_code_getter,
+        constexpr_args=constexpr_args)
     if do_meta_eval:
         evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib)
         evaluator.eval_total_tree(fn.fn, meta_args)
-    return TritonKernelRunner(lib)
+    return TritonKernelRunner(lib, env)
     
-tl.make_block_ptr

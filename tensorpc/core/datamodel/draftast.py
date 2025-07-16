@@ -191,6 +191,16 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
             return x and y
         elif op == "||":
             return x or y
+        elif op == "+":
+            return x + y
+        elif op == "-":
+            return x - y
+        elif op == "*":
+            return x * y
+        elif op == "/":
+            return x / y
+        elif op == "//":
+            return x // y
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.UNARY_OP:
@@ -428,6 +438,16 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
             return x and y, []
         elif op == "||":
             return x or y, []
+        elif op == "+":
+            return x + y, []
+        elif op == "-":
+            return x - y, []
+        elif op == "*":
+            return x * y, []
+        elif op == "/":
+            return x / y, []
+        elif op == "//":
+            return x // y, []
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.UNARY_OP:
@@ -526,6 +546,16 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
             return x and y, []
         elif op == "||":
             return x or y, []
+        elif op == "+":
+            return x + y, []
+        elif op == "-":
+            return x - y, []
+        elif op == "*":
+            return x * y, []
+        elif op == "/":
+            return x / y, []
+        elif op == "//":
+            return x // y, []
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.UNARY_OP:

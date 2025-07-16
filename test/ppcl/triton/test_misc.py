@@ -4,7 +4,7 @@ from typing import Annotated, Any, Optional, Union
 import numpy as np
 import triton 
 from tensorpc.core import pfl
-from tensorpc.apps.ppcl.backends import tritonstd
+from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
 
 def _softmax_kernel_test_fn() -> pfl.PFLInlineRunEnv:
@@ -15,7 +15,7 @@ def _softmax_kernel_test_fn() -> pfl.PFLInlineRunEnv:
     ref = torch.softmax(x, dim=1)
 
 
-    BLOCK_SIZE = triton.next_power_of_2(x.shape[1])
+    BLOCK_SIZE = tritonstd.next_power_of_2(x.shape[1])
     num_programs = x.shape[0]
 
     test_kwargs: dict[str, Any] = {

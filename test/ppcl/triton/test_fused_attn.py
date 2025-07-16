@@ -5,7 +5,7 @@ from typing import Annotated, Any, Optional, Union
 import numpy as np
 import triton 
 from tensorpc.core import pfl
-from tensorpc.apps.ppcl.backends import tritonstd
+from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
 
 # np.seterr(all='raise')
@@ -79,7 +79,6 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         delta = (ref * dref).sum(dim=-1)
 
         delta_np = delta.detach().numpy()
-
         # we have to run fwd kernel here to get correct M.
         runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd)
         global_mem_fwd = tritonstd.create_global_mem_from_kwargs(fwd_kwargs)
@@ -128,7 +127,7 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo(grid, ref_kwargs))
 
 @triton.jit
-@tritonstd.mark_triton_compilable
+@tritonstd.mark_triton_compilable(is_template=True)
 def _attn_fwd_inner(acc, l_i, m_i, q,  #
                     desc_k, desc_v,  #
                     offset_y, dtype: tl.constexpr, start_m, qk_scale,  #
@@ -199,7 +198,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
     return acc, l_i, m_i
 
 @triton.jit
-@tritonstd.mark_triton_compilable
+@tritonstd.mark_triton_compilable(is_template=True)
 def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
     if isinstance(desc_or_ptr, tl._experimental_tensor_descriptor):
         return desc_or_ptr
@@ -295,7 +294,7 @@ def _attn_bwd_preprocess(O, DO,  #
 
 # The main inner-loop logic for computing dK and dV.
 @triton.jit
-@tritonstd.mark_triton_compilable
+@tritonstd.mark_triton_compilable(is_template=True)
 def _attn_bwd_dkdv(dk, dv,  #
                    Q, k, v, sm_scale,  #
                    DO,  #
@@ -349,7 +348,7 @@ def _attn_bwd_dkdv(dk, dv,  #
 
 # the main inner-loop logic for computing dQ
 @triton.jit
-@tritonstd.mark_triton_compilable
+@tritonstd.mark_triton_compilable(is_template=True)
 def _attn_bwd_dq(dq, q, K, V,  #
                  do, m, D,
                  # shared by Q/K/V/DO.
@@ -374,7 +373,6 @@ def _attn_bwd_dq(dq, q, K, V,  #
     step_n = BLOCK_N2
     for blk_idx in range(num_steps):
         kT = tl.load(kT_ptrs)
-        vT = tl.load(vT_ptrs)
         qk = tl.dot(q, kT)
         p = tl.exp2(qk - m)
         # Autoregressive masking.
@@ -383,6 +381,8 @@ def _attn_bwd_dq(dq, q, K, V,  #
             mask = (offs_m[:, None] >= offs_n[None, :])
             p = tl.where(mask, p, 0.0)
         # Compute dP and dS.
+        vT = tl.load(vT_ptrs)
+
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.float16)
@@ -548,7 +548,7 @@ def _comparer(x, y):
 
 def test_attn_fwd():
     runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd)
-    # print(pfl.unparse_pfl_ast(runner._library.get_compiled_unit(_attn_fwd.fn)))
+    # print(pfl.unparse_pfl_ast(runner._library.get_compiled_unit_specs(_attn_fwd.fn)))
 
     asyncio.run(runner.validate_kernel_by_test_data(_attn_fwd.fn, _comparer))
 

@@ -2,11 +2,14 @@ import dataclasses
 import math
 import random
 import struct
-from typing import Any, Optional, Union
-from .core import mark_meta_infer, register_backend, PFLParseConfig
-from .pfl_reg import register_pfl_std
+import time
+from typing import Any, Optional, TypeVar, Union
+from ..core import mark_meta_infer, register_backend, PFLParseConfig
+from ..pfl_reg import register_pfl_std
 import numpy as np 
 # implement all math func in javascript Math 
+from typing_extensions import Self
+from tensorpc.utils import perfetto_colors
 
 register_backend("js", PFLParseConfig(
     allow_var_union=False,
@@ -14,6 +17,7 @@ register_backend("js", PFLParseConfig(
     allow_nd_slice=False,
     allow_slice=False,
     allow_new_var_after_if=True,
+    tuple_assign_must_be_homogeneous=True,
 ))
 
 @register_pfl_std(mapped_name="len", backend="js", mapped=len)
@@ -36,6 +40,10 @@ def float_func(x: Any) -> float:
 def bool_func(x: Any) -> bool:
     return bool(x)
 
+@register_pfl_std(mapped_name="str", backend="js", mapped=str)
+def str_func(x: Any) -> str:
+    return str(x)
+
 @register_pfl_std(mapped_name="range", backend="js", mapped=range)
 def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = None) -> range:
     if stop is None and step is None:
@@ -45,6 +53,8 @@ def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = Non
     else:
         assert stop is not None and step is not None, "stop and step must be provided together"
         return range(start, stop, step) 
+
+_T_math = TypeVar("_T_math", int, float)
 
 @register_pfl_std(mapped_name="Math", backend="js")
 @dataclasses.dataclass
@@ -213,6 +223,21 @@ class Math:
     SQRT2: float = math.sqrt(2)
 
 
+@register_pfl_std(mapped_name="TypedArray", backend="js")
+@dataclasses.dataclass
+class TypedArray:
+    def __getitem__(self, key: int) -> float: ...
+    def __setitem__(self, key: int, val: float) -> None: ...
+
+    @property 
+    def length(self) -> int: ...
+
+@register_pfl_std(mapped_name="PerformanceUtil", backend="js", mapped=time)
+@dataclasses.dataclass
+class PerformanceUtil:
+    @staticmethod
+    def time() -> float: ...
+
 @register_pfl_std(mapped_name="MathUtil", backend="js")
 @dataclasses.dataclass
 class MathUtil:
@@ -220,16 +245,42 @@ class MathUtil:
     def clamp(x: float, min_val: float, max_val: float) -> float:
         return max(min(x, max_val), min_val)
 
+    @staticmethod
+    def getTypedArray(x: np.ndarray) -> TypedArray: ...
+
+@register_pfl_std(mapped_name="ColorUtil", backend="js")
+@dataclasses.dataclass
+class ColorUtil:
+    @staticmethod
+    def getPerfettoColorRGB(color: str) -> tuple[float, float, float]: 
+        res = perfetto_colors.perfetto_string_to_color(color).base.rgb
+        return res[0], res[1], res[2]
+
+    @staticmethod
+    def getPerfettoSliceColorRGB(color: str) -> tuple[float, float, float]:
+        res = perfetto_colors.perfetto_slice_to_color(color).base.rgb
+        return res[0], res[1], res[2]
+
+    @staticmethod
+    def getPerfettoVariantColorRGB(color: str) -> tuple[float, float, float]:
+        res = perfetto_colors.perfetto_slice_to_color(color).variant.rgb
+        return res[0], res[1], res[2]
+
+    @staticmethod
+    def getPerfettoVariantSliceColorRGB(color: str) -> tuple[float, float, float]:
+        res = perfetto_colors.perfetto_slice_to_color(color).variant.rgb
+        return res[0], res[1], res[2]
+
 @register_pfl_std(mapped_name="NdArray", mapped=np.ndarray, backend="js")
 @dataclasses.dataclass
 class NdArray:
     shape: list[int]
     dtype: int
     ndim: int
-    def __getitem__(self, key: int) -> np.ndarray: ...
+    def __getitem__(self, key: int) -> Self: ...
     def tolist(self) -> list[Any]: ...
     def size(self) -> int: ...
-
+    def reshape(self, new_shape: list[int]) -> Self: ...
 
 @register_pfl_std(mapped_name="Numpy", mapped=np, backend="js")
 @dataclasses.dataclass
@@ -259,9 +310,20 @@ class Numpy:
         return np.ones(shape, dtype=_JS_DTYPE_TO_NP[dtype])
 
     @staticmethod
+    def empty(shape: list[int], dtype: int) -> np.ndarray: 
+        return np.zeros(shape, dtype=_JS_DTYPE_TO_NP[dtype])
+
+    @staticmethod
     def full(shape: list[int], val: Union[int, float], dtype: int) -> np.ndarray: 
         return np.full(shape, val, dtype=_JS_DTYPE_TO_NP[dtype])
 
+    @staticmethod
+    def zeros_like(x: np.ndarray) -> np.ndarray: 
+        return np.zeros_like(x)
+
+    @staticmethod
+    def empty_like(x: np.ndarray) -> np.ndarray: 
+        return np.empty_like(x)
 
 _JS_DTYPE_TO_NP = {
     0: np.float32,

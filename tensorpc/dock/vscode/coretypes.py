@@ -13,6 +13,7 @@ class VscodeTensorpcMessageType(enum.IntEnum):
     UpdateCursorPosition = 1
     ShowFunctionArguments = 2
     ShowFunctionLocals = 3
+    PFLLaunchSimulation = 4
 
 class VscodeTensorpcQueryType(enum.IntEnum):
     TraceTrees = 0

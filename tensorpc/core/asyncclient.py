@@ -345,11 +345,11 @@ class AsyncRemoteObject(object):
                         ]
                         stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
+                        for s in stream:
+                            yield s
                     except:
                         traceback.print_exc()
                         continue
-                    for s in stream:
-                        yield s
 
             stream_generator_func = stream_generator_async
         else:
@@ -370,11 +370,11 @@ class AsyncRemoteObject(object):
                         ]
                         stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
+                        for s in stream:
+                            yield s
                     except:
                         traceback.print_exc()
                         continue
-                    for s in stream:
-                        yield s
 
             stream_generator_func = stream_generator
         from_stream = core_io.FromBufferStream()

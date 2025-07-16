@@ -4,6 +4,7 @@ from functools import partial
 import math
 import time
 
+from tensorpc.core import pfl
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout
@@ -12,7 +13,7 @@ from typing import Any, Optional
 from typing_extensions import Annotated
 import numpy as np
 import tensorpc.core.datamodel as D
-from tensorpc.core.pfl.pfl_std import Math, MathUtil
+from tensorpc.core.pfl.backends.js import Math, MathUtil
 
 from tensorpc.dock.components.three.event import HudLayoutChangeEvent, KeyboardHoldEvent, PointerEvent, ViewportChangeEvent
 from tensorpc.utils.perfetto_colors import perfetto_slice_to_color 
@@ -85,55 +86,66 @@ class VisModel(VisInfo):
         })
         return comp
 
-def _keyhold_handler_dfdsl(root: VisModel, data: KeyboardHoldEvent):
-    """This function will be compiled to javascript in frontend. so we only support limited python syntax/method.
-    """
-    if root.perfHover is not None:
-        prev = root.scaleX
-        prev_scroll_value = root.scrollValueX
-        dx = 0.0
-        is_scale = data.code == "KeyW" or data.code == "KeyS"
-        if data.code == "KeyW":
-            dx = data.deltaTime * 0.002 * root.scaleX
-        elif data.code == "KeyS":
-            dx = -data.deltaTime * 0.002 * root.scaleX
-        elif data.code == "KeyA":
-            dx = -data.deltaTime * 0.002 / root.scaleX
-        elif data.code == "KeyD":
-            dx = data.deltaTime * 0.002 / root.scaleX
-        if is_scale:
-            new_scale = MathUtil.clamp(dx + prev, 1.0, 100.0)
-            real_dx = new_scale - prev
-            root.scaleX = new_scale
-            # scaledWidth = (innerWidth * scaleX)
-            # offset_view_inner = offset / width * (innerWidth * scaleX) - scrollValueX * ((innerWidth * scaleX) - innerWidth)
-            # new_offset_view_inner = offset / width * (innerWidth * (scaleX + dX)) - scrollValueX * ((innerWidth * (scaleX + dX)) - innerWidth)
+    @pfl.mark_pfl_compilable
+    def _keyhold_handler_pfl(self, data: KeyboardHoldEvent):
+        """This function will be compiled to javascript in frontend. so we only support limited python syntax/method.
+        """
+        if self.perfHover is not None:
+            prev = self.scaleX
+            prev_scroll_value = self.scrollValueX
+            dx = 0.0
+            is_scale = data.code == "KeyW" or data.code == "KeyS"
+            if data.code == "KeyW":
+                dx = data.deltaTime * 0.002 * self.scaleX
+            elif data.code == "KeyS":
+                dx = -data.deltaTime * 0.002 * self.scaleX
+            elif data.code == "KeyA":
+                dx = -data.deltaTime * 0.002 / self.scaleX
+            elif data.code == "KeyD":
+                dx = data.deltaTime * 0.002 / self.scaleX
+            if is_scale:
+                new_scale = MathUtil.clamp(dx + prev, 1.0, 100.0)
+                real_dx = new_scale - prev
+                self.scaleX = new_scale
+                # scaledWidth = (innerWidth * scaleX)
+                # offset_view_inner = offset / width * (innerWidth * scaleX) - scrollValueX * ((innerWidth * scaleX) - innerWidth)
+                # new_offset_view_inner = offset / width * (innerWidth * (scaleX + dX)) - scrollValueX * ((innerWidth * (scaleX + dX)) - innerWidth)
 
-            # offset_view_inner = offset / width * scaleX - scrollValueX * (scaleX - 1)
-            # new_offset_view_inner = offset / width * (scaleX + dX) - newScrollValueX * (scaleX + dX - 1)
+                # offset_view_inner = offset / width * scaleX - scrollValueX * (scaleX - 1)
+                # new_offset_view_inner = offset / width * (scaleX + dX) - newScrollValueX * (scaleX + dX - 1)
 
 
-            # offset_view_inner = offset / width 
-            # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
+                # offset_view_inner = offset / width 
+                # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
 
-            # offset_view_inner = 0
-            # new_offset_view_inner = offset / width * dX - newScrollValueX * dX
+                # offset_view_inner = 0
+                # new_offset_view_inner = offset / width * dX - newScrollValueX * dX
 
-            # offset_view_inner = offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1)
-            # new_offset_view_inner = offset / width * scaleX - newScrollValueX * (scaleX - 1)
+                # offset_view_inner = offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1)
+                # new_offset_view_inner = offset / width * scaleX - newScrollValueX * (scaleX - 1)
 
-            # offset_view_inner = offset / width
-            # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
+                # offset_view_inner = offset / width
+                # new_offset_view_inner = offset / width * (1 + dX) - newScrollValueX * dX
 
-            # offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1) == offset / width * (scaleX) - newScrollValueX * (scaleX - 1)
-            # -offset / width * dX - scrollValueX * (scaleX - dX - 1) == -newScrollValueX * (scaleX - 1)
+                # offset / width * (scaleX - dX) - scrollValueX * (scaleX - dX - 1) == offset / width * (scaleX) - newScrollValueX * (scaleX - 1)
+                # -offset / width * dX - scrollValueX * (scaleX - dX - 1) == -newScrollValueX * (scaleX - 1)
 
-            # newScrollValueX = (offset / width * dX + scrollValueX * (scaleX - dX - 1)) / (scaleX - 1)
-            # newScrollValueX = (offset / width + scrollValueX) * dX / (scaleX - 1) + scrollValueX
+                # newScrollValueX = (offset / width * dX + scrollValueX * (scaleX - dX - 1)) / (scaleX - 1)
+                # newScrollValueX = (offset / width + scrollValueX) * dX / (scaleX - 1) + scrollValueX
 
-            root.scrollValueX = MathUtil.clamp((root.perfHover.pointLocal[0] + 0.5 - prev_scroll_value) * real_dx / Math.max(new_scale - 1.0, 1e-6) + prev_scroll_value, 0.0, 1.0)
-        else:
-            root.scrollValueX = MathUtil.clamp(prev_scroll_value + dx, 0.0, 1.0)
+                self.scrollValueX = MathUtil.clamp((self.perfHover.pointLocal[0] + 0.5 - prev_scroll_value) * real_dx / Math.max(new_scale - 1.0, 1e-6) + prev_scroll_value, 0.0, 1.0)
+            else:
+                self.scrollValueX = MathUtil.clamp(prev_scroll_value + dx, 0.0, 1.0)
+    
+    @staticmethod
+    def _create_empty_vis_model():
+        trs_empty = np.zeros((0, 3), dtype=np.float32)
+        colors_empty = np.zeros((0, 3), dtype=np.float32)
+        scales_empty = np.zeros((0, 3), dtype=np.float32)
+        indexes_empty = np.zeros((0,), dtype=np.int32)
+        durs_empty = np.zeros((0,), dtype=np.float32)
+        return VisModel(trs_empty, colors_empty, scales_empty, indexes_empty, 
+            indexes_empty, durs_empty, 0, 0, 0, 0, [])
 
 
 def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: float, 
@@ -203,6 +215,7 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
 class PerfMonitor(mui.FlexBox):
     def __init__(self, use_view: bool = False):
         trs_empty = np.zeros((0, 3), dtype=np.float32)
+
         boxmesh = three.InstancedMesh(trs_empty, 200000, [
             three.PlaneGeometry(),
             three.MeshBasicMaterial(),
@@ -303,7 +316,7 @@ class PerfMonitor(mui.FlexBox):
         ])
         canvas.event_context_menu.on(self._on_menu_select)
 
-        empty_model = self._create_empty_vis_model()
+        empty_model = VisModel._create_empty_vis_model()
         dm = mui.DataModel(empty_model, [])
         draft = dm.get_draft()
         dm.install_draft_change_handler(draft.clickInstanceId, self._on_click_instance_id_change)
@@ -326,7 +339,7 @@ class PerfMonitor(mui.FlexBox):
         canvas.event_viewport_change.add_frontend_draft_change(draft, "viewport")
 
         canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD"])
-        canvas.event_keyboard_hold.add_frontend_handler(_keyhold_handler_dfdsl, use_immer=False)
+        canvas.event_keyboard_hold.add_frontend_handler_v2(dm, VisModel._keyhold_handler_pfl, use_immer=False)
         boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales")
         # VisModel.bind_scale_xy(perf_group)
         # devmesh.bind_fields(scale="$.whole_scales")
@@ -335,7 +348,7 @@ class PerfMonitor(mui.FlexBox):
                 .prop(variant="caption")
                 .bind_fields(value="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarray_getitem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)"),
             # mui.JsonViewer().bind_fields(data="getitem($.infos, ndarray_getitem($.info_idxes, not_null($.hoverData.instanceId, `0`)))"),
-        ]).prop(width="300px", position="absolute", backgroundColor="rgba(255, 255, 255, 0.5)", pointerEvents="none")
+        ]).prop(width="300px", position="absolute", backgroundColor="rgba(255, 255, 255, 0.5)", pointerEvents="none", zIndex=1)
         label_box.bind_fields(top="not_null($.hoverData.offset[1], `0`) + `5`", left="not_null($.hoverData.offset[0], `0`) + `5`")
         label = mui.MatchCase.binary_selection(True, label_box)
         label.bind_fields(condition="$.hoverData != `null`")
@@ -382,6 +395,15 @@ class PerfMonitor(mui.FlexBox):
         self._detail_viewer = mui.JsonViewer() # .bind_fields(data="perfHover")
         self._update_lock = asyncio.Lock()
         self.max_num_history = 1000
+        canvas_container_with_tooltip = mui.TooltipFlexBox("", [
+            canvas.prop(flex=1),
+            # label,
+        ]).prop(minHeight=0,
+                minWidth=0,
+                overflow="hidden",
+                flex=1,
+                followCursor=True)
+        canvas_container_with_tooltip.bind_fields(title="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarray_getitem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)")
         dm.init_add_layout([
             mui.VBox([
                 mui.HBox([
@@ -390,14 +412,7 @@ class PerfMonitor(mui.FlexBox):
                     slider.prop(flex=2),
                 ]),
                 mui.HDivider(),
-                mui.HBox([
-                    canvas.prop(flex=1),
-                    label,
-                ]).prop(minHeight=0,
-                        minWidth=0,
-                        overflow="hidden",
-                        flex=1,
-                        position="relative")
+                canvas_container_with_tooltip,
             ]).prop(minHeight=0,
                     minWidth=0,
                     overflow="hidden",
@@ -416,15 +431,6 @@ class PerfMonitor(mui.FlexBox):
                 height="100%",
                 overflow="hidden")
 
-    def _create_empty_vis_model(self):
-        trs_empty = np.zeros((0, 3), dtype=np.float32)
-        colors_empty = np.zeros((0, 3), dtype=np.float32)
-        scales_empty = np.zeros((0, 3), dtype=np.float32)
-        indexes_empty = np.zeros((0,), dtype=np.int32)
-        durs_empty = np.zeros((0,), dtype=np.float32)
-        return VisModel(trs_empty, colors_empty, scales_empty, indexes_empty, 
-            indexes_empty, durs_empty, 0, 0, 0, 0, [])
-
     async def _on_menu_select(self, value: str):
         if value == "reset":
             await self._cam_ctrl.reset_camera()
@@ -433,7 +439,7 @@ class PerfMonitor(mui.FlexBox):
 
     async def clear(self):
         self.history.clear()
-        vis_model = self._create_empty_vis_model()
+        vis_model = VisModel._create_empty_vis_model()
         await self._sync_history_select()
         async with self.dm.draft_update() as draft:
             draft.trs = vis_model.trs 
@@ -666,3 +672,12 @@ class PerfMonitor(mui.FlexBox):
             minWidth=vis_info.minWidth,
         )
         return vis_model 
+
+
+def _main():
+    dm = mui.DataModel(VisModel._create_empty_vis_model(), [])
+    assert dm._pfl_library is not None 
+    print(dm._pfl_library.all_compiled.keys())
+
+if __name__ == "__main__":
+    _main()

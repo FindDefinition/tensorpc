@@ -1,4 +1,4 @@
-from tensorpc.apps.ppcl import tsim
+from tensorpc.apps.mls import tsim
 import numpy as np 
 
 def test_tsim_memory():

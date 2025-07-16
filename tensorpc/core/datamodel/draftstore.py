@@ -24,7 +24,7 @@ import dataclasses as dataclasses_plain
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (
     AnnotatedType, BackendOnlyProp, DataclassType, Undefined,
-    child_type_generator, child_type_generator_with_dataclass,
+    child_type_generator_with_dataclass,
     get_dataclass_field_meta_dict, get_type_hints_with_cache, is_annotated,
     parse_type_may_optional_undefined, resolve_type_hints)
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined

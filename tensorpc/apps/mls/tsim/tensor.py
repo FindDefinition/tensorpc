@@ -11,7 +11,7 @@ import contextvars
 from typing_extensions import Self
 
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
-from tensorpc.apps.ppcl.tsim.core import DTypeEnum, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType
+from tensorpc.apps.mls.tsim.core import DTypeEnum, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType
 
 @dataclasses.dataclass
 class SimTensorStorage:
@@ -581,6 +581,82 @@ class SimTensorBase:
             return dataclasses.replace(self, shape=first_shape_no_cat, dtype=tensors[0].dtype, storage=None)
         new_storage = tensors[0].get_storage_checked().concat([t.get_storage_checked() for t in tensors], axis)
         return dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)), dtype=tensors[0].dtype, storage=new_storage)
+
+    def unsqueeze(self, axis: Optional[Union[int, Sequence[int]]] = None) -> Self:
+        """
+        Add a new dimension to the tensor at the specified axis.
+        If axis is None, add a new dimension at the end.
+        """
+        if self.storage is None:
+            if axis is None:
+                new_shape = self.shape + [1]
+            elif isinstance(axis, int):
+                new_shape = self.shape[:axis] + [1] + self.shape[axis:]
+            else:
+                new_shape = list(self.shape)
+                for a in sorted(axis, reverse=True):
+                    new_shape.insert(a, 1)
+            return dataclasses.replace(self, shape=new_shape)
+        else:
+            if axis is None:
+                new_shape = self.shape + [1]
+            elif isinstance(axis, int):
+                new_shape = self.shape[:axis] + [1] + self.shape[axis:]
+            else:
+                new_shape = list(self.shape)
+                for a in sorted(axis, reverse=True):
+                    new_shape.insert(a, 1)
+            new_storage = self.storage.reshape(new_shape)
+            res = dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)), storage=new_storage)
+            return res
+
+    def squeeze(self, axis: Optional[Union[int, Sequence[int]]] = None) -> Self:
+        """
+        Remove dimensions of size 1 from the tensor.
+        If axis is specified, only remove those dimensions.
+        """
+        if self.storage is None:
+            if axis is None:
+                new_shape = [dim for dim in self.shape if dim != 1]
+            elif isinstance(axis, int):
+                new_shape = self.shape[:axis] + self.shape[axis + 1:] if self.shape[axis] == 1 else self.shape
+            else:
+                new_shape = list(self.shape)
+                for a in sorted(axis, reverse=True):
+                    if new_shape[a] == 1:
+                        new_shape.pop(a)
+            return dataclasses.replace(self, shape=new_shape)
+        else:
+            if axis is None:
+                new_shape = [dim for dim in self.shape if dim != 1]
+                axes_to_remove = [i for i, dim in enumerate(self.shape) if dim == 1]
+            elif isinstance(axis, int):
+                new_shape = self.shape[:axis] + self.shape[axis + 1:] if self.shape[axis] == 1 else self.shape
+                axes_to_remove = [axis] if self.shape[axis] == 1 else []
+            else:
+                new_shape = list(self.shape)
+                axes_to_remove = [a for a in axis if new_shape[a] == 1]
+                for a in sorted(axes_to_remove, reverse=True):
+                    new_shape.pop(a)
+            new_storage = self.storage.reduce(self.storage.data, axes_to_remove, keepdims=False)
+            res = dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)), storage=new_storage)
+            return res
+
+    def stack(self, tensors: Sequence[Self], axis: int = 0) -> Self:
+        """
+        Stack a sequence of tensors along a new axis.
+        """
+        # use concat to implement stack
+
+        tensors = [self, *tensors]
+        if len(tensors) == 0:
+            raise ValueError("Cannot stack an empty sequence of tensors")
+        axis_unsq = axis
+        if axis_unsq < 0:
+            axis_unsq += len(tensors[0].shape) + 1
+        tensors_unsqueezed = [t.unsqueeze(axis_unsq) for t in tensors]
+        return tensors_unsqueezed[0].concat(tensors_unsqueezed[1:], axis)
+
 
 @dataclasses.dataclass
 class SimTensor(SimTensorBase):

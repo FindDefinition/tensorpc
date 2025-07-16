@@ -1751,17 +1751,6 @@ class _MonacoEditorControlType(enum.IntEnum):
     SetValue = 2
     SetDecoration = 3
 
-
-@dataclasses.dataclass
-class MonacoSaveEvent:
-    value: str
-    saveVersionId: int
-    viewState: Any
-    userdata: Optional[Any] = None
-    # let user know which path/lang is saved
-    lang: Optional[str] = None 
-    path: Optional[str] = None 
-
 @dataclasses.dataclass
 class MonacoPosition:
     lineNumber: int
@@ -1773,6 +1762,17 @@ class MonacoRange:
     startColumn: int
     endLineNumber: int
     endColumn: int
+
+@dataclasses.dataclass
+class MonacoSaveEvent:
+    value: str
+    saveVersionId: int
+    viewState: Any
+    userdata: Optional[Any] = None
+    # let user know which path/lang is saved
+    lang: Optional[str] = None 
+    path: Optional[str] = None 
+    decorationsRanges: Optional[dict[str, List[MonacoRange]]] = None
 
 @dataclasses.dataclass
 class MonacoSelection(MonacoRange):
@@ -1788,6 +1788,7 @@ class MonacoHoverQueryEvent:
 @dataclasses.dataclass
 class MonacoInlayHintQueryEvent:
     range: MonacoRange
+    value: Optional[str] = None
 
 @dataclasses.dataclass
 class MonacoMarkdownString:
@@ -1812,6 +1813,22 @@ class MonacoInlayHint:
 class MonacoInlayHintList:
     hints: list[MonacoInlayHint]
 
+class MonacoMinimapPosition(enum.IntEnum):
+    Inline = 1
+    Gutter = 2
+
+class MonacoMinimapSectionHeaderStyle(enum.IntEnum):
+    Normal = 1
+    Underlined = 2
+
+
+@dataclasses.dataclass
+class MonacoModelDecorationMinimapOptions:
+    position: MonacoMinimapPosition
+    sectionHeaderStyle: Union[MonacoMinimapSectionHeaderStyle, Undefined] = undefined
+    sectionHeaderText: Union[str, Undefined] = undefined
+
+
 @dataclasses.dataclass
 class MonacoModelDecoration:
     className: Union[Undefined, str] = undefined 
@@ -1824,6 +1841,7 @@ class MonacoModelDecoration:
     zIndex: Union[Undefined, int] = undefined
     linesDecorationsClassName: Union[Undefined, str] = undefined
     marginClassName: Union[Undefined, str] = undefined
+    minimap: Union[Undefined, MonacoModelDecorationMinimapOptions] = undefined
 
 @dataclasses.dataclass
 class MonacoModelDeltaDecoration:
@@ -1836,6 +1854,18 @@ class MonacoSelectionEvent:
     selectedCode: str
     source: str
 
+@dataclasses.dataclass
+class _MonacoDecorationChangeEventRaw:
+    affectsMinimap: bool 
+    affectsGlyphMargin: bool
+    affectsOverviewRuler: bool
+    affectsLineNumber: bool
+
+@dataclasses.dataclass
+class MonacoDecorationChangeEvent:
+    ranges: list[MonacoRange]
+    collection: str 
+    raw: _MonacoDecorationChangeEventRaw
 
 @dataclasses.dataclass
 class MonacoActionEvent:
@@ -1843,6 +1873,7 @@ class MonacoActionEvent:
     selection: Optional[MonacoSelectionEvent]
     userdata: Optional[Any] = None
 
+_T = TypeVar("_T")
 
 class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
     @dataclasses.dataclass
@@ -1862,6 +1893,18 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
     @dataclasses.dataclass
     class ChildDef:
         icomps: dict[str, "MonacoEditor.InlineComponent"]
+
+        def get_child_component_checked(self, key: str, type: type[_T]) -> _T:
+            """Get child component by key, and check its type.
+            If the type is not matched, raise TypeError.
+            """
+            if key not in self.icomps:
+                raise KeyError(f"Child component {key} not found")
+            comp = self.icomps[key]
+            if not isinstance(comp.comp, type):
+                raise TypeError(
+                    f"Child component {key} is not of type {type.__name__}")
+            return comp.comp
 
     def __init__(self, value: str, language: str, path: str, icomps: Optional[dict[str, "MonacoEditor.InlineComponent"]] = None) -> None:
         all_evs = [
@@ -1912,6 +1955,9 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
             lambda x: MonacoHoverQueryEvent(**x))
         self.event_editor_codelens_query = self._create_event_slot(
             FrontendEventType.EditorCodelensQuery)
+        self.event_editor_decoration_change = self._create_event_slot(
+            FrontendEventType.EditorDecorationsChange,
+            converter=lambda x: MonacoDecorationChangeEvent(**x))
 
     @property
     def childs_complex(self):
@@ -1920,10 +1966,10 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
 
     def state_change_callback(
             self,
-            value: Tuple[str, int, Any],
+            value: dict[str, Any],
             type: ValueType = FrontendEventType.Change.value):
-        self.props.value = value[0]
-        self._view_state = value[-1]
+        self.props.value = value["value"]
+        self._view_state = value["viewState"]
 
     def _default_on_save_state(self, state):
         self._view_state = state["viewState"]
@@ -4729,6 +4775,9 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
                                  expanded={k: True
                                            for k in all_expandable})
 
+    async def clear(self):
+        """clear the tree, set tree to empty dict"""
+        await self.send_and_wait(self.update_event(tree=JsonLikeNode.create_dummy(), expanded={}))
 
 class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
 

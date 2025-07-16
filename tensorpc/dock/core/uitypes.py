@@ -84,6 +84,14 @@ class IconType(enum.IntEnum):
     CloudDownload = 73
     CloudUpload = 74
     Insights = 75
+    KeyboardDoubleArrowRight = 76
+    KeyboardDoubleArrowLeft = 77
+    KeyboardArrowRight = 78
+    KeyboardArrowLeft = 79
+    KeyboardArrowDown = 80
+    KeyboardArrowUp = 81
+    KeyboardDoubleArrowDown = 82
+    KeyboardDoubleArrowUp = 83
 
 @dataclasses.dataclass
 class MenuItem:

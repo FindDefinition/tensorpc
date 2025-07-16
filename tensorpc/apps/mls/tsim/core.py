@@ -250,6 +250,15 @@ class TensorSimConfig:
     dtype_mapping: dict[DTypeEnum, np.dtype] = dataclasses.field(
         default_factory=_get_default_sim_dtype_mapping)
 
+@dataclasses.dataclass 
+class TensorSimIoOp:
+    is_load: bool
+    name: str
+    io_indices: np.ndarray
+    ast_node: pfl.PFLCall
+    shape: list[int]
+
+
 class TensorSimContext:
     def __init__(self, grid_id: Sequence[int], grid_size: Sequence[int], 
             simd_group_id: Optional[Sequence[int]] = None, simd_group_size: Optional[Sequence[int]] = None, 
@@ -265,6 +274,8 @@ class TensorSimContext:
             cfg = TensorSimConfig()
         self.cfg = cfg
 
+        self._recorded_io_ops: list[TensorSimIoOp] = []
+
 _TENSOR_SIM_CONTEXT: contextvars.ContextVar[
     Optional[TensorSimContext]] = contextvars.ContextVar("TensorSimContext",
                                                         default=None)
@@ -274,6 +285,8 @@ _TENSOR_SIM_CONTEXT: contextvars.ContextVar[
 def enter_tensorsim_context(grid_id: Sequence[int], grid_size: Sequence[int], 
             simd_group_id: Optional[Sequence[int]] = None, simd_group_size: Optional[Sequence[int]] = None, 
             cfg: Optional[TensorSimConfig] = None, global_mem: Optional["SimMemoryStorage"] = None):
+    for idx, size in zip(grid_id, grid_size):
+        assert idx < size, f"Grid index {idx} must be less than grid size {size}"
     ctx = TensorSimContext(
         grid_id=grid_id,
         grid_size=grid_size,
@@ -333,3 +346,12 @@ def get_sim_dtype_mapping():
     if ctx.cfg.dtype_mapping is None:
         return {}
     return ctx.cfg.dtype_mapping
+
+
+def get_flush_sim_io_ops() -> list[TensorSimIoOp]:
+    ctx = _TENSOR_SIM_CONTEXT.get()
+    if ctx is None:
+        return []
+    res = ctx._recorded_io_ops.copy()
+    ctx._recorded_io_ops.clear()
+    return res

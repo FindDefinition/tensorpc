@@ -34,6 +34,8 @@ class StdRegistry:
 
     def __init__(self):
         self.global_dict: dict[tuple[str, Optional[str]], StdRegistryItem] = {}
+        self._mapped_backend_to_item: dict[tuple[Any, Optional[str]], StdRegistryItem] = {}
+        self._type_backend_to_item: dict[tuple[Any, Optional[str]], StdRegistryItem] = {}
 
     def register(
         self,
@@ -77,8 +79,7 @@ class StdRegistry:
             assert (
                 key_, backend
             ) not in self.global_dict, f"Duplicate registration for {key_} with backend {backend}"
-
-            self.global_dict[(key_, backend)] = StdRegistryItem(
+            item = StdRegistryItem(
                 dcls=func,
                 mapped_name=mapped_name,
                 mapped=mapped,
@@ -89,6 +90,12 @@ class StdRegistry:
                 _internal_disable_type_check=_internal_disable_type_check,
             )
 
+            if mapped is not None:
+                assert (mapped, backend) not in self._mapped_backend_to_item, f"Duplicate mapped type {mapped} for {key_} with backend {backend}"
+                self._mapped_backend_to_item[(mapped, backend)] = item
+                self._type_backend_to_item[(mapped, backend)] = item
+            self.global_dict[(key_, backend)] = item
+            self._type_backend_to_item[(func, backend)] = item
             return cast(T, func)
 
         if func is None:
@@ -173,7 +180,8 @@ class StdRegistry:
         if external is not None:
             check_items = {**self.global_dict, **external}
         else:
-            check_items = self.global_dict
+            return self._mapped_backend_to_item.get((mapped_type, backend), None)
+            # check_items = self.global_dict
         for _, item in check_items.items():
             if _builtin_only and not item.is_builtin:
                 continue

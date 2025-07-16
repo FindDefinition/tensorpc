@@ -15,6 +15,7 @@ class App:
     @mark_create_layout
     def my_layout(self):
         self.monitor = PerfMonitor(use_view=True)
+        
         # self.monitor2 = mui.HBox([mui.Markdown("## PerfMonitor"),])
         # self.monitor2 = PerfMonitor(use_view=True)
 
