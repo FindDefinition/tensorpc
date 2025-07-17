@@ -218,7 +218,7 @@ _PFL_UNARY_TYPE_TO_METHOD_NAME = {
     UnaryOpType.USUB: "__neg__",
 }
 
-_PFL_BINARY_TYPE_TO_METHOD_NAME = {
+_PFL_COMPARE_TYPE_TO_METHOD_NAME = {
     CompareType.EQUAL: "__eq__",
     CompareType.NOT_EQUAL: "__ne__",
     CompareType.LESS: "__lt__",
@@ -227,6 +227,9 @@ _PFL_BINARY_TYPE_TO_METHOD_NAME = {
     CompareType.GREATER_EQUAL: "__ge__",
     CompareType.IN: "__contains__",
     CompareType.NOT_IN: "__contains__",
+}
+
+_PFL_BINARY_TYPE_TO_METHOD_NAME = {
     BinOpType.ADD: "__add__",
     BinOpType.SUB: "__sub__",
     BinOpType.MULT: "__mul__",
@@ -745,7 +748,7 @@ class PFLBinOpBase(PFLExpr):
             return False
         return self.is_right
 
-    def resolve_custom_type(self, op: Union[BinOpType, CompareType]):
+    def resolve_custom_type(self, op: Union[BinOpType, CompareType], is_compare: bool):
         # TODO if left and right are both custom type
         # overrideable operators
         left = self.left
@@ -754,7 +757,12 @@ class PFLBinOpBase(PFLExpr):
         custom_res_type = None
         resolved_custom_expr = None
         resolved_op_func = None
-        op_name = _PFL_BINARY_TYPE_TO_METHOD_NAME[op]
+        if is_compare:
+            assert isinstance(op, CompareType), f"op must be CompareType, but got {type(op)}"
+            op_name = _PFL_COMPARE_TYPE_TO_METHOD_NAME[op]
+        else:
+            assert isinstance(op, BinOpType), f"op must be BinOpType, but got {type(op)}"
+            op_name = _PFL_BINARY_TYPE_TO_METHOD_NAME[op]
         if left.st.type == PFLExprType.DATACLASS_OBJECT:
             dcls_type = left.st.get_origin_type_checked()
             op_func = inspect.getattr_static(dcls_type, op_name, None)
@@ -850,7 +858,7 @@ class PFLBinOp(PFLBinOpBase):
 
     def check_and_infer_type(self):
         is_custom_type, custom_res_type, op_func = self.resolve_custom_type(
-            self.op)
+            self.op, is_compare=False)
         if not is_custom_type:
             promotion_type = self.left.st.check_support_binary_op_and_promotion(self.right.st)
             self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
@@ -916,8 +924,7 @@ class PFLCompare(PFLBinOpBase):
         custom_type_res = None
         if not (self.op == CompareType.IS or self.op == CompareType.IS_NOT):
             # overrideable operators
-            is_custom_type, custom_type_res, op_func = self.resolve_custom_type(self.op)
-
+            is_custom_type, custom_type_res, op_func = self.resolve_custom_type(self.op, is_compare=True)
         if not is_custom_type:
             # all operands are base type
             if not (self.op == CompareType.EQUAL or self.op
