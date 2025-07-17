@@ -655,7 +655,7 @@ class PFLUnaryOp(PFLExpr):
             finfo = op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
-            ) == 1, f"custom operator {op_name} must have one arg, but got {len(finfo.args)}"
+            ) == 0, f"custom operator {op_name} must have no non-self arg, but got {len(finfo.args)}"
             is_custom_type = True
             custom_res_type = finfo.return_type
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"

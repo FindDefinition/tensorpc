@@ -416,7 +416,6 @@ class Tensor:
             return self._replace_wrapped(self._wrapped < other._wrapped)
         return self._replace_wrapped(self._wrapped < other)
 
-
     def __le__(self, other: Union[Self, int, float]) -> Self:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped <= other._wrapped)
@@ -429,6 +428,26 @@ class Tensor:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped > other._wrapped)
         return self._replace_wrapped(self._wrapped > other)
+
+    @overload
+    def __eq__(self, other: Self) -> Self: ...
+    @overload
+    def __eq__(self, other: Union[int, float]) -> Self: ...
+
+    @overload
+    def __ne__(self, other: Self) -> Self: ...
+    @overload
+    def __ne__(self, other: Union[int, float]) -> Self: ...
+
+    def __eq__(self, other: Any) -> Any:
+        if isinstance(other, Tensor):
+            return self._replace_wrapped(self._wrapped == other._wrapped)
+        return self._replace_wrapped(self._wrapped == other)
+
+    def __ne__(self, other: Any) -> Any:
+        if isinstance(other, Tensor):
+            return self._replace_wrapped(self._wrapped != other._wrapped)
+        return self._replace_wrapped(self._wrapped != other)
 
     @overload 
     def reshape(self, shape: int, *shapes: int) -> Self: ...
