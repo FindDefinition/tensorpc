@@ -75,6 +75,7 @@ def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = Non
 
 def _print_meta_infer(fn: Callable, *args: pfl.PFLExprInfo):
     # prevent print is called in meta infer
+    print("[pfl.staticanalysis]", [x.metadata for x in args], *args)
     return None 
 
 @pfl.register_pfl_std(mapped_name="print", backend="triton", mapped=print)
@@ -138,7 +139,7 @@ class Tensor:
         if other.has_metadata(Tensor, PointerTensor, PointerScalarFloat, PointerScalarInt):
             # metadata is Tensor or PointerTensor
             return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.metadata_checked))
-        assert other.type == pfl.PFLExprType.NUMBER 
+        assert other.type == pfl.PFLExprType.NUMBER or other.type == pfl.PFLExprType.BOOL, "other must be a number or a boolean"
         # when binary operation with Tensor, result won't be constexpr, so we create a new dummy number.
         return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.get_origin_type_checked()(1)))
 
@@ -411,19 +412,25 @@ class Tensor:
     def __invert__(self) -> Self:
         return self._replace_wrapped(~self._wrapped)
 
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __lt__(self, other: Union[Self, int, float]) -> Self:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped < other._wrapped)
         return self._replace_wrapped(self._wrapped < other)
 
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __le__(self, other: Union[Self, int, float]) -> Self:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped <= other._wrapped)
         return self._replace_wrapped(self._wrapped <= other)
+
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __ge__(self, other: Union[Self, int, float]) -> Self:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped >= other._wrapped)
         return self._replace_wrapped(self._wrapped >= other)
+
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __gt__(self, other: Union[Self, int, float]) -> Self:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped > other._wrapped)
@@ -439,11 +446,13 @@ class Tensor:
     @overload
     def __ne__(self, other: Union[int, float]) -> Self: ...
 
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __eq__(self, other: Any) -> Any:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped == other._wrapped)
         return self._replace_wrapped(self._wrapped == other)
 
+    @pfl.configure_std_func(meta_infer=_binary_infer)
     def __ne__(self, other: Any) -> Any:
         if isinstance(other, Tensor):
             return self._replace_wrapped(self._wrapped != other._wrapped)
