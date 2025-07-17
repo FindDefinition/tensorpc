@@ -14,7 +14,7 @@ import triton.language as tl
 def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
     import torch 
     # TODO triton code don't support BLOCK_M < BLOCK_N
-    BATCH, H, N_CTX, HEAD_DIM = 1, 1, 128, 128
+    BATCH, H, N_CTX, HEAD_DIM = 1, 1, 256, 64
     BLOCK_M = 32
     BLOCK_N = 32
     is_causal = True 
@@ -48,10 +48,6 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
     o_np = np.empty_like(ref.detach().numpy())
     ref_np = ref.detach().numpy()
     y_dim = q.shape[0] * q.shape[1] * q.shape[2]
-    desc_q = tritonstd.HostTensorDescriptor(q_np.reshape(y_dim, -1), block_shape=[BLOCK_M, HEAD_DIM])
-    desc_v = tritonstd.HostTensorDescriptor(v_np.reshape(y_dim, -1), block_shape=[BLOCK_N, HEAD_DIM])
-    desc_k = tritonstd.HostTensorDescriptor(k_np.reshape(y_dim, -1), block_shape=[BLOCK_N, HEAD_DIM])
-    desc_o = tritonstd.HostTensorDescriptor(o_np.reshape(y_dim, -1), block_shape=[BLOCK_M, HEAD_DIM])
     fwd_grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
     fwd_kwargs: dict[str, Any] = {
         "sm_scale": sm_scale,
@@ -90,7 +86,11 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         ref_kwargs = {
             "Out": ref_np.reshape(y_dim, -1)
         }
-        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=tritonstd.TritonSimInfo(fwd_grid, ref_kwargs))
+        vis_layout=[
+            [None, "Q.T", None],
+            ["K", "Out.T", "V"]
+        ]
+        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=tritonstd.TritonSimInfo(fwd_grid, ref_kwargs, vis_layout=vis_layout))
     else:
         delta = torch.empty_like(M)
         delta = (ref * dref).sum(dim=-1)

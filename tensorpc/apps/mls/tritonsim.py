@@ -129,8 +129,14 @@ class TritonSimModel:
                     line_pos_buffer = MathUtil.getTypedArray(line_pos)
                     line_size_buffer = MathUtil.getTypedArray(line_size)
                     for j in range(inds_flat_buffer.length):
-                        line_pos_buffer[j * 2] = inds_flat_buffer[j] % global_mat.width + 0.5 - global_mat.width / 2
-                        line_pos_buffer[j * 2 + 1] = -(Math.floor(inds_flat_buffer[j] / global_mat.width) + 0.5 - global_mat.height / 2)
+                        x = inds_flat_buffer[j] % global_mat.width + 0.5 - global_mat.width / 2
+                        y = (Math.floor(inds_flat_buffer[j] / global_mat.width) + 0.5 - global_mat.height / 2)
+                        if global_mat.transposed:
+                            tmp = x
+                            x = y
+                            y = tmp
+                        line_pos_buffer[j * 2] = x
+                        line_pos_buffer[j * 2 + 1] = -y
                         line_size_buffer[j * 2] = 1
                         line_size_buffer[j * 2 + 1] = 1
                     # print(fill_pos)
@@ -328,10 +334,6 @@ class TritonKernelRunner:
 class TritonSim:
     @mark_create_layout
     def my_layout(self):
-        # mui.MonacoEditor.InlineComponent(
-        #     mui.BlenderSlider(0, 10, 1).prop(width="50%"), 
-        #     afterLineNumber=2, heightInPx=24)
-
         self.dm = mui.DataModel(TritonSimModel(global_mem=GlobalMemoryModel.empty(), local_matrices={}), [])
         draft = self.dm.get_draft()
         self.editor = mui.MonacoEditor("", "python", "")
@@ -472,7 +474,7 @@ class TritonSim:
         mat_dict: dict[str, np.ndarray] = {}
         for k, block in gmem.memory_blocks.items():
             mat_dict[k] = block.get_data_view_checked()
-        await self._global_mem.set_matrix_dict(mat_dict)
+        await self._global_mem.set_matrix_dict(mat_dict, sim_info.vis_layout)
 
     async def _handle_editor_save(self, ev: mui.MonacoSaveEvent):
         assert self._runner is not None, "Runner must be initialized before saving"
@@ -496,9 +498,7 @@ class TritonSim:
                 for j in range(len(cur_grid_idxes)):
                     cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
                     cur_grid_idxes[j] = min(cur_grid_idxes[j], self._runner.grid_size[j] - 1)
-                # print(2)
                 await self._runner.run_to(cur_grid_idxes, new_bkpt_lineno)
-                # print(cur_grid_idxes, new_bkpt_lineno)
     
     def _install_event_handlers_to_runner(self, runner: TritonKernelRunner):
         runner.runner.event_eval_start.on(self._handle_eval_start)
@@ -540,11 +540,10 @@ class TritonSim:
         else:
             await self._runner.run_single_block(old_value)
 
-    def _bkpt_handle_local_tensor_panel_local(self, k: str, draft: TritonSimModel, bkpt: PFLBreakpoint):
+    def _bkpt_handle_local_tensor_panel_local(self, user_func_uid_no_suffix: str, k: str, draft: TritonSimModel, bkpt: PFLBreakpoint):
         for stack in bkpt.stack[::-1]:
-            if k in stack.scope:
-                func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
-
+            func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
+            if k in stack.scope and func_uid_no_suffix == user_func_uid_no_suffix:
                 local_key = f"{func_uid_no_suffix}-{k}"
                 ten = bkpt.scope[k]
                 assert isinstance(ten, (tritonstd.Tensor, tritonstd.PointerTensor))
@@ -581,7 +580,8 @@ class TritonSim:
     async def _bkpt_handle_local_tensor_preview_panel(self, draft: TritonSimModel, bkpt: PFLBreakpoint):
         for local_key, v in self.dm.model.local_matrices.items():
             obj_id = local_key.split("-")[-1]
-            self._bkpt_handle_local_tensor_panel_local(obj_id, draft, bkpt)
+            func_uid_no_suffix = "-".join(local_key.split("-")[:-1])
+            self._bkpt_handle_local_tensor_panel_local(func_uid_no_suffix, obj_id, draft, bkpt)
 
 
     async def _handle_io_tree_select(self, selected: dict[str, bool]):
@@ -787,12 +787,13 @@ class TritonSim:
                 lineno = act.selection.selections[0].startLineNumber
                 inline_env = await self._runner.run_to(self._get_cur_grid_idxes(), lineno)
                 if inline_env is not None:
-                    gmem = inline_env.get_userdata_typed(tritonstd.TritonSimInfo).global_mem
+                    sim_info = inline_env.get_userdata_typed(tritonstd.TritonSimInfo)
+                    gmem = sim_info.global_mem
                     assert gmem is not None 
                     mat_dict: dict[str, np.ndarray] = {}
                     for k, block in gmem.memory_blocks.items():
                         mat_dict[k] = block.get_data_view_checked()
-                    await self._global_mem.set_matrix_dict(mat_dict)
+                    await self._global_mem.set_matrix_dict(mat_dict, sim_info.vis_layout)
 
     async def _handle_editor_cursor_selection(self, ev: mui.MonacoSelectionEvent):
         if self._runner is None:
@@ -842,7 +843,7 @@ class TritonSim:
             if self._runner.runner.is_paused():
                 bkpt = self._runner.runner.get_state().cur_bkpt
                 assert bkpt is not None
-                self._bkpt_handle_local_tensor_panel_local(obj_name, draft, bkpt)
+                self._bkpt_handle_local_tensor_panel_local(func_uid_no_suffix, obj_name, draft, bkpt)
         await self.tree.set_custom_layout(mui.HBox([
             local_container
         ]).prop(width="100%", height="100%", overflow="hidden"))
@@ -875,6 +876,9 @@ class TritonSim:
                     if self._remove_spec_suffix_of_func_uid(s.node.uid) == self._remove_spec_suffix_of_func_uid(func_uid):
                         if isinstance(node, pfl.PFLName) and node.id in s.scope:
                             val = s.scope[node.id]
+                            msg += f"\n\n**Value in stack**: \n`{val}`"
+                        if isinstance(node, pfl.PFLArg) and node.arg in s.scope:
+                            val = s.scope[node.arg]
                             msg += f"\n\n**Value in stack**: \n`{val}`"
 
             return mui.MonacoHover([

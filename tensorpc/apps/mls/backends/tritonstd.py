@@ -74,8 +74,7 @@ def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = Non
         return range(start, stop, step) 
 
 def _print_meta_infer(fn: Callable, *args: pfl.PFLExprInfo):
-    # prevent print is called in meta infer
-    print("[pfl.staticanalysis]", [x.metadata for x in args], *args)
+    print(f"[pfl.staticanalysis]Types: {args}, metadatas: {[x.metadata for x in args]}")
     return None 
 
 @pfl.register_pfl_std(mapped_name="print", backend="triton", mapped=print)
@@ -1450,6 +1449,9 @@ class TritonSimInfo:
     ref_results: dict[str, Any]
 
     global_mem: Optional[tsim.SimMemoryStorage] = None
+    # for visualization only.
+    # support identifier or identifier.T (transposed) or None (empty space)
+    vis_layout: Optional[list[list[Optional[str]]]] = None
 
 def create_global_mem_from_kwargs(kwargs: dict[str, Any]) -> tsim.SimMemoryStorage:
     global_mem_arrays: dict[str, np.ndarray] = {}

@@ -39,10 +39,13 @@ def _matmul_kernel_test_fn(is_persist: bool) -> pfl.PFLInlineRunEnv:
     ref_kwargs = {
         "c_ptr": c_ref
     }
-    num_grid = tritonstd.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * tritonstd.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
+    num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
-    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs))
+    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
+        [None, "b_ptr"],
+        ["a_ptr", "c_ptr"]
+    ]))
 
 def _matmul_kernel_test_fn_tma(is_persist: bool) -> pfl.PFLInlineRunEnv:
     M = 240
@@ -72,10 +75,13 @@ def _matmul_kernel_test_fn_tma(is_persist: bool) -> pfl.PFLInlineRunEnv:
     ref_kwargs = {
         "c_desc": c_ref
     }
-    num_grid = tritonstd.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * tritonstd.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
+    num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
-    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs))
+    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
+        [None, "b_ptr"],
+        ["a_ptr", "c_ptr"]
+    ]))
 
 @triton.jit
 @pfl.mark_pfl_compilable(is_template=True)

@@ -14,7 +14,7 @@ import triton.language as tl
 def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
     import torch 
     # TODO triton code don't support BLOCK_M < BLOCK_N
-    BATCH, H, N_CTX, HEAD_DIM = 1, 1, 128, 128
+    BATCH, H, N_CTX, HEAD_DIM = 1, 1, 256, 64
     BLOCK_M = 32
     BLOCK_N = 32
     is_causal = True 
@@ -74,7 +74,11 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         ref_kwargs = {
             "desc_o": ref_np.reshape(y_dim, -1)
         }
-        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=tritonstd.TritonSimInfo(fwd_grid, ref_kwargs))
+        vis_layout=[
+            [None, "desc_q.T", None],
+            ["desc_k", "desc_o.T", "desc_v"]
+        ]
+        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=tritonstd.TritonSimInfo(fwd_grid, ref_kwargs, vis_layout=vis_layout))
     else:
         delta = torch.empty_like(M)
         delta = (ref * dref).sum(dim=-1)

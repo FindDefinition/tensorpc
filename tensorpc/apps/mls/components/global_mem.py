@@ -18,6 +18,9 @@ class MatrixBase:
     name: str
     width: float 
     height: float
+    widthVis: float 
+    heightVis: float
+
     # tensor is always converted to a matrix, this store the shape of the tensor.
     shape: list[int]
     # vis layers
@@ -27,9 +30,20 @@ class MatrixBase:
 
     # if height is too small, we scale height to get better visibility.
     height_scale: float = 1.0
+    transposed: bool = False
 
     def get_vis_wh(self, padding: int = 2):
-        return (self.width + padding * 2, self.height * self.height_scale + padding * 2)
+        res = (self.width + padding * 2, self.height * self.height_scale + padding * 2)
+        if self.transposed:
+            return res[::-1]
+        return res
+
+    @staticmethod
+    def get_vis_wh_static(width: int, height: int, height_scale: int = 1, padding: int = 2, transposed: bool = False):
+        res = (width + padding * 2, height * height_scale + padding * 2)
+        if transposed:
+            return res[::-1]
+        return res
 
 def _get_matrix_shape_from_tensor_shape(tensor_shape: Sequence[int]):
     ndim = len(tensor_shape)
@@ -71,11 +85,11 @@ class Matrix(MatrixBase):
     fontSize: float = 3
 
     @classmethod 
-    def from_array(cls, name: str, arr: np.ndarray, padding: int = 2):
-        return cls.from_shape(name, list(arr.shape), padding)
+    def from_array(cls, name: str, arr: np.ndarray, padding: int = 2, transposed: bool = False):
+        return cls.from_shape(name, list(arr.shape), padding, transposed)
 
     @classmethod 
-    def from_shape(cls, name: str, shape: list[int], padding: int = 2):
+    def from_shape(cls, name: str, shape: list[int], padding: int = 2, transposed: bool = False):
         shape = _get_matrix_shape_from_tensor_shape(shape)
         raw_shape = shape
         width = shape[1] 
@@ -85,14 +99,17 @@ class Matrix(MatrixBase):
             name=name,
             width=width,
             height=height,
+            widthVis=height if transposed else width,
+            heightVis=width if transposed else height,
             shape=raw_shape,
             offsetX=0.0,
             offsetY=0.0,
+            transposed=transposed,
         )
 
         desc_length = res.get_desc_length()
         layout_w, layout_h = res.get_vis_wh(padding=2)
-        res.fontSize = max(1 + padding, layout_w / desc_length)
+        res.fontSize = min(max(1 + padding, layout_w / desc_length), layout_h)
         return res 
 
     def get_desc_length(self):
@@ -110,7 +127,7 @@ class Matrix(MatrixBase):
         self.linePosY = ((-(idx_y + 0.5)) + self.height / 2) * self.height_scale
 
     @staticmethod 
-    def get_value_pos_and_color_gray(tensor: np.ndarray, height_scale: float = 1.0):
+    def get_value_pos_and_color_gray(tensor: np.ndarray, height_scale: float = 1.0, transposed: bool = False):
         shape = _get_matrix_shape_from_tensor_shape(tensor.shape)
         mat = tensor.reshape(shape)
         if mat.dtype.kind != "f":
@@ -121,8 +138,10 @@ class Matrix(MatrixBase):
         height = shape[0]
         mat_flat_inds = np.arange(mat.size, dtype=np.int32)
         fill_pos_x = (mat_flat_inds % width) + 0.5 - width / 2
-        fill_pos_y = -(np.floor(mat_flat_inds / width) + 0.5 - height / 2)
-        fill_pos = np.stack([fill_pos_x, fill_pos_y * height_scale], axis=-1)
+        fill_pos_y = (np.floor(mat_flat_inds / width) + 0.5 - height / 2)
+        if transposed:
+            fill_pos_x, fill_pos_y = fill_pos_y, fill_pos_x
+        fill_pos = np.stack([fill_pos_x, -fill_pos_y * height_scale], axis=-1)
 
         # get gray color based on value
         mat_flat = mat.flatten()
@@ -143,8 +162,10 @@ class Matrix(MatrixBase):
     def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True):
         inds_flat = inds.reshape(-1).astype(np.float32)
         fill_pos_x = (inds_flat % self.width) + 0.5 - self.width / 2
-        fill_pos_y = -(np.floor(inds_flat / self.width) + 0.5 - self.height / 2)
-        fill_pos = np.stack([fill_pos_x, fill_pos_y * self.height_scale], axis=-1)
+        fill_pos_y = (np.floor(inds_flat / self.width) + 0.5 - self.height / 2)
+        if self.transposed:
+            fill_pos_x, fill_pos_y = fill_pos_y, fill_pos_x
+        fill_pos = np.stack([fill_pos_x, -fill_pos_y * self.height_scale], axis=-1)
         fill_color = np.empty([inds_flat.shape[0], 3], np.float32)
         if is_persist:
             color = ColorUtil.getPerfettoColorRGB(global_key)
@@ -192,8 +213,8 @@ class GlobalMatrixPanel(three.Group):
         ]).prop(position=(0, 0, int(GlobalMemLayers.BKGD)))
 
         self._event_plane.bind_fields_unchecked_dict({
-            "scale-x": draft.width,
-            "scale-y": draft.height,
+            "scale-x": draft.widthVis,
+            "scale-y": draft.heightVis,
         })
         self._hover_line = three.LineShape(three.Shape.from_aabb(0, 0, 1, 1))
         self._hover_line.prop(color="blue", lineWidth=1, position=(0, 0, int(GlobalMemLayers.INDICATOR)))
@@ -209,10 +230,10 @@ class GlobalMatrixPanel(three.Group):
             self._event_plane.event_move.add_frontend_handler_v2(dm, Matrix._on_hover_pfl, targetPath=str(draft))
 
         self._border = three.LineShape(three.Shape.from_aabb(0, 0, 1, 1))
-        self._border.prop(color="black", lineWidth=2)
+        self._border.prop(color="black", lineWidth=1)
         self._border.bind_fields_unchecked_dict({
-            "scale-x": draft.width,
-            "scale-y": draft.height,
+            "scale-x": draft.widthVis,
+            "scale-y": draft.heightVis,
         }).prop(position=(0, 0, int(GlobalMemLayers.BKGD)))
         fill_material = three.MeshShaderMaterial([
             three.ShaderUniform("color2", three.ShaderUniformType.Color, "white"),
@@ -412,18 +433,62 @@ class GlobalMemContainer(mui.FlexBox):
                 height="100%",
                 overflow="hidden")
 
-    def _get_global_matrix(self, matrices: dict[str, np.ndarray]):
+    def _get_global_matrix(self, matrices: dict[str, np.ndarray], layout: Optional[list[list[Optional[str]]]] = None):
+        matrices = matrices.copy()
         padding = 1
         cur_offset_y = 0
         max_width = 1
         matrixe_objs: dict[str, Matrix] = {}
+        if layout is not None:
+            # do user layout first. if remain, do regular layout.
+            max_row_cnt = 0
+            for row in layout:
+                max_row_cnt = max(max_row_cnt, len(row))
+
+            # first pass: determine width and height of each cell.
+            layout_wh = np.zeros((len(layout), max_row_cnt, 2), dtype=np.int32)
+            for i, row in enumerate(layout):
+                assert row, "row must not empty"
+                for j, key in enumerate(row):
+                    if key is None:
+                        continue
+                    transposed = False 
+                    if key.endswith(".T"):
+                        key = key[:-2]
+                        transposed = True
+                    arr = matrices[key]
+                    shape = _get_matrix_shape_from_tensor_shape(arr.shape)
+                    vis_wh = MatrixBase.get_vis_wh_static(shape[1], shape[0], padding=padding, transposed=transposed)
+                    layout_wh[i, j] = (vis_wh[0], vis_wh[1])
+            # determine width of all columns and height of all rows.
+            widths = np.max(layout_wh[..., 0], axis=0)
+            heights = np.max(layout_wh[..., 1], axis=1)
+            widths_cumsum = np.cumsum(np.concatenate([[0], widths]))[:-1]
+            heights_cumsum = np.cumsum(np.concatenate([[0], heights]))[:-1]
+            for i, row in enumerate(layout):
+                for j, key in enumerate(row):
+                    if key is None:
+                        continue
+                    transposed = False 
+                    if key.endswith(".T"):
+                        key = key[:-2]
+                        transposed = True
+                    arr = matrices[key]
+                    gmat = Matrix.from_array(key, arr, transposed=transposed)
+                    if transposed:
+                        gmat.name += ".T"
+                    layout_w, layout_h = gmat.get_vis_wh(padding)
+                    gmat.offsetX = layout_w / 2 + widths_cumsum[j]
+                    gmat.offsetY = layout_h / 2 + heights_cumsum[i]
+                    matrices.pop(key)
+                    matrixe_objs[key] = gmat
+            cur_offset_y = int(heights_cumsum[-1] + heights[-1])
+            max_width = int(widths_cumsum[-1] + widths[-1])
         for k, v in matrices.items():
             gmat = Matrix.from_array(k, v)
             layout_w, layout_h = gmat.get_vis_wh(padding)
             gmat.offsetX = layout_w / 2
             gmat.offsetY = cur_offset_y + layout_h / 2
-            gmat.temp_fill_pos = np.zeros((1, 3), dtype=np.float32)
-            gmat.temp_fill_color = np.array([0.4, 0.7, 0.1], dtype=np.float32)
             cur_offset_y += layout_h
             matrixe_objs[k] = gmat
             max_width = max(max_width, layout_w)
@@ -434,9 +499,9 @@ class GlobalMemContainer(mui.FlexBox):
         return matrixe_objs, max_width, cur_offset_y
 
 
-    async def set_matrix_dict(self, matrices: dict[str, np.ndarray]):
+    async def set_matrix_dict(self, matrices: dict[str, np.ndarray], layout: Optional[list[list[Optional[str]]]] = None):
         matrixe_panels: dict[str, GlobalMatrixPanel] = {}
-        gmatrices, max_width, max_height = self._get_global_matrix(matrices)
+        gmatrices, max_width, max_height = self._get_global_matrix(matrices, layout)
         async with self._dm.draft_update():
             for k, v in gmatrices.items():
                 self._draft.matrices[k] = v

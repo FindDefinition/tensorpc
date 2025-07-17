@@ -333,7 +333,7 @@ class AsyncSSHTerminal(Terminal):
                  line_raw_ev_max_length: int = 10000,
                  init_size: Optional[tuple[int, int]] = (80, 24),
                  terminalId: Optional[str] = None,
-                 min_size: Optional[tuple[int, int]] = (40, 15)) -> None:
+                 min_size: Optional[tuple[int, int]] = (25, 15)) -> None:
         super().__init__(init_data, terminalId=terminalId)
         if desc is None:
             assert manual_connect, "Cannot auto connect/disconnect when mount without url_with_port(ip:port), username, and password."
@@ -490,7 +490,9 @@ class AsyncSSHTerminal(Terminal):
     async def _on_resize(self, data: TerminalResizeEvent):
         self._size_state = data
         if self._min_size is not None:
-            if data.width > self._min_size[0] or data.height > self._min_size[1]:
+            if data.width < self._min_size[0]:
+                LOGGER.warning("Terminal resize width %d is less than min size %s, ignore resize.",
+                                 data.width, self._min_size)
                 # reject small resize. this usually caused by unmount of tab.
                 return
         if self._ssh_state is not None:
