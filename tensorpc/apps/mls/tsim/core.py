@@ -251,13 +251,21 @@ class TensorSimConfig:
         default_factory=_get_default_sim_dtype_mapping)
 
 @dataclasses.dataclass 
+class TensorSimIoMatrixInfo:
+    # only used for better debug info.
+    # block ptr may load a block matrix
+    offsets: tuple[int, int]
+    shape: tuple[int, int]
+
+
+@dataclasses.dataclass 
 class TensorSimIoOp:
     is_load: bool
     name: str
     io_indices: np.ndarray
     ast_node: pfl.PFLCall
     shape: list[int]
-
+    matrix_info: Optional[TensorSimIoMatrixInfo] = None
 
 class TensorSimContext:
     def __init__(self, grid_id: Sequence[int], grid_size: Sequence[int], 

@@ -3004,6 +3004,7 @@ class BlenderSliderProps(MUIComponentBaseProps):
     fractionDigits: Union[Undefined, int] = undefined
     isInteger: Union[Undefined, bool] = undefined
     showTotal: Union[Undefined, bool] = undefined
+    showStep: Union[Undefined, bool] = undefined
     forwardOnly: Union[Undefined, bool] = undefined
     disabled: Union[Undefined, bool] = undefined
     # for inline component in monaco editor.

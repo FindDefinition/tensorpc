@@ -9,6 +9,7 @@ from tensorpc.core.pfl.evaluator import get_pfl_runner_state
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
 from tensorpc.apps.mls.tsim.core import (
     DTypeEnum,
+    TensorSimIoMatrixInfo,
     TensorSimIoOp,
     get_default_base_dtype,
     get_tensorsim_context,
@@ -193,6 +194,7 @@ class SimMemoryStorage(SimTensorStorage):
         pointer: Union["SimPointerTensor", "SimPointerScalarBase"],
         mask: Optional[Union[SimTensor, bool]] = None,
         other: Optional[Union[SimTensor, float, int, bool]] = None,
+        matrix_info: Optional[TensorSimIoMatrixInfo] = None,
     ) -> SimTensor:
         if pointer.storage is None:
             assert not isinstance(pointer, SimPointerScalarBase)
@@ -236,7 +238,9 @@ class SimMemoryStorage(SimTensorStorage):
             indices_for_record = loaded_indices.reshape(-1, pointer.num_element).copy()
             if mask is not None:
                 indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
-            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(True, block_name, indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape))
+            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(True, block_name,
+                indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape,
+                matrix_info=matrix_info))
         if mask is None:
             output_data[:] = data_raw[pointer_data].reshape(
                 *pointer.shape, pointer.num_element
@@ -295,6 +299,7 @@ class SimMemoryStorage(SimTensorStorage):
         pointer: Union["SimPointerTensor", "SimPointerScalarBase"],
         value: Union[SimTensor, int, float],
         mask: Optional[Union[SimTensor, bool]] = None,
+        matrix_info: Optional[TensorSimIoMatrixInfo] = None,
     ):
         assert (
             pointer.num_element == 1
@@ -323,7 +328,9 @@ class SimMemoryStorage(SimTensorStorage):
             indices_for_record = mapped_pointer_data.reshape(-1, pointer.num_element).copy()
             if mask is not None:
                 indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
-            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(False, block_name, indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape))
+            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(False, block_name,
+                 indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape,
+                 matrix_info=matrix_info))
 
         if DTypeEnum(pointer.dtype).to_numpy_dtype() != block_data.dtype:
             raise NotImplementedError
@@ -425,20 +432,22 @@ class SimPointerTensor(SimTensorBase):
         self,
         mask: Optional[Union[bool, SimTensor]] = None,
         other: Optional[Union[SimTensor, float, int, bool]] = None,
+        matrix_info: Optional[TensorSimIoMatrixInfo] = None,
     ) -> SimTensor:
         if self.memory_storage is None:
             # create a meta tensor from self
             return SimTensor(shape=self.shape, dtype=self.dtype, storage=None)
-        return self.memory_storage.load(self, mask, other)
+        return self.memory_storage.load(self, mask, other, matrix_info=matrix_info)
 
     def store(
         self,
         value: Union[SimTensor, int, float],
         mask: Optional[Union[bool, SimTensor]] = None,
+        matrix_info: Optional[TensorSimIoMatrixInfo] = None,
     ):
         if self.memory_storage is None:
             return
-        return self.memory_storage.store(self, value, mask)
+        return self.memory_storage.store(self, value, mask, matrix_info=matrix_info)
 
     def __add__(self, other: Union[SimTensor, int]) -> Self:
         res = self._binary_base(cast(Self, other), BinOpType.ADD, False)
@@ -742,7 +751,13 @@ class SimTensorBlockPointer:
         cur_pointer_tensor, mask_tensor = self.get_current_pointer_tensor_and_mask(
             offsets
         )
-        return cur_pointer_tensor.load(mask=mask_tensor, other=other)
+        matrix_info = None 
+        if len(self.shape) == 2:
+            matrix_info = TensorSimIoMatrixInfo(
+                offsets=(offsets[0] + self.offset[0], offsets[1] + self.offset[1]),
+                shape=(self.block_shape[0], self.block_shape[1]),
+            )
+        return cur_pointer_tensor.load(mask=mask_tensor, other=other, matrix_info=matrix_info)
 
     def store(self, offsets: list[int], value: Union[SimTensor, int, float]):
         if self.base.storage is None:
@@ -751,7 +766,13 @@ class SimTensorBlockPointer:
         cur_pointer_tensor, mask_tensor = self.get_current_pointer_tensor_and_mask(
             offsets
         )
-        return cur_pointer_tensor.store(mask=mask_tensor, value=value)
+        matrix_info = None 
+        if len(self.shape) == 2:
+            matrix_info = TensorSimIoMatrixInfo(
+                offsets=(offsets[0] + self.offset[0], offsets[1] + self.offset[1]),
+                shape=(self.block_shape[0], self.block_shape[1]),
+            )
+        return cur_pointer_tensor.store(mask=mask_tensor, value=value, matrix_info=matrix_info)
 
 
 def create_tensor_block_pointer(

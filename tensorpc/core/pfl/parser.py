@@ -1416,7 +1416,6 @@ class PFLParser:
             ), f"parent {parent_from_qn} must be a dataclass type, got {type(parent_from_qn)}"
             self_type = parse_type_may_optional_undefined(parent_from_qn)
         func_uid = get_module_id_of_type(func)
-        print("func_uid", func_uid)
         func_meta = get_compilable_meta(func)
         func_sig = inspect.signature(func)
         is_method_def = False

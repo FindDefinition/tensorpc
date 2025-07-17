@@ -1,5 +1,6 @@
 import asyncio
 from functools import partial
+from pathlib import Path
 from typing import Annotated, Any, Optional, Union
 
 import numpy as np
@@ -96,7 +97,7 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
 
         delta_np = delta.detach().numpy()
         # we have to run fwd kernel here to get correct M.
-        runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd)
+        runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd, module_code_getter=lambda x: Path(__file__).read_text())
         global_mem_fwd = tritonstd.create_global_mem_from_kwargs(fwd_kwargs)
         runner.run_kernel_in_executor(
             _attn_fwd.fn, grid_size=fwd_grid, global_mem=global_mem_fwd, **fwd_kwargs)

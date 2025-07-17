@@ -15,7 +15,7 @@ from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
 from tensorpc.core.moduleid import get_module_id_of_type
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
 
-from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLInlineRunEnv, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
+from .core import (BACKEND_CONFIG_REGISTRY, PFL_LOGGER, PFLErrorFormatContext, PFLInlineRunEnv, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
                    enter_parse_context, get_parse_context, get_parse_context_checked)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
@@ -919,7 +919,6 @@ class PFLAsyncRunner:
         func_node = self._library.all_compiled[func_uid]
         try:
             await self.event_eval_start.emit_async()
-
             with enter_pfl_runner_state(self._state):
                 if scope is not None:
                     return await self._run_func(func_uid, scope)
@@ -938,6 +937,8 @@ class PFLAsyncRunner:
                             stack.enter_context(ctx)
                         return await self._run_func(func_uid, scope)
                 return await self._run_func(func_uid, scope)
+        except PFLEvalStop:
+            PFL_LOGGER.warning("Eval stopped by user.")
         finally:
             self.clear_runtime_state()
             if exit_event is not None:
@@ -956,13 +957,9 @@ class PFLAsyncRunner:
         self.add_breakpoint(stmt_start_lineno, one_shot=False)
         try:
             return await self.run_func(func_uid, scope, external_inline_env, exit_event)
-        except PFLEvalStop:
-            self.clear_runtime_state()
         except:
             traceback.print_exc()
             raise
-        finally:
-            self.clear_runtime_state()
 
     def get_state(self) -> PFLAsyncRunnerState:
         return self._state

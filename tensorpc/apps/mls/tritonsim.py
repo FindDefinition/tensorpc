@@ -5,11 +5,14 @@ import enum
 from functools import partial
 import importlib
 import json
+import linecache
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 import time
 import traceback
 import types
 from typing import Any, Union, cast
+import uuid
 from tensorpc.core.astex.sourcecache import SCDItem, SourceChangeDiffCache
 from tensorpc.apps.mls import tsim
 from tensorpc.apps.mls.components.global_mem import GlobalMatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix
@@ -101,9 +104,6 @@ class TritonSimModel:
     @pfl.mark_pfl_compilable
     def _on_hover_pfl(self, data: three.PointerEvent, key: str):
         # print("WTF", self.global_mem)
-        for global_key, mat in self.global_mem.matrices.items():
-            mat.temp_fill_pos = None 
-            mat.temp_fill_color = None
 
         if key in self.local_matrices:
             local_mat = self.local_matrices[key]
@@ -188,6 +188,7 @@ def get_key_from_prefix_data(prefix: InlineCompPrefix, data: str) -> str:
 
 class TritonKernelRunner:
     def __init__(self, item: AstCacheItem, path: str, lineno: int):
+        self._compiled_tmp_file_path: Optional[str] = None
         mod_dict = self._get_module_dict_init(path, item.content)
         func_nodes = find_toplevel_func_node_container_by_lineno(cast(ast.Module, item.tree), lineno)
         assert func_nodes is not None 
@@ -217,6 +218,13 @@ class TritonKernelRunner:
 
         self._mapper_new_to_old: Optional[SCDItem] = None
 
+
+    def close(self):
+        if self._compiled_tmp_file_path is not None:
+            # remove from linecache
+            linecache.checkcache(self._compiled_tmp_file_path)
+            self._compiled_tmp_file_path = None
+
     def _get_module_dict_init(self, path: str, code: Optional[str] = None):
         module_import_path = find_submodule_from_file(path)
         if module_import_path is None:
@@ -230,10 +238,25 @@ class TritonKernelRunner:
         # use dynamic file import
         module = types.ModuleType(path)
         spec = importlib.machinery.ModuleSpec(path, None, origin=path)
-        module.__file__ = path
         module.__spec__ = spec
-        code_comp = compile(code, path, "exec")
-        exec(code_comp, module.__dict__)
+        use_tmp_file: bool = False 
+        if use_tmp_file:
+            if self._compiled_tmp_file_path is not None:
+                # remove from linecache
+                linecache.checkcache(self._compiled_tmp_file_path)
+            with NamedTemporaryFile(mode="w", suffix=".py", delete=True) as f:
+                f.write(code)
+                code_comp = compile(code, f.name, "exec")
+                module.__file__ = f.name
+                exec(code_comp, module.__dict__)
+                self._compiled_tmp_file_path = f.name
+        else:
+            # assume user already save code to filesystem.
+            linecache.checkcache(path)
+            code_comp = compile(code, path, "exec")
+            module.__file__ = path
+            exec(code_comp, module.__dict__)
+
         mod_dict = module.__dict__
         return mod_dict
 
@@ -241,8 +264,8 @@ class TritonKernelRunner:
         self._runner_task_ev.clear()
         mod_dict = self._get_module_dict_by_code(self._path, new_code)
         fn = mod_dict[self._fn_name]
-        self._fn = fn
         runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, module_code_getter=lambda x: new_code)
+        self._fn = fn
         # print(ast.ret_st)
         lib = runner._library
         self.lib = lib
@@ -329,19 +352,19 @@ class TritonSim:
         ]
         debug_toolbar = mui.HBox([
             mui.IconButton(mui.IconType.PlayArrow, self._on_debug_just_run)
-                .prop(tooltip="Run Single Block", size="small", iconSize="small")
+                .prop(tooltip="Run Single Block", size="small", iconSize="small", muiColor="primary")
                 .bind_fields(disabled=f"({draft.is_paused})"),
             mui.IconButton(mui.IconType.KeyboardArrowRight, self._on_debug_next_line)
-                .prop(tooltip="Next Line", size="small", iconSize="small")
+                .prop(tooltip="Next Line", size="small", iconSize="small", muiColor="primary")
                 .bind_fields(disabled=f"!({draft.is_paused})"),
             mui.IconButton(mui.IconType.KeyboardDoubleArrowRight, self._on_debug_continue)
-                .prop(tooltip="Continue", size="small", iconSize="small")
+                .prop(tooltip="Continue", size="small", iconSize="small", muiColor="primary")
                 .bind_fields(disabled=f"!({draft.is_paused})"),
             mui.IconButton(mui.IconType.RestartAlt,)
-                .prop(tooltip="Restart", size="small", iconSize="small")
+                .prop(tooltip="Restart", size="small", iconSize="small", muiColor="success")
                 .bind_fields(disabled=f"!({draft.is_paused})"),
             mui.IconButton(mui.IconType.Stop, self._on_debug_stop)
-                .prop(tooltip="Stop", size="small", iconSize="small")
+                .prop(tooltip="Stop", size="small", iconSize="small", muiColor="error")
                 .bind_fields(disabled=f"!({draft.is_paused})"),
         ])
         self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts)
@@ -376,6 +399,7 @@ class TritonSim:
 
         self._block_run_backend_state: Optional[SingleBlockRunState] = None
         self._cur_observed_local_tensor_key: Optional[tuple[str, str]] = None
+        self._next_bkpt_set_lineno: bool = False
 
         self.dm.init_add_layout([
             mui.VBox([
@@ -409,12 +433,16 @@ class TritonSim:
             return
         self._validate_editor_has_unsave()
         self._runner.runner.release_breakpoint()
+        self._next_bkpt_set_lineno = True
 
     async def _on_debug_next_line(self):
         if self._runner is None:
             return
         self._validate_editor_has_unsave()
+        assert self._runner.runner.is_paused(), "Runner must be paused to continue to next line"
         await self._runner.runner.continue_next_line()
+        self._next_bkpt_set_lineno = True
+
 
     async def _on_debug_stop(self):
         if self._runner is None:
@@ -451,12 +479,12 @@ class TritonSim:
         prev_is_paused = self._runner.runner.is_paused()
         # print(0)
         await self._on_debug_stop()
-        self._runner.recompile(ev.value)
-        self._install_event_handlers_to_runner(self._runner)
         # print(1)
         with open(self._runner._path, "w", encoding="utf-8") as f:
             f.write(ev.value)
+        self._runner.recompile(ev.value)
         await self._init_sim_info()
+        self._install_event_handlers_to_runner(self._runner)
 
         if prev_is_paused:
             decors = ev.decorationsRanges
@@ -480,6 +508,9 @@ class TritonSim:
 
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):
         if data.type == VscodeTensorpcMessageType.PFLLaunchSimulation:
+            if self._runner is not None:
+                await self._runner.stop_run()
+                self._runner.close()
             assert data.selections is not None 
             # vscode.Selection use zero-based line numbers and col offset
             # monaco.Selection use 1-based for both. oh my god
@@ -505,7 +536,6 @@ class TritonSim:
         if self._runner.runner.is_paused():
             cur_bkpt_lineno = self._runner.runner.get_state().cur_bkpt.node.source_loc[0]
             await self._runner.stop_run()
-            await self._runner._runner_task_ev.wait()
             await self._runner.run_to(old_value, cur_bkpt_lineno)
         else:
             await self._runner.run_single_block(old_value)
@@ -519,6 +549,10 @@ class TritonSim:
                 ten = bkpt.scope[k]
                 assert isinstance(ten, (tritonstd.Tensor, tritonstd.PointerTensor))
                 if isinstance(ten, tritonstd.Tensor):
+                    for global_key in self.dm.model.global_mem.matrices.keys():
+                        draft.global_mem.matrices[global_key].temp_fill_pos = None 
+                        draft.global_mem.matrices[global_key].temp_fill_color = None
+
                     storage = ten._wrapped.get_storage_checked()
                     data = storage.data
                     if data.dtype == np.bool_:
@@ -539,6 +573,7 @@ class TritonSim:
                         # draft.global_mem.matrices[global_key].temp_mask_pos = fill_pos
                         draft.global_mem.matrices[global_key].temp_fill_pos = fill_pos
                         draft.global_mem.matrices[global_key].temp_fill_color = fill_color
+                    break
                 else:
                     # TODO
                     raise NotImplementedError
@@ -562,6 +597,7 @@ class TritonSim:
                     draft.global_mem.matrices[global_key].temp_mask_pos = None
 
                 draft.global_mem.matrices[op.name].temp_mask_pos = fill_pos
+            await self.editor.set_line_number(op.ast_node.source_loc[0], select_line=True)
 
     async def _recorded_io_ops_to_global(self, io_ops: list[TensorSimIoOp]):
         # add persist memory access data to global matrix.
@@ -584,16 +620,28 @@ class TritonSim:
 
     async def _bkpt_handle_recorded_io_ops(self, io_ops: list[TensorSimIoOp]):
         items: list[mui.JsonLikeNode] = []
-        self._cur_recorded_io_ops = io_ops
-        for i, op in enumerate(io_ops):
+        old_length = len(self._cur_recorded_io_ops)
+        # old ops
+        for i, op in enumerate(self._cur_recorded_io_ops + io_ops):
+            is_old = i < old_length
+            name = f"{op.name}"
+            if not is_old:
+                name = "+" + name
+            if op.matrix_info is not None:
+                s0 = op.matrix_info.offsets[0]
+                s1 = op.matrix_info.offsets[1]
+                e0 = s0 + op.matrix_info.shape[0]
+                e1 = s1 + op.matrix_info.shape[1]
+                name += f"[{s0}:{e0}, {s1}:{e1}]"
             node = mui.JsonLikeNode(
                 id=UniqueTreeIdForTree.from_parts([str(i)]),
-                name=f"{op.name}",
+                name=name,
                 type=mui.JsonLikeType.Object.value,
                 typeStr="Load" if op.is_load else "Store",
                 value=str(op.shape)
             ) 
             items.append(node)
+        self._cur_recorded_io_ops.extend(io_ops)
         dummy_node = mui.JsonLikeNode.create_dummy()
         dummy_node.children = items
         await self.io_ops_tree.send_and_wait(self.io_ops_tree.update_event(tree=dummy_node, ignoreRoot=True))
@@ -603,11 +651,15 @@ class TritonSim:
         if self._runner is None:
             return 
         tsim_io_ops = get_flush_sim_io_ops()
+        if self._next_bkpt_set_lineno:
+            await self.editor.set_line_number(bkpt.node.source_loc[0])
+            self._next_bkpt_set_lineno = False
         async with self._editor_lock:
             await self.tree.tree.set_root_object_dict(bkpt.scope)
             await self.editor.set_decorations("common", [
                 mui.MonacoModelDeltaDecoration(mui.MonacoRange(bkpt.node.source_loc[0], 1, bkpt.node.source_loc[0], 1),
-                mui.MonacoModelDecoration(className="monaco-editor-content-decoration", isWholeLine=True))
+                mui.MonacoModelDecoration(className="monaco-editor-content-decoration", isWholeLine=True,
+                minimap=mui.MonacoModelDecorationMinimapOptions(mui.MonacoMinimapPosition.Inline)))
             ])
             for ctrl_id, ctrl in self._runner.runner.get_state().cur_ctrl_points.items():
                 assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
@@ -616,7 +668,8 @@ class TritonSim:
                     node = ctrl.node
                     slider = mui.BlenderSlider(ctrl.range.start, ctrl.range.stop, ctrl.range.step)
                     slider.event_change.on(partial(self._handle_slider, slider=slider, ctrl=ctrl))
-                    slider.prop(width="50%", showControlButton=True, showTotal=True, isInteger=True, forwardOnly=True, zIndex=10, alwaysShowButton=True)
+                    slider.prop(width="50%", showControlButton=True, showTotal=True, showStep=True, 
+                        isInteger=True, forwardOnly=True, zIndex=10, alwaysShowButton=True)
                     inline_comp = mui.MonacoEditor.InlineComponent(
                         slider,
                         afterLineNumber=node.source_loc[0], heightInPx=24)
@@ -673,6 +726,7 @@ class TritonSim:
         self.editor.childs_complex.icomps.clear()
         await self.editor.set_new_layout(self.editor.childs_complex)
         await self.tree.clear_custom_layout()
+        self._next_bkpt_set_lineno = False
         async with self.dm.draft_update() as draft:
             draft.is_paused = False
             # keep persist data here until new run.
@@ -835,6 +889,7 @@ class TritonSim:
         if self._runner.runner.is_paused():
             mapper: Optional[SCDItem] = None
             new_value = ev.value
+            query_range = ev.range
             if new_value is not None:
                 new_value_lines = new_value.split("\n")
                 # mapper = SourceChangeDiffCache.get_raw_item_for_mapping(new_value_lines, self._runner._content_lines, )
@@ -859,6 +914,8 @@ class TritonSim:
                             end_lineno_mapped = mapper.bisect_mapped_lineno(end_lineno)
                             if end_lineno_mapped != -1:
                                 end_lineno = end_lineno_mapped
+                        if end_lineno < query_range.startLineNumber or end_lineno > query_range.endLineNumber:
+                            continue
                         res.append(mui.MonacoInlayHint(
                             label=f":{val_str}",
                             position=mui.MonacoPosition(end_lineno, node.get_source_loc_checked()[3] + 1),
