@@ -1,33 +1,41 @@
 import asyncio
 import concurrent.futures
+import contextlib
+import enum
 from functools import partial
 import inspect
 import math
-
+import importlib.machinery
 import concurrent
+import multiprocessing
+import types
 import triton
 from tensorpc.apps.mls.tsim import get_tensorsim_context_checked
 from tensorpc.apps.mls.tsim.core import get_tensorsim_context
 from tensorpc.apps.mls.tsim.tensor import SimTensor
 from tensorpc.core import pfl
-from typing_extensions import Self
-import numpy as np 
-import dataclasses 
+from typing_extensions import Literal, Self
+import numpy as np
+import dataclasses
 from typing import Annotated, Any, Callable, ClassVar, Optional, Type, TypeAlias, TypeVar, Union, cast, get_type_hints, overload
-from tensorpc.apps.mls import tsim 
+from tensorpc.apps.mls import tsim
 from tensorpc.apps.mls.tsim import DTypeEnum
 import triton.language as tl
 
 from tensorpc.core.annolib import Undefined
+from tensorpc.core.moduleid import get_object_type_from_module_id
 from tensorpc.core.pfl.core import PFLInlineRunEnv
+from tensorpc.utils.package_finder import find_submodule_from_file
 
-pfl.register_backend("triton", pfl.PFLParseConfig(
-    allow_var_union=False,
-    allow_kw=True,
-    allow_nd_slice=True,
-    allow_slice=True,
-    allow_new_var_after_if=True,
-))
+pfl.register_backend(
+    "triton",
+    pfl.PFLParseConfig(
+        allow_var_union=False,
+        allow_kw=True,
+        allow_nd_slice=True,
+        allow_slice=True,
+        allow_new_var_after_if=True,
+    ))
 
 # @pfl.register_pfl_std(mapped_name="int", backend="triton", mapped=int)
 # def int_func(x: Any) -> int:
@@ -41,109 +49,156 @@ pfl.register_backend("triton", pfl.PFLParseConfig(
 # def bool_func(x: Any) -> bool:
 #     return bool(x)
 
-@pfl.register_pfl_builtin_proxy(mapped_name="int", backend="triton", mapped=int)
+
+@pfl.register_pfl_builtin_proxy(mapped_name="int",
+                                backend="triton",
+                                mapped=int)
 @dataclasses.dataclass
 class _IntProxy:
+
     @staticmethod
     def __pfl_proxy_init__(x: Any) -> int:
         return int(x)
 
-@pfl.register_pfl_builtin_proxy(mapped_name="float", backend="triton", mapped=float)
+
+@pfl.register_pfl_builtin_proxy(mapped_name="float",
+                                backend="triton",
+                                mapped=float)
 @dataclasses.dataclass
 class _FloatProxy:
+
     @staticmethod
     def __pfl_proxy_init__(x: Any) -> float:
         return float(x)
 
-@pfl.register_pfl_builtin_proxy(mapped_name="bool", backend="triton", mapped=bool)
+
+@pfl.register_pfl_builtin_proxy(mapped_name="bool",
+                                backend="triton",
+                                mapped=bool)
 @dataclasses.dataclass
 class _BoolProxy:
+
     @staticmethod
     def __pfl_proxy_init__(x: Any) -> bool:
         return bool(x)
 
 
 @pfl.register_pfl_std(mapped_name="range", backend="triton", mapped=range)
-def range_func(start: int, stop: Optional[int] = None, step: Optional[int] = None) -> range:
+def range_func(start: int,
+               stop: Optional[int] = None,
+               step: Optional[int] = None) -> range:
     if stop is None and step is None:
         return range(start)
     elif step is None and stop is not None:
         return range(start, stop)
     else:
         assert stop is not None and step is not None, "stop and step must be provided together"
-        return range(start, stop, step) 
+        return range(start, stop, step)
+
 
 def _print_meta_infer(fn: Callable, *args: pfl.PFLExprInfo):
-    print(f"[pfl.staticanalysis]Types: {args}, metadatas: {[x.metadata for x in args]}")
-    return None 
+    print(
+        f"[pfl.staticanalysis]Types: {args}, metadatas: {[x.metadata for x in args]}"
+    )
+    return None
+
 
 @pfl.register_pfl_std(mapped_name="print", backend="triton", mapped=print)
 @pfl.configure_std_func(meta_infer=_print_meta_infer, force_meta_infer=True)
 def print_func(*args: Any) -> None:
     print(*args)
 
-@pfl.register_pfl_std(mapped_name="TritonConstexpr", backend="triton", mapped=tl.constexpr)
+
+@pfl.register_pfl_std(mapped_name="TritonConstexpr",
+                      backend="triton",
+                      mapped=tl.constexpr)
 @dataclasses.dataclass
 class ConstExpr:
     pass
 
-@pfl.register_pfl_std(mapped_name="TritonPointerType", backend="triton", mapped=tl.pointer_type)
+
+@pfl.register_pfl_std(mapped_name="TritonPointerType",
+                      backend="triton",
+                      mapped=tl.pointer_type)
 @dataclasses.dataclass
 class pointer_type:
     dtype: int
+
 
 @pfl.register_pfl_std(mapped_name="TritonBlockTensor", backend="triton")
 @dataclasses.dataclass
 class Tensor:
     _wrapped: tsim.SimTensor
+
     def _replace_wrapped(self, new_tensor: tsim.SimTensor) -> Self:
         return dataclasses.replace(self, _wrapped=new_tensor)
+
     def __repr__(self) -> str:
         return self._wrapped.__repr__()
-    @property 
+
+    @property
     def shape(self) -> list[int]:
-        return self._wrapped.shape 
-    @property 
+        return self._wrapped.shape
+
+    @property
     def dtype(self) -> int:
-        return self._wrapped.dtype 
-    @property 
-    def ndim(self) -> int: 
+        return self._wrapped.dtype
+
+    @property
+    def ndim(self) -> int:
         return len(self.shape)
-    @property 
-    def T(self) -> Self: 
+
+    @property
+    def T(self) -> Self:
         return self._replace_wrapped(self._wrapped.T)
-        
+
     def __getitem__(self, key: Any) -> Self:
         return self._replace_wrapped(self._wrapped[key])
 
-    @overload 
-    def to(self, dtype: int) -> Self: ...
+    @overload
+    def to(self, dtype: int) -> Self:
+        ...
 
-    @overload 
-    def to(self, dtype: pointer_type) -> "PointerTensor": ...
+    @overload
+    def to(self, dtype: pointer_type) -> "PointerTensor":
+        ...
 
-    def to(self, dtype: Union[int, pointer_type]) -> Union[Self, "PointerTensor"]:
+    def to(self, dtype: Union[int,
+                              pointer_type]) -> Union[Self, "PointerTensor"]:
         if isinstance(dtype, int):
             return self._replace_wrapped(self._wrapped.to(dtype))
         else:
             if self._wrapped.storage is None:
-                return PointerTensor(tsim.create_pointer_tensor_meta(dtype.dtype, self._wrapped.shape))
+                return PointerTensor(
+                    tsim.create_pointer_tensor_meta(dtype.dtype,
+                                                    self._wrapped.shape))
             ctx = tsim.get_tensorsim_context_checked()
             assert ctx.global_mem is not None, "pointer of pointer must have global memory set."
-            return PointerTensor(tsim.create_pointer_tensor(dtype.dtype, self._wrapped.get_storage_checked().data, ctx.global_mem))
-
-    @staticmethod 
-    def _binary_infer(fn: Callable, this: pfl.PFLExprInfo, other: pfl.PFLExprInfo) -> pfl.PFLMetaInferResult:
-        assert this.has_metadata(Tensor, PointerTensor, PointerScalarFloat, PointerScalarInt)
-        if other.has_metadata(Tensor, PointerTensor, PointerScalarFloat, PointerScalarInt):
-            # metadata is Tensor or PointerTensor
-            return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.metadata_checked))
-        assert other.type == pfl.PFLExprType.NUMBER or other.type == pfl.PFLExprType.BOOL, "other must be a number or a boolean"
-        # when binary operation with Tensor, result won't be constexpr, so we create a new dummy number.
-        return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.get_origin_type_checked()(1)))
+            return PointerTensor(
+                tsim.create_pointer_tensor(
+                    dtype.dtype,
+                    self._wrapped.get_storage_checked().data, ctx.global_mem))
 
     @staticmethod
-    def _reshape_permute_meta_infer(fn: Callable, x: pfl.PFLExprInfo, *shapes: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+    def _binary_infer(fn: Callable, this: pfl.PFLExprInfo,
+                      other: pfl.PFLExprInfo) -> pfl.PFLMetaInferResult:
+        assert this.has_metadata(Tensor, PointerTensor, PointerScalarFloat,
+                                 PointerScalarInt)
+        if other.has_metadata(Tensor, PointerTensor, PointerScalarFloat,
+                              PointerScalarInt):
+            # metadata is Tensor or PointerTensor
+            return pfl.PFLMetaInferResult(
+                fn(this.metadata_checked, other.metadata_checked))
+        assert other.type == pfl.PFLExprType.NUMBER or other.type == pfl.PFLExprType.BOOL, "other must be a number or a boolean"
+        # when binary operation with Tensor, result won't be constexpr, so we create a new dummy number.
+        return pfl.PFLMetaInferResult(
+            fn(this.metadata_checked,
+               other.get_origin_type_checked()(1)))
+
+    @staticmethod
+    def _reshape_permute_meta_infer(
+            fn: Callable, x: pfl.PFLExprInfo, *shapes:
+        pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         if len(shapes) == 0:
             # for triton.trans
             return pfl.PFLMetaInferResult(fn(x.metadata_checked))
@@ -151,16 +206,22 @@ class Tensor:
         shapes = shapes[1:]
         if shape.type == pfl.PFLExprType.ARRAY or shape.type == pfl.PFLExprType.TUPLE:
             assert len(shapes) == 0
-            assert shape.has_metadata(), "shape must have metadata for reshape operation"
+            assert shape.has_metadata(
+            ), "shape must have metadata for reshape operation"
             metadata = shape.metadata_checked
-            assert isinstance(metadata, (list, tuple)), "shape must be a list or tuple of integers"
+            assert isinstance(
+                metadata,
+                (list, tuple)), "shape must be a list or tuple of integers"
             for dim in metadata:
-                assert not isinstance(dim, Undefined), "element of shape must defined"
+                assert not isinstance(
+                    dim, Undefined), "element of shape must defined"
         else:
             assert shape.type == pfl.PFLExprType.NUMBER, "shape must be a number or an array of numbers"
             for s in shapes:
                 assert s.type == pfl.PFLExprType.NUMBER, "shape must be a number or an array of numbers"
-        return pfl.PFLMetaInferResult(fn(x.metadata_checked, shape.metadata_checked, *[s.metadata_checked for s in shapes]))
+        return pfl.PFLMetaInferResult(
+            fn(x.metadata_checked, shape.metadata_checked,
+               *[s.metadata_checked for s in shapes]))
 
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __add__(self, other: Union[Self, int, float]) -> Self:
@@ -301,7 +362,7 @@ class Tensor:
             return self
         self._wrapped &= other
         return self
-    
+
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __or__(self, other: Self) -> Self:
         if isinstance(other, Tensor):
@@ -385,14 +446,14 @@ class Tensor:
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __lpow__(self, other: Union[Self, int]) -> Self:
         if isinstance(other, Tensor):
-            return self._replace_wrapped(self._wrapped ** other._wrapped)
-        return self._replace_wrapped(self._wrapped ** other)
+            return self._replace_wrapped(self._wrapped**other._wrapped)
+        return self._replace_wrapped(self._wrapped**other)
 
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __rpow__(self, other: Union[Self, int]) -> Self:
         if isinstance(other, Tensor):
-            return self._replace_wrapped(other._wrapped ** self._wrapped)
-        return self._replace_wrapped(other ** self._wrapped)
+            return self._replace_wrapped(other._wrapped**self._wrapped)
+        return self._replace_wrapped(other**self._wrapped)
 
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __ipow__(self, other: Union[Self, int]) -> Self:
@@ -436,14 +497,20 @@ class Tensor:
         return self._replace_wrapped(self._wrapped > other)
 
     @overload
-    def __eq__(self, other: Self) -> Self: ...
-    @overload
-    def __eq__(self, other: Union[int, float]) -> Self: ...
+    def __eq__(self, other: Self) -> Self:
+        ...
 
     @overload
-    def __ne__(self, other: Self) -> Self: ...
+    def __eq__(self, other: Union[int, float]) -> Self:
+        ...
+
     @overload
-    def __ne__(self, other: Union[int, float]) -> Self: ...
+    def __ne__(self, other: Self) -> Self:
+        ...
+
+    @overload
+    def __ne__(self, other: Union[int, float]) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=_binary_infer)
     def __eq__(self, other: Any) -> Any:
@@ -457,34 +524,45 @@ class Tensor:
             return self._replace_wrapped(self._wrapped != other._wrapped)
         return self._replace_wrapped(self._wrapped != other)
 
-    @overload 
-    def reshape(self, shape: int, *shapes: int) -> Self: ...
+    @overload
+    def reshape(self, shape: int, *shapes: int) -> Self:
+        ...
 
-    @overload 
-    def reshape(self, shape: Union[list[int], tuple[int, ...]], *shapes: int) -> Self: ...
+    @overload
+    def reshape(self, shape: Union[list[int], tuple[int, ...]], *shapes:
+                int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=_reshape_permute_meta_infer)
-    def reshape(self, shape: Union[list[int], tuple[int, ...], int], *shapes: int) -> Self: 
+    def reshape(self, shape: Union[list[int], tuple[int, ...], int], *shapes:
+                int) -> Self:
         return self._replace_wrapped(self._wrapped.reshape(shape, *shapes))
 
-    @overload 
-    def permute(self, shape: int, *shapes: int) -> Self: ...
+    @overload
+    def permute(self, shape: int, *shapes: int) -> Self:
+        ...
 
-    @overload 
-    def permute(self, shape: Union[list[int], tuple[int, ...]], *shapes: int) -> Self: ...
+    @overload
+    def permute(self, shape: Union[list[int], tuple[int, ...]], *shapes:
+                int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=_reshape_permute_meta_infer)
-    def permute(self, shape: Union[list[int], tuple[int, ...], int], *shapes: int) -> Self: 
+    def permute(self, shape: Union[list[int], tuple[int, ...], int], *shapes:
+                int) -> Self:
         return self._replace_wrapped(self._wrapped.permute(shape, *shapes))
 
-    def split(self) -> "tuple[Tensor, Tensor]": 
+    def split(self) -> "tuple[Tensor, Tensor]":
         last_dim = self.shape[-1]
         assert last_dim == 2, "triton split only support last dimension of 2"
         assert last_dim % 2 == 0, "split only support even first dimension"
         # last_dim_div_2 = last_dim // 2
         # res = self._replace_wrapped(self._wrapped[..., :last_dim_div_2]), self._replace_wrapped(self._wrapped[..., last_dim_div_2:])
-        res = self._replace_wrapped(self._wrapped[..., 0]), self._replace_wrapped(self._wrapped[..., 1])
+        res = self._replace_wrapped(
+            self._wrapped[..., 0]), self._replace_wrapped(self._wrapped[...,
+                                                                        1])
         return res
+
 
 @pfl.register_pfl_std(mapped_name="TritonPointerTensor", backend="triton")
 @dataclasses.dataclass
@@ -497,20 +575,26 @@ class PointerTensor:
 
     def _replace_wrapped(self, new_tensor: tsim.SimPointerTensor) -> Self:
         return dataclasses.replace(self, _wrapped=new_tensor)
+
     def __repr__(self) -> str:
         return self._wrapped.__repr__()
-    @property 
+
+    @property
     def shape(self) -> list[int]:
-        return self._wrapped.shape 
-    @property 
+        return self._wrapped.shape
+
+    @property
     def dtype(self) -> int:
-        return self._wrapped.dtype 
-    @property 
-    def ndim(self) -> int: 
+        return self._wrapped.dtype
+
+    @property
+    def ndim(self) -> int:
         return len(self.shape)
-    @property 
+
+    @property
     def T(self) -> Self:
         return self._replace_wrapped(self._wrapped.T)
+
     def __getitem__(self, key: Any) -> Self:
         return self._replace_wrapped(self._wrapped[key])
 
@@ -556,7 +640,17 @@ class PointerTensor:
 
         return self._replace_wrapped(other - self._wrapped)
 
-@pfl.register_pfl_std(mapped_name="TritonTensorDesc", backend="triton", mapped=tl._experimental_tensor_descriptor)
+
+if hasattr(tl, "_experimental_tensor_descriptor"):
+    _TRITON_TD_CLS = tl._experimental_tensor_descriptor
+elif hasattr(tl, "tensor_descriptor"):
+    _TRITON_TD_CLS = tl.tensor_descriptor
+else:
+    _TRITON_TD_CLS = None
+
+@pfl.register_pfl_std(mapped_name="TritonTensorDesc",
+                      backend="triton",
+                      mapped=_TRITON_TD_CLS)
 @dataclasses.dataclass
 class TensorDescriptor:
     _wrapped: tsim.SimTensorBlockPointer
@@ -565,18 +659,23 @@ class TensorDescriptor:
         # create a new pointer tensor with the same metadata
         return dataclasses.replace(self, _wrapped=self._wrapped.clone())
 
-    @staticmethod 
-    def _load_infer(fn: Callable, this: pfl.PFLExprInfo, offset: pfl.PFLExprInfo) -> pfl.PFLMetaInferResult:
-        assert this.has_metadata(TensorDescriptor), f"this must have metadata of TensorDescriptor, got {this.metadata}"
+    @staticmethod
+    def _load_infer(fn: Callable, this: pfl.PFLExprInfo,
+                    offset: pfl.PFLExprInfo) -> pfl.PFLMetaInferResult:
+        assert this.has_metadata(
+            TensorDescriptor
+        ), f"this must have metadata of TensorDescriptor, got {this.metadata}"
         return pfl.PFLMetaInferResult(this.metadata_checked.load([0, 0]))
 
     @pfl.configure_std_func(meta_infer=_load_infer)
     def load(self, offset: list[int]) -> Tensor:
         return Tensor(self._wrapped.load(offset, other=0))
 
-    def store(self, offset: list[int], value: Union[int, float, Tensor]) -> None:
+    def store(self, offset: list[int], value: Union[int, float,
+                                                    Tensor]) -> None:
         value_wrapped = value._wrapped if isinstance(value, Tensor) else value
-        return self._wrapped.store(offset, value_wrapped)
+        self._wrapped.store(offset, value_wrapped)
+
 
 @pfl.register_pfl_std(mapped_name="TritonBlockPointer", backend="triton")
 @dataclasses.dataclass
@@ -586,36 +685,48 @@ class BlockPointer:
     def advance(self, offset: Union[list[int], tuple[int, ...]]) -> Self:
         return self.__class__(self._wrapped.advance(list(offset)))
 
+
 @pfl.register_pfl_std(mapped_name="TritonPointerScalarFloat", backend="triton")
 @dataclasses.dataclass
 class PointerScalarFloat:
     _wrapped: tsim.SimPointerScalar
+
     def _replace_wrapped(self, new_tensor: tsim.SimPointerScalar) -> Self:
         return dataclasses.replace(self, _wrapped=new_tensor)
+
     def clone(self) -> Self:
         # create a new pointer tensor with the same metadata
         return self._replace_wrapped(self._wrapped.clone())
+
     def __repr__(self) -> str:
         return self._wrapped.__repr__()
-    @property 
+
+    @property
     def shape(self) -> list[int]:
-        return self._wrapped.shape 
-    @property 
+        return self._wrapped.shape
+
+    @property
     def dtype(self) -> int:
-        return self._wrapped.dtype 
-    @property 
-    def ndim(self) -> int: 
+        return self._wrapped.dtype
+
+    @property
+    def ndim(self) -> int:
         return len(self.shape)
-    @property 
+
+    @property
     def T(self) -> Self:
         return self._replace_wrapped(self._wrapped.T)
+
     def __getitem__(self, key: Any) -> Self:
         return self._replace_wrapped(self._wrapped[key])
 
     @overload
-    def __add__(self, other: Tensor) -> PointerTensor: ...
+    def __add__(self, other: Tensor) -> PointerTensor:
+        ...
+
     @overload
-    def __add__(self, other: int) -> Self: ...
+    def __add__(self, other: int) -> Self:
+        ...
 
     # pointer tensor only support add and sub operations
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
@@ -631,21 +742,27 @@ class PointerScalarFloat:
         return self
 
     @overload
-    def __radd__(self, other: Tensor) -> PointerTensor: ...
-    @overload
-    def __radd__(self, other: int) -> Self: ...
+    def __radd__(self, other: Tensor) -> PointerTensor:
+        ...
 
+    @overload
+    def __radd__(self, other: int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
-    def __radd__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
+    def __radd__(self, other: Union[Tensor,
+                                    int]) -> Union[Self, PointerTensor]:
         if isinstance(other, Tensor):
             return PointerTensor(other._wrapped + self._wrapped)
         return self._replace_wrapped(other + self._wrapped)
 
     @overload
-    def __sub__(self, other: Tensor) -> PointerTensor: ...
+    def __sub__(self, other: Tensor) -> PointerTensor:
+        ...
+
     @overload
-    def __sub__(self, other: int) -> Self: ...
+    def __sub__(self, other: int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
     def __sub__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
@@ -659,51 +776,71 @@ class PointerScalarFloat:
         return self
 
     @overload
-    def __rsub__(self, other: Tensor) -> PointerTensor: ...
+    def __rsub__(self, other: Tensor) -> PointerTensor:
+        ...
+
     @overload
-    def __rsub__(self, other: int) -> Self: ...
+    def __rsub__(self, other: int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
-    def __rsub__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
+    def __rsub__(self, other: Union[Tensor,
+                                    int]) -> Union[Self, PointerTensor]:
         if isinstance(other, Tensor):
             return PointerTensor(other._wrapped - self._wrapped)
 
         return self._replace_wrapped(other - self._wrapped)
 
+
 @pfl.register_pfl_std(mapped_name="TritonPointerScalarInt", backend="triton")
 @dataclasses.dataclass
 class PointerScalarInt:
     _wrapped: tsim.SimPointerScalar
+
     def _replace_wrapped(self, new_tensor: tsim.SimPointerScalar) -> Self:
         return dataclasses.replace(self, _wrapped=new_tensor)
+
     def clone(self) -> Self:
         # create a new pointer tensor with the same metadata
         return self._replace_wrapped(self._wrapped.clone())
+
     def __repr__(self) -> str:
         return self._wrapped.__repr__()
-    @property 
+
+    @property
     def shape(self) -> list[int]:
-        return self._wrapped.shape 
-    @property 
+        return self._wrapped.shape
+
+    @property
     def dtype(self) -> int:
-        return self._wrapped.dtype 
-    @property 
-    def ndim(self) -> int: 
+        return self._wrapped.dtype
+
+    @property
+    def ndim(self) -> int:
         return len(self.shape)
-    @property 
+
+    @property
     def T(self) -> Self:
         return self._replace_wrapped(self._wrapped.T)
+
     def __getitem__(self, key: Any) -> Self:
         return self._replace_wrapped(self._wrapped[key])
 
     @overload
-    def __add__(self, other: Tensor) -> PointerTensor: ...
+    def __add__(self, other: Tensor) -> PointerTensor:
+        ...
+
     @overload
-    def __add__(self, other: int) -> Self: ...
+    def __add__(self, other: int) -> Self:
+        ...
+
     @overload
-    def __radd__(self, other: Tensor) -> PointerTensor: ...
+    def __radd__(self, other: Tensor) -> PointerTensor:
+        ...
+
     @overload
-    def __radd__(self, other: int) -> Self: ...
+    def __radd__(self, other: int) -> Self:
+        ...
 
     # pointer tensor only support add and sub operations
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
@@ -718,20 +855,27 @@ class PointerScalarInt:
         return self
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
-    def __radd__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
+    def __radd__(self, other: Union[Tensor,
+                                    int]) -> Union[Self, PointerTensor]:
         if isinstance(other, Tensor):
             return PointerTensor(other._wrapped + self._wrapped)
         return self._replace_wrapped(other + self._wrapped)
 
     @overload
-    def __sub__(self, other: Tensor) -> PointerTensor: ...
-    @overload
-    def __sub__(self, other: int) -> Self: ...
-    @overload
-    def __rsub__(self, other: Tensor) -> PointerTensor: ...
-    @overload
-    def __rsub__(self, other: int) -> Self: ...
+    def __sub__(self, other: Tensor) -> PointerTensor:
+        ...
 
+    @overload
+    def __sub__(self, other: int) -> Self:
+        ...
+
+    @overload
+    def __rsub__(self, other: Tensor) -> PointerTensor:
+        ...
+
+    @overload
+    def __rsub__(self, other: int) -> Self:
+        ...
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
     def __sub__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
@@ -745,84 +889,128 @@ class PointerScalarInt:
         return self
 
     @pfl.configure_std_func(meta_infer=Tensor._binary_infer)
-    def __rsub__(self, other: Union[Tensor, int]) -> Union[Self, PointerTensor]:
+    def __rsub__(self, other: Union[Tensor,
+                                    int]) -> Union[Self, PointerTensor]:
         if isinstance(other, Tensor):
             return PointerTensor(other._wrapped - self._wrapped)
 
         return self._replace_wrapped(other - self._wrapped)
 
-def _none_infer(fn: Callable, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
-    return None 
-    
-def _global_unary_infer(fn: Callable, x: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+
+def _none_infer(fn: Callable, *args,
+                **kwargs) -> Optional[pfl.PFLMetaInferResult]:
+    return None
+
+def _global_unary_infer(
+        fn: Callable, x: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
     if x.type == pfl.PFLExprType.NUMBER:
         if x.has_metadata():
             return pfl.PFLMetaInferResult(fn(x))
         return None
     return pfl.PFLMetaInferResult(fn(x.metadata_checked))
 
-def _global_binary_infer(fn: Callable, this: pfl.PFLExprInfo, other: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+
+def _global_binary_infer(
+        fn: Callable, this: pfl.PFLExprInfo,
+        other: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
     # binary only do const eval if all operands are number and have metadata.
     if this.type == pfl.PFLExprType.NUMBER and other.type == pfl.PFLExprType.NUMBER:
         # only calc metadata (consteval) if all operands have metadata (const value)
         if this.has_metadata() and other.has_metadata():
-            return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.metadata_checked))
+            return pfl.PFLMetaInferResult(
+                fn(this.metadata_checked, other.metadata_checked))
         return None
     if not this.has_metadata(Tensor) and other.has_metadata(Tensor):
-        assert this.type == pfl.PFLExprType.NUMBER 
-        return pfl.PFLMetaInferResult(fn(other.get_origin_type_checked()(1), other.metadata_checked))
+        assert this.type == pfl.PFLExprType.NUMBER
+        return pfl.PFLMetaInferResult(
+            fn(other.get_origin_type_checked()(1), other.metadata_checked))
     elif this.has_metadata(Tensor) and not other.has_metadata(Tensor):
-        assert other.type == pfl.PFLExprType.NUMBER 
-        return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.get_origin_type_checked()(1)))
+        assert other.type == pfl.PFLExprType.NUMBER
+        return pfl.PFLMetaInferResult(
+            fn(this.metadata_checked,
+               other.get_origin_type_checked()(1)))
     elif this.has_metadata(Tensor) and other.has_metadata(Tensor):
-        return pfl.PFLMetaInferResult(fn(this.metadata_checked, other.metadata_checked))
+        return pfl.PFLMetaInferResult(
+            fn(this.metadata_checked, other.metadata_checked))
     else:
-        raise NotImplementedError(f"Unsupported binary operation between {this.type} and {other.type}")
+        raise NotImplementedError(
+            f"Unsupported binary operation between {this.type} and {other.type}"
+        )
+
 
 @overload
-def min_fn(x: int, y: int) -> int: ...
+def min_fn(x: int, y: int) -> int:
+    ...
+
+
 @overload
-def min_fn(x: float, y: float) -> float: ...
+def min_fn(x: float, y: float) -> float:
+    ...
+
+
 @overload
-def min_fn(x: Tensor, y: Union[int, float]) -> Tensor: ...
+def min_fn(x: Tensor, y: Union[int, float]) -> Tensor:
+    ...
+
+
 @overload
-def min_fn(x: Union[int, float], y: Tensor) -> Tensor: ...
+def min_fn(x: Union[int, float], y: Tensor) -> Tensor:
+    ...
+
 
 @pfl.register_pfl_std(mapped_name="min", backend="triton", mapped=min)
 @pfl.configure_std_func(meta_infer=_global_binary_infer)
-def min_fn(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Union[Tensor, int, float]:
+def min_fn(x: Union[Tensor, int, float],
+           y: Union[Tensor, int, float]) -> Union[Tensor, int, float]:
     if not isinstance(x, Tensor) and not isinstance(y, Tensor):
         return min(x, y)
     x_wrapped = x._wrapped if isinstance(x, Tensor) else x
     y_wrapped = y._wrapped if isinstance(y, Tensor) else y
     return Tensor(tsim.minimum(x_wrapped, y_wrapped))
 
+
 @overload
-def max_fn(x: int, y: int) -> int: ...
+def max_fn(x: int, y: int) -> int:
+    ...
+
+
 @overload
-def max_fn(x: float, y: float) -> float: ...
+def max_fn(x: float, y: float) -> float:
+    ...
+
+
 @overload
-def max_fn(x: Tensor, y: Union[int, float]) -> Tensor: ...
+def max_fn(x: Tensor, y: Union[int, float]) -> Tensor:
+    ...
+
+
 @overload
-def max_fn(x: Union[int, float], y: Tensor) -> Tensor: ...
+def max_fn(x: Union[int, float], y: Tensor) -> Tensor:
+    ...
+
 
 @pfl.register_pfl_std(mapped_name="max", backend="triton", mapped=max)
 @pfl.configure_std_func(meta_infer=_global_binary_infer)
-def max_fn(x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Union[Tensor, int, float]:
+def max_fn(x: Union[Tensor, int, float],
+           y: Union[Tensor, int, float]) -> Union[Tensor, int, float]:
     if not isinstance(x, Tensor) and not isinstance(y, Tensor):
         return max(x, y)
     x_wrapped = x._wrapped if isinstance(x, Tensor) else x
     y_wrapped = y._wrapped if isinstance(y, Tensor) else y
     return Tensor(tsim.minimum(x_wrapped, y_wrapped))
 
+
 _T_math = TypeVar("_T_math", Tensor, int, float)
 _T_math_fp = TypeVar("_T_math_fp", Tensor, float)
-_T_any = TypeVar("_T_any", Tensor, int, float, PointerTensor, PointerScalarFloat, PointerScalarInt)
+_T_any = TypeVar("_T_any", Tensor, int, float, PointerTensor,
+                 PointerScalarFloat, PointerScalarInt)
 _T_all_tensor = TypeVar("_T_all_tensor", Tensor, PointerTensor)
+
 
 @pfl.register_pfl_std(mapped_name="tl_math", backend="triton", mapped=tl.math)
 @dataclasses.dataclass
 class triton_std_math:
+
     @staticmethod
     @pfl.configure_std_func(meta_infer=_global_unary_infer)
     def abs(x: _T_math) -> _T_math:
@@ -892,7 +1080,6 @@ class triton_std_math:
         else:
             return math.exp2(x)
 
-
     @staticmethod
     @pfl.configure_std_func(meta_infer=_global_unary_infer)
     def log(x: _T_math_fp) -> _T_math_fp:
@@ -911,7 +1098,7 @@ class triton_std_math:
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_global_unary_infer)
-    def rsqrt(x: _T_math_fp) -> _T_math_fp: 
+    def rsqrt(x: _T_math_fp) -> _T_math_fp:
         if isinstance(x, Tensor):
             return Tensor(tsim.rsqrt(x._wrapped))
         else:
@@ -936,36 +1123,40 @@ class triton_std_math:
         else:
             return math.sqrt(x)
 
-
     @staticmethod
     def softmax(x: Tensor, axis: Optional[int] = None) -> Tensor:
         return Tensor(tsim.softmax(x._wrapped, axis))
 
+    @staticmethod
+    @overload
+    def _internal_binary_anno(x: Tensor, y: float) -> Tensor:
+        ...
 
     @staticmethod
     @overload
-    def _internal_binary_anno(x: Tensor, y: float) -> Tensor: ...
+    def _internal_binary_anno(x: float, y: Tensor) -> Tensor:
+        ...
 
     @staticmethod
     @overload
-    def _internal_binary_anno(x: float, y: Tensor) -> Tensor: ...
+    def _internal_binary_anno(x: float, y: float) -> float:
+        ...
 
     @staticmethod
     @overload
-    def _internal_binary_anno(x: float, y: float) -> float: ...
+    def _internal_binary_anno(x: Tensor, y: Tensor) -> Tensor:
+        ...
 
     @staticmethod
-    @overload
-    def _internal_binary_anno(x: Tensor, y: Tensor) -> Tensor: ...
-
-    @staticmethod
-    def _internal_binary_anno(x: Union[Tensor, float], y: Union[Tensor, float]) -> Union[Tensor, float]:
+    def _internal_binary_anno(x: Union[Tensor, float],
+                              y: Union[Tensor, float]) -> Union[Tensor, float]:
         raise NotImplementedError("shouldn't be used directly.")
 
     @staticmethod
-    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
+    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno,
+                            meta_infer=_global_binary_infer)
     def maximum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x
         y_wrapped = y._wrapped if isinstance(y, Tensor) else y
         res_wrapped = tsim.maximum(x_wrapped, y_wrapped)
         if isinstance(res_wrapped, SimTensor):
@@ -974,15 +1165,17 @@ class triton_std_math:
             return res_wrapped
 
     @staticmethod
-    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno, meta_infer=_global_binary_infer)
+    @pfl.configure_std_func(take_overloads_fn=_internal_binary_anno,
+                            meta_infer=_global_binary_infer)
     def minimum(x: Union[Tensor, float], y: Union[Tensor, float]) -> Tensor:
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x
         y_wrapped = y._wrapped if isinstance(y, Tensor) else y
         res_wrapped = tsim.minimum(x_wrapped, y_wrapped)
         if isinstance(res_wrapped, SimTensor):
             return Tensor(res_wrapped)
         else:
             return res_wrapped
+
 
 @pfl.register_pfl_std(mapped_name="tl", backend="triton", mapped=tl)
 @dataclasses.dataclass
@@ -993,7 +1186,6 @@ class triton_std(triton_std_math):
     # # subtypes using ClassVar
     # TensorX: TypeAlias = Tensor
     # PointerTensor: ClassVar[Type["PointerTensor"]] = PointerTensor
-
 
     float32: DTypeEnum = DTypeEnum.float32
     float64: DTypeEnum = DTypeEnum.float64
@@ -1007,46 +1199,50 @@ class triton_std(triton_std_math):
     uint64: DTypeEnum = DTypeEnum.uint64
     bool_: DTypeEnum = DTypeEnum.bool_
     float16: DTypeEnum = DTypeEnum.float16
-    bfloat16 : DTypeEnum = DTypeEnum.bfloat16
+    bfloat16: DTypeEnum = DTypeEnum.bfloat16
 
-    float8e5 : DTypeEnum = DTypeEnum.float8e5
-    float8e5b16 : DTypeEnum = DTypeEnum.float8e5b16
-    float8e4nv : DTypeEnum = DTypeEnum.float8e4nv
-    float8e4b8 : DTypeEnum = DTypeEnum.float8e4b8
-    float8e4b15 : DTypeEnum = DTypeEnum.float8e4b15
+    float8e5: DTypeEnum = DTypeEnum.float8e5
+    float8e5b16: DTypeEnum = DTypeEnum.float8e5b16
+    float8e4nv: DTypeEnum = DTypeEnum.float8e4nv
+    float8e4b8: DTypeEnum = DTypeEnum.float8e4b8
+    float8e4b15: DTypeEnum = DTypeEnum.float8e4b15
 
     @staticmethod
-    def _program_id_infer(fn: Callable, axis: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+    def _program_id_infer(
+            fn: Callable,
+            axis: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         return None
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_program_id_infer)
-    def program_id(axis: int) -> int: 
+    def program_id(axis: int) -> int:
         ctx = get_tensorsim_context_checked()
         return ctx.grid_id[axis]
 
     @staticmethod
-    def _compiler_hints_infer(fn: Callable, x: pfl.PFLExprInfo, y: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+    def _compiler_hints_infer(
+            fn: Callable, x: pfl.PFLExprInfo,
+            y: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         return pfl.PFLMetaInferResult(x.metadata)
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_compiler_hints_infer)
-    def max_contiguous(x: _T_any, y: Any) -> _T_any: 
+    def max_contiguous(x: _T_any, y: Any) -> _T_any:
         return x
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_compiler_hints_infer)
-    def multiple_of(x: _T_any, y: Any) -> _T_any: 
+    def multiple_of(x: _T_any, y: Any) -> _T_any:
         return x
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_program_id_infer)
-    def num_programs(axis: int) -> int: 
+    def num_programs(axis: int) -> int:
         ctx = get_tensorsim_context_checked()
         return ctx.grid_size[axis]
 
     @staticmethod
-    def zeros(shape: Union[list[int], tuple[int, ...]], dtype: int) -> Tensor: 
+    def zeros(shape: Union[list[int], tuple[int, ...]], dtype: int) -> Tensor:
         return Tensor(tsim.zeros(shape, dtype))
 
     @staticmethod
@@ -1057,43 +1253,82 @@ class triton_std(triton_std_math):
     def arange(start: int, end: int) -> Tensor:
         return Tensor(tsim.arange(start, end))
 
-    @staticmethod 
-    def _load_infer(fn: Callable, pointer: pfl.PFLExprInfo, mask: Optional[pfl.PFLExprInfo] = None, other: Optional[pfl.PFLExprInfo] = None) -> Optional[pfl.PFLMetaInferResult]:
-        if isinstance(pointer.metadata_checked, (PointerScalarFloat, PointerScalarInt)):
-            return None 
+    @staticmethod
+    def _load_infer(
+        fn: Callable,
+        pointer: pfl.PFLExprInfo,
+        mask: Optional[pfl.PFLExprInfo] = None,
+        other: Optional[pfl.PFLExprInfo] = None,
+        *args,
+        **kwargs
+    ) -> Optional[pfl.PFLMetaInferResult]:
+        if isinstance(pointer.metadata_checked,
+                      (PointerScalarFloat, PointerScalarInt)):
+            return None
         if other is None:
-            other_value = None 
+            other_value = None
         else:
             if not other.has_metadata(Tensor):
                 if other.type == pfl.PFLExprType.NUMBER:
                     other_value = other.get_origin_type_checked()(1)
                 else:
-                    raise NotImplementedError(f"Unsupported type {other.type} for load operation")
+                    raise NotImplementedError(
+                        f"Unsupported type {other.type} for load operation")
             else:
                 other_value = other.metadata_checked
         if mask is None:
-            mask_value = None 
+            mask_value = None
         else:
-            mask_value = mask.metadata_checked if mask.has_metadata(Tensor) else None
-        return pfl.PFLMetaInferResult(fn(pointer.metadata_checked, mask_value, other_value))
-    
+            mask_value = mask.metadata_checked if mask.has_metadata(
+                Tensor) else None
+        return pfl.PFLMetaInferResult(
+            fn(pointer.metadata_checked, mask_value, other_value))
+
     @staticmethod
     @overload
-    def load(pointer: PointerScalarFloat, mask: Optional[bool] = None, other: Optional[Union[int, float]] = None) -> float: ...
+    def load(pointer: PointerScalarFloat,
+             mask: Optional[bool] = None,
+             other: Optional[Union[int, float]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> float:
+        ...
+
     @staticmethod
     @overload
-    def load(pointer: PointerScalarInt, mask: Optional[bool] = None, other: Optional[Union[int, float]] = None) -> int: ...
+    def load(pointer: PointerScalarInt,
+             mask: Optional[bool] = None,
+             other: Optional[Union[int, float]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> int:
+        ...
+
     @staticmethod
     @overload
-    def load(pointer: PointerTensor, mask: Optional[Tensor] = None, other: Optional[Union[int, float, Tensor]] = None) -> Tensor: ...
+    def load(pointer: PointerTensor,
+             mask: Optional[Tensor] = None,
+             other: Optional[Union[int, float, Tensor]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> Tensor:
+        ...
+
     @staticmethod
     @overload
-    def load(pointer: BlockPointer) -> Tensor: ...
+    def load(pointer: BlockPointer,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> Tensor:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_load_infer)
-    def load(pointer: Union[PointerTensor, PointerScalarFloat, PointerScalarInt, BlockPointer], mask: Optional[Union[Tensor, bool]] = None, other: Optional[Union[int, float, Tensor]] = None) -> Union[Tensor, int, float]:
-        mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask 
+    def load(
+        pointer: Union[PointerTensor, PointerScalarFloat, PointerScalarInt,
+                       BlockPointer],
+        mask: Optional[Union[Tensor, bool]] = None,
+        other: Optional[Union[int, float, Tensor]] = None,
+        cache_modifier: Optional[str] = None,
+        eviction_policy: Optional[str] = None
+    ) -> Union[Tensor, int, float]:
+        mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask
         other_wrapped = other._wrapped if isinstance(other, Tensor) else other
         if isinstance(pointer, PointerScalarFloat):
             if mask_wrapped is not None:
@@ -1112,39 +1347,62 @@ class triton_std(triton_std_math):
 
     @staticmethod
     @overload
-    def store(pointer: PointerScalarFloat, value: float, mask: Optional[bool] = None) -> None: ...
+    def store(pointer: PointerScalarFloat,
+              value: float,
+              mask: Optional[bool] = None) -> None:
+        ...
+
     @staticmethod
     @overload
-    def store(pointer: PointerScalarInt, value: int, mask: Optional[bool] = None) -> None: ...
+    def store(pointer: PointerScalarInt,
+              value: int,
+              mask: Optional[bool] = None) -> None:
+        ...
+
     @staticmethod
     @overload
-    def store(pointer: PointerTensor, value: Tensor, mask: Optional[Tensor] = None) -> None: ...
+    def store(pointer: PointerTensor,
+              value: Tensor,
+              mask: Optional[Tensor] = None) -> None:
+        ...
+
     @staticmethod
     @overload
-    def store(pointer: BlockPointer, value: Tensor) -> None: ...
+    def store(pointer: BlockPointer, value: Tensor) -> None:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_none_infer)
-    def store(pointer: Union[PointerTensor, PointerScalarFloat, PointerScalarInt, BlockPointer], value: Union[int, float, Tensor], mask: Optional[Union[Tensor, bool]] = None) -> None:
-        mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask 
+    def store(pointer: Union[PointerTensor, PointerScalarFloat,
+                             PointerScalarInt, BlockPointer],
+              value: Union[int, float, Tensor],
+              mask: Optional[Union[Tensor, bool]] = None) -> None:
+        mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask
         value_wrapped = value._wrapped if isinstance(value, Tensor) else value
         if isinstance(pointer, PointerScalarFloat):
-            assert isinstance(mask_wrapped, bool)
+            assert mask_wrapped is None or isinstance(mask_wrapped, bool)
             assert not isinstance(value_wrapped, tsim.SimTensor)
-            return pointer._wrapped.store(value_wrapped, mask_wrapped)
+            pointer._wrapped.store(value_wrapped, mask_wrapped)
+            return
         elif isinstance(pointer, PointerScalarInt):
-            assert isinstance(mask_wrapped, bool)
+            assert mask_wrapped is None or isinstance(mask_wrapped, bool)
             assert not isinstance(value_wrapped, tsim.SimTensor)
-            return pointer._wrapped.store(value_wrapped, mask_wrapped)
+            pointer._wrapped.store(value_wrapped, mask_wrapped)
+            return
         elif isinstance(pointer, BlockPointer):
             assert mask is None, "BlockPointer does not support (don't need) mask"
             assert isinstance(value_wrapped, tsim.SimTensor)
-            return pointer._wrapped.store([0, 0], value_wrapped)
+            pointer._wrapped.store([0, 0], value_wrapped)
+            return
         pointer._wrapped.store(value_wrapped, mask_wrapped)
 
     @staticmethod
-    def range(start: int, stop: Optional[int] = None, step: Optional[int] = None, num_stages: Optional[int] = None, 
-                warp_specialize: Optional[int] = None, flatten: bool = False) -> range:
+    def range(start: int,
+              stop: Optional[int] = None,
+              step: Optional[int] = None,
+              num_stages: Optional[int] = None,
+              warp_specialize: Optional[int] = None,
+              flatten: bool = False) -> range:
         if stop is not None:
             if step is not None:
                 return range(start, stop, step)
@@ -1153,50 +1411,68 @@ class triton_std(triton_std_math):
 
     @staticmethod
     @overload
-    def cdiv(x: Tensor, div: Union[Tensor, int, float]) -> Tensor: ...
-    
-    @staticmethod
-    @overload
-    def cdiv(x: int, div: int) -> int: ...
+    def cdiv(x: Tensor, div: Union[Tensor, int, float]) -> Tensor:
+        ...
 
     @staticmethod
     @overload
-    def cdiv(x: float, div: float) -> float: ...
+    def cdiv(x: int, div: int) -> int:
+        ...
+
+    @staticmethod
+    @overload
+    def cdiv(x: float, div: float) -> float:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_global_binary_infer)
-    def cdiv(x: Union[Tensor, int, float], div: Union[Tensor, int, float]) -> Union[int, float, Tensor]: 
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
-        div_wrapped = div._wrapped if isinstance(div, Tensor) else div 
+    def cdiv(x: Union[Tensor, int, float],
+             div: Union[Tensor, int, float]) -> Union[int, float, Tensor]:
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x
+        div_wrapped = div._wrapped if isinstance(div, Tensor) else div
         res = (x_wrapped + div_wrapped - 1) // div_wrapped
         if isinstance(res, tsim.SimTensor):
             return Tensor(res)
         return res
 
-    @staticmethod 
-    def _dot_infer(fn: Callable, x: pfl.PFLExprInfo, y: pfl.PFLExprInfo, acc: Optional[pfl.PFLExprInfo] = None, **kwargs_dontcare) -> Optional[pfl.PFLMetaInferResult]:
+    @staticmethod
+    def _dot_infer(fn: Callable,
+                   x: pfl.PFLExprInfo,
+                   y: pfl.PFLExprInfo,
+                   acc: Optional[pfl.PFLExprInfo] = None,
+                   **kwargs_dontcare) -> Optional[pfl.PFLMetaInferResult]:
         if acc is None:
-            acc_value = None 
+            acc_value = None
         else:
             acc_value = acc.metadata_checked
-        return pfl.PFLMetaInferResult(fn(x.metadata_checked, y.metadata_checked, acc_value))
+        return pfl.PFLMetaInferResult(
+            fn(x.metadata_checked, y.metadata_checked, acc_value))
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_dot_infer)
-    def dot(x: Tensor, y: Tensor, acc: Optional[Tensor] = None, allow_tf32: bool = True) -> Tensor:
+    def dot(x: Tensor,
+            y: Tensor,
+            acc: Optional[Tensor] = None,
+            allow_tf32: bool = True) -> Tensor:
         res_wrapped = x._wrapped @ y._wrapped
         if acc is not None:
             acc._wrapped[:] += res_wrapped
             return acc
         return Tensor(res_wrapped)
-    
+
     @staticmethod
-    def argmax(input: Tensor, axis: int, tie_break_left: bool = True, keep_dims: bool = False) -> Tensor:
+    def argmax(input: Tensor,
+               axis: int,
+               tie_break_left: bool = True,
+               keep_dims: bool = False) -> Tensor:
         assert isinstance(axis, int)
         return Tensor(input._wrapped.argmax(axis, keep_dims))
 
     @staticmethod
-    def argmin(input: Tensor, axis: int, tie_break_left: bool = True, keep_dims: bool = False) -> Tensor:
+    def argmin(input: Tensor,
+               axis: int,
+               tie_break_left: bool = True,
+               keep_dims: bool = False) -> Tensor:
         assert isinstance(axis, int)
         return Tensor(input._wrapped.argmin(axis, keep_dims))
 
@@ -1210,7 +1486,6 @@ class triton_std(triton_std_math):
         assert isinstance(axis, int)
         return Tensor(input._wrapped.min(axis, keep_dims))
 
-
     # @staticmethod
     # def max_with_indices(input: Tensor, axis: int, return_indices_tie_break_left: bool = True, keep_dims: bool = False) -> Tensor: ...
 
@@ -1218,12 +1493,16 @@ class triton_std(triton_std_math):
     # def min_with_indices(input: Tensor, axis: int, return_indices_tie_break_left: bool = True, keep_dims: bool = False) -> Tensor: ...
 
     @staticmethod
-    def sum(input: Tensor, axis: int, keep_dims: bool = False, dtype: Optional[int] = None) -> Tensor:
+    def sum(input: Tensor,
+            axis: int,
+            keep_dims: bool = False,
+            dtype: Optional[int] = None) -> Tensor:
         assert isinstance(axis, int)
         return Tensor(input._wrapped.sum(axis, keep_dims))
 
-    @staticmethod 
-    def _where_infer(fn: Callable, cond: pfl.PFLExprInfo, x: pfl.PFLExprInfo, y: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+    @staticmethod
+    def _where_infer(fn: Callable, cond: pfl.PFLExprInfo, x: pfl.PFLExprInfo,
+                     y: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         if x.type == pfl.PFLExprType.NUMBER:
             x_val = x.get_origin_type_checked()(1)
         else:
@@ -1236,13 +1515,16 @@ class triton_std(triton_std_math):
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=_where_infer)
-    def where(cond: Tensor, x: Union[Tensor, int, float], y: Union[Tensor, int, float]) -> Tensor: 
-        x_wrapped = x._wrapped if isinstance(x, Tensor) else x 
+    def where(cond: Tensor, x: Union[Tensor, int, float],
+              y: Union[Tensor, int, float]) -> Tensor:
+        x_wrapped = x._wrapped if isinstance(x, Tensor) else x
         y_wrapped = y._wrapped if isinstance(y, Tensor) else y
         return Tensor(tsim.where(cond._wrapped, x_wrapped, y_wrapped))
 
     @staticmethod
-    def _cast_meta_infer(fn: Callable, x: pfl.PFLExprInfo, dtype: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+    def _cast_meta_infer(
+            fn: Callable, x: pfl.PFLExprInfo,
+            dtype: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
         dtype_val = dtype.constexpr_data_checked
         if isinstance(dtype_val, pointer_type):
             if x.type == pfl.PFLExprType.NUMBER:
@@ -1253,14 +1535,15 @@ class triton_std(triton_std_math):
                 else:
                     return pfl.PFLMetaInferResult(PointerScalarInt(res))
         if x.type == pfl.PFLExprType.NUMBER:
-            return None # currently scalar don't have metadata
+            return None  # currently scalar don't have metadata
         assert x.has_metadata(Tensor), "cast only support Tensor type"
         x_meta = x.get_metadata_checked(Tensor)
         return pfl.PFLMetaInferResult(x_meta.to(dtype_val))
 
     @staticmethod
     def _cast_static_infer(x: pfl.PFLExprInfo, dtype: pfl.PFLExprInfo):
-        assert dtype.has_constexpr_data(), "dtype must have constexpr data for cast operation"
+        assert dtype.has_constexpr_data(
+        ), "dtype must have constexpr data for cast operation"
         if isinstance(dtype._constexpr_data, pointer_type):
             dtype_enum = tsim.DTypeEnum(dtype._constexpr_data.dtype)
             if x.type == pfl.PFLExprType.NUMBER:
@@ -1281,25 +1564,30 @@ class triton_std(triton_std_math):
                 elif dtype_v.is_integer_type():
                     return int
                 else:
-                    raise NotImplementedError(f"Unsupported dtype {dtype_v} for cast operation")
-
+                    raise NotImplementedError(
+                        f"Unsupported dtype {dtype_v} for cast operation")
 
     @staticmethod
-    @pfl.configure_std_func(static_type_infer=_cast_static_infer, meta_infer=_cast_meta_infer, force_meta_infer=True)
-    def cast(x: Union[int, float, Tensor], dtype: Union[int, pointer_type]) -> Any: 
+    @pfl.configure_std_func(static_type_infer=_cast_static_infer,
+                            meta_infer=_cast_meta_infer,
+                            force_meta_infer=True)
+    def cast(x: Union[int, float, Tensor], dtype: Union[int,
+                                                        pointer_type]) -> Any:
         dtype_val = dtype
         if isinstance(dtype_val, pointer_type):
             if isinstance(x, (int, float)):
                 assert isinstance(dtype_val, pointer_type)
                 ctx = tsim.get_tensorsim_context_checked()
                 assert ctx.global_mem is not None, "pointer of pointer must have global memory set."
-                res = tsim.create_pointer_scalar(dtype_val.dtype, int(x), ctx.global_mem)
+                res = tsim.create_pointer_scalar(dtype_val.dtype, int(x),
+                                                 ctx.global_mem)
                 if res.is_floating():
                     return PointerScalarFloat(res)
                 else:
                     return PointerScalarInt(res)
             else:
-                raise NotImplementedError("don't support Tensor to pointer cast yet.")
+                raise NotImplementedError(
+                    "don't support Tensor to pointer cast yet.")
         else:
             if isinstance(x, Tensor):
                 return x.to(dtype_val)
@@ -1310,66 +1598,87 @@ class triton_std(triton_std_math):
                 elif dtype_v.is_integer_type():
                     return int(x)
                 else:
-                    raise NotImplementedError(f"Unsupported dtype {dtype_v} for cast operation")
+                    raise NotImplementedError(
+                        f"Unsupported dtype {dtype_v} for cast operation")
 
     @staticmethod
-    @overload 
-    def reshape(x: _T_all_tensor, shape: int, *shapes: int) -> _T_all_tensor: ...
+    @overload
+    def reshape(x: _T_all_tensor, shape: int, *shapes: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
-    @overload 
-    def reshape(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...]], *shapes: int) -> _T_all_tensor: ...
+    @overload
+    def reshape(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...]],
+                *shapes: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=Tensor._reshape_permute_meta_infer)
-    def reshape(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...], int], *shapes: int) -> _T_all_tensor: 
+    def reshape(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...],
+                                               int], *shapes:
+                int) -> _T_all_tensor:
         if isinstance(x, Tensor):
             return Tensor(x._wrapped.reshape(shape, *shapes))
         else:
-            assert isinstance(x, PointerTensor), "reshape only support Tensor and PointerTensor type"
+            assert isinstance(
+                x, PointerTensor
+            ), "reshape only support Tensor and PointerTensor type"
             return PointerTensor(x._wrapped.reshape(shape, *shapes))
 
     @staticmethod
-    @overload 
-    def permute(x: _T_all_tensor, shape: int, *shapes: int) -> _T_all_tensor: ...
+    @overload
+    def permute(x: _T_all_tensor, shape: int, *shapes: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
-    @overload 
-    def permute(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...]], *shapes: int) -> _T_all_tensor: ...
+    @overload
+    def permute(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...]],
+                *shapes: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=Tensor._reshape_permute_meta_infer)
-    def permute(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...], int], *shapes: int) -> _T_all_tensor: 
+    def permute(x: _T_all_tensor, shape: Union[list[int], tuple[int, ...],
+                                               int], *shapes:
+                int) -> _T_all_tensor:
         if isinstance(x, Tensor):
             return Tensor(x._wrapped.permute(shape))
         else:
-            assert isinstance(x, PointerTensor), "reshape only support Tensor and PointerTensor type"
+            assert isinstance(
+                x, PointerTensor
+            ), "reshape only support Tensor and PointerTensor type"
             return PointerTensor(x._wrapped.permute(shape))
 
     @staticmethod
-    @overload 
-    def trans(x: _T_all_tensor, order: int, *orders: int) -> _T_all_tensor: ...
+    @overload
+    def trans(x: _T_all_tensor, order: int, *orders: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
-    @overload 
-    def trans(x: _T_all_tensor, order: Optional[Union[list[int], tuple[int, ...]]] = None, *orders: int) -> _T_all_tensor: ...
-
+    @overload
+    def trans(x: _T_all_tensor,
+              order: Optional[Union[list[int], tuple[int, ...]]] = None,
+              *orders: int) -> _T_all_tensor:
+        ...
 
     @staticmethod
     @pfl.configure_std_func(meta_infer=Tensor._reshape_permute_meta_infer)
-    def trans(x: _T_all_tensor, order: Optional[Union[list[int], tuple[int, ...], int]] = None, *orders: int) -> _T_all_tensor: 
+    def trans(x: _T_all_tensor,
+              order: Optional[Union[list[int], tuple[int, ...], int]] = None,
+              *orders: int) -> _T_all_tensor:
         if order is None:
             assert len(orders) == 0
             order = list(range(len(x.shape) - 1, -1, -1))
         if isinstance(x, Tensor):
             return Tensor(x._wrapped.permute(order))
         else:
-            assert isinstance(x, PointerTensor), "reshape only support Tensor and PointerTensor type"
+            assert isinstance(
+                x, PointerTensor
+            ), "reshape only support Tensor and PointerTensor type"
             return PointerTensor(x._wrapped.permute(order))
 
-
     @staticmethod
-    def split(x: _T_all_tensor) -> tuple[_T_all_tensor, _T_all_tensor]: 
+    def split(x: _T_all_tensor) -> tuple[_T_all_tensor, _T_all_tensor]:
         last_dim = x.shape[-1]
         assert last_dim == 2, "triton split only support last dimension of size 2"
         # assert last_dim % 2 == 0, "split only support even first dimension"
@@ -1378,21 +1687,35 @@ class triton_std(triton_std_math):
         if isinstance(x, Tensor):
             return Tensor(x._wrapped[..., 0]), Tensor(x._wrapped[..., 1])
         else:
-            assert isinstance(x, PointerTensor), "split only support Tensor and PointerTensor type"
-            return PointerTensor(x._wrapped[..., 0]), PointerTensor(x._wrapped[..., 1])
+            assert isinstance(
+                x, PointerTensor
+            ), "split only support Tensor and PointerTensor type"
+            return PointerTensor(x._wrapped[...,
+                                            0]), PointerTensor(x._wrapped[...,
+                                                                          1])
 
     @staticmethod
-    def join(x: _T_all_tensor, y: _T_all_tensor) -> _T_all_tensor: 
+    def join(x: _T_all_tensor, y: _T_all_tensor) -> _T_all_tensor:
         if isinstance(x, Tensor) and isinstance(y, Tensor):
             return Tensor(x._wrapped.stack([y._wrapped], axis=-1))
         else:
-            assert isinstance(x, PointerTensor) and isinstance(y, PointerTensor), "join only support Tensor and PointerTensor type"
+            assert isinstance(x, PointerTensor) and isinstance(
+                y, PointerTensor
+            ), "join only support Tensor and PointerTensor type"
             return PointerTensor(x._wrapped.stack([y._wrapped], axis=-1))
 
     @staticmethod
-    def _make_block_pointer_meta_infer(base_cls: Union[Type[TensorDescriptor], Type[BlockPointer]], fn, base: pfl.PFLExprInfo, shape: pfl.PFLExprInfo, strides: pfl.PFLExprInfo, offsets: pfl.PFLExprInfo, block_shape: pfl.PFLExprInfo, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
-        assert base.has_metadata() and shape.has_metadata() and strides.has_metadata() and block_shape.has_metadata() and offsets.has_metadata(), "base, shape, strides and block_shape must have metadata"
-        shape_val = shape.metadata_checked # may be list of int or list of undefined.
+    def _make_block_pointer_meta_infer(
+            base_cls: Union[Type[TensorDescriptor],
+                            Type[BlockPointer]], fn, base: pfl.PFLExprInfo,
+            shape: pfl.PFLExprInfo, strides: pfl.PFLExprInfo,
+            offsets: pfl.PFLExprInfo, block_shape: pfl.PFLExprInfo, *args,
+            **kwargs) -> Optional[pfl.PFLMetaInferResult]:
+        assert base.has_metadata() and shape.has_metadata(
+        ) and strides.has_metadata() and block_shape.has_metadata(
+        ) and offsets.has_metadata(
+        ), "base, shape, strides and block_shape must have metadata"
+        shape_val = shape.metadata_checked  # may be list of int or list of undefined.
         strides_val = strides.metadata_checked
         block_shape_val = block_shape.metadata_checked
         for val in block_shape_val:
@@ -1400,50 +1723,149 @@ class triton_std(triton_std_math):
         assert (
             len(shape_val) == len(strides_val) == len(block_shape_val)
         ), "Shape, strides, block_shape and offset must have the same length"
-        return pfl.PFLMetaInferResult(base_cls(tsim.create_tensor_block_pointer_meta(base.metadata_checked._wrapped, len(shape_val), block_shape_val)))
+        return pfl.PFLMetaInferResult(
+            base_cls(
+                tsim.create_tensor_block_pointer_meta(
+                    base.metadata_checked._wrapped, len(shape_val),
+                    block_shape_val)))
 
-    @staticmethod 
-    @pfl.configure_std_func(meta_infer=partial(_make_block_pointer_meta_infer, TensorDescriptor))
-    def make_tensor_descriptor(base: Union[PointerScalarFloat, PointerScalarInt], shape: list[int], strides: list[int], block_shape: list[int]) -> TensorDescriptor:
-        return TensorDescriptor(tsim.create_tensor_block_pointer(base._wrapped, shape, strides, block_shape))
+    @staticmethod
+    @pfl.configure_std_func(
+        meta_infer=partial(_make_block_pointer_meta_infer, TensorDescriptor))
+    def make_tensor_descriptor(base: Union[PointerScalarFloat,
+                                           PointerScalarInt], shape: list[int],
+                               strides: list[int],
+                               block_shape: list[int]) -> TensorDescriptor:
+        return TensorDescriptor(
+            tsim.create_tensor_block_pointer(base._wrapped, shape, strides,
+                                             block_shape))
 
-    @staticmethod 
-    @pfl.configure_std_func(meta_infer=partial(_make_block_pointer_meta_infer, BlockPointer))
-    def make_block_ptr(base: Union[PointerScalarFloat, PointerScalarInt], shape: Union[list[int], tuple[int, ...]], 
-            strides: Union[list[int], tuple[int, ...]], 
-            offsets: Union[list[int], tuple[int, ...]], 
-            block_shape: Union[list[int], tuple[int, ...]], 
+    @staticmethod
+    @pfl.configure_std_func(
+        meta_infer=partial(_make_block_pointer_meta_infer, BlockPointer))
+    def make_block_ptr(
+            base: Union[PointerScalarFloat,
+                        PointerScalarInt], shape: Union[list[int], tuple[int,
+                                                                         ...]],
+            strides: Union[list[int],
+                           tuple[int, ...]], offsets: Union[list[int],
+                                                            tuple[int, ...]],
+            block_shape: Union[list[int], tuple[int, ...]],
             order: Union[list[int], tuple[int, ...]]) -> BlockPointer:
-        return BlockPointer(tsim.create_tensor_block_pointer(base._wrapped, shape, strides, block_shape, offsets))
-    
+        return BlockPointer(
+            tsim.create_tensor_block_pointer(base._wrapped, list(shape), list(strides),
+                                             list(block_shape), list(offsets)))
+
     @staticmethod
     def _static_assert_static_infer(x: pfl.PFLExprInfo):
-        assert x.has_constexpr_data(), "static_assert only support constexpr data"
+        assert x.has_constexpr_data(
+        ), "static_assert only support constexpr data"
         assert x._constexpr_data, "static_assert condition must be True"
 
     @staticmethod
     def static_assert(x: bool) -> None:
-        assert x 
+        assert x
 
-    @staticmethod 
-    def advance(base: BlockPointer, offset: Union[list[int], tuple[int, ...]]) -> BlockPointer:
+    @staticmethod
+    def advance(base: BlockPointer,
+                offset: Union[list[int], tuple[int, ...]]) -> BlockPointer:
         return base.advance(offset)
 
+    @staticmethod
+    def _atomic_meta_infer(
+            fn, pointer: pfl.PFLExprInfo, *args, **kwargs) -> Optional[pfl.PFLMetaInferResult]:
+        if not pointer.has_metadata():
+            return None 
+        pointer_meta = pointer.metadata_checked
+        if isinstance(pointer_meta, (PointerScalarFloat, PointerScalarInt)):
+            return None 
+        assert isinstance(pointer_meta, (PointerTensor, BlockPointer)), \
+            "pointer must be PointerTensor or BlockPointer"
+        _unused = 1
+        if isinstance(pointer_meta, PointerTensor):
+            store_res = pointer_meta._wrapped.store(_unused)
+        else:
+            store_res = pointer_meta._wrapped.store([0, 0], _unused)
+        assert isinstance(store_res, tsim.SimTensor)
+        return pfl.PFLMetaInferResult(Tensor(store_res))
+
+    @staticmethod
+    @overload
+    def atomic_add(pointer: PointerScalarFloat,
+              value: float, 
+              mask: Optional[bool] = None,
+              sem: Optional[str] = None,
+              scope: Optional[str] = None) -> float:
+        ...
+
+    @staticmethod
+    @overload
+    def atomic_add(pointer: PointerScalarInt,
+              value: int, 
+              mask: Optional[bool] = None,
+              sem: Optional[str] = None,
+              scope: Optional[str] = None) -> int:
+        ...
+
+    @staticmethod
+    @overload
+    def atomic_add(pointer: PointerTensor,
+              value: Tensor, 
+              mask: Optional[Tensor] = None,
+              sem: Optional[str] = None,
+              scope: Optional[str] = None) -> Tensor:
+        ...
+
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_atomic_meta_infer)
+    def atomic_add(pointer: Union[PointerTensor, PointerScalarFloat,
+                             PointerScalarInt, BlockPointer],
+              value: Union[int, float, Tensor],
+              mask: Optional[Union[Tensor, bool]] = None,
+              sem: Optional[str] = None,
+              scope: Optional[str] = None) -> Union[Tensor, int, float]:
+        value_wrapped = value._wrapped if isinstance(value, Tensor) else value
+        mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask
+        if isinstance(pointer, PointerScalarFloat):
+            assert mask_wrapped is None or isinstance(mask_wrapped, bool)
+            assert not isinstance(value_wrapped, tsim.SimTensor)
+            res = pointer._wrapped.store(value_wrapped, mask_wrapped, atomic_op="add")
+        elif isinstance(pointer, PointerScalarInt):
+            assert mask_wrapped is None or isinstance(mask_wrapped, bool)
+            assert not isinstance(value_wrapped, tsim.SimTensor)
+            res = pointer._wrapped.store(value_wrapped, mask_wrapped, atomic_op="add")
+        elif isinstance(pointer, BlockPointer):
+            assert mask is None, "BlockPointer does not support (don't need) mask"
+            assert isinstance(value_wrapped, tsim.SimTensor)
+            res1 = pointer._wrapped.store([0, 0], value_wrapped, atomic_op="add")
+            assert isinstance(res1, tsim.SimTensor)
+            res = Tensor(res1)
+        else:
+            res1 = pointer._wrapped.store(value_wrapped, mask_wrapped, atomic_op="add")
+            assert isinstance(res1, tsim.SimTensor)
+            res = Tensor(res1)
+        assert res is not None 
+        return res
+
 T = TypeVar("T")
+tl.atomic_add
 
-
-def _triton_anno_transform(inferred: pfl.PFLExprInfo, anno_in_ast: Any) -> pfl.PFLExprInfo:
+def _triton_anno_transform(inferred: pfl.PFLExprInfo,
+                           anno_in_ast: Any) -> pfl.PFLExprInfo:
     if anno_in_ast is tl.constexpr:
         inferred = dataclasses.replace(inferred)
         inferred.anno_metadatas_ext.append(ConstExpr())
     return inferred
 
-@dataclasses.dataclass 
+
+@dataclasses.dataclass
 class HostTensorDescriptor:
     data: np.ndarray
     block_shape: list[int]
 
-@dataclasses.dataclass 
+
+@dataclasses.dataclass
 class TritonSimInfo:
     grid_size: tuple[int, int, int]
     ref_results: dict[str, Any]
@@ -1452,17 +1874,37 @@ class TritonSimInfo:
     # for visualization only.
     # support identifier or identifier.T (transposed) or None (empty space)
     vis_layout: Optional[list[list[Optional[str]]]] = None
+    grid_size_for_triton: Optional[Callable[[Any], tuple[int, int,
+                                                         int]]] = None
 
-def create_global_mem_from_kwargs(kwargs: dict[str, Any]) -> tsim.SimMemoryStorage:
+
+class TritonSimExecType(enum.IntEnum):
+    SIM = 0
+    REAL_TRITON = 1
+    REAL_RAW = 2
+
+@dataclasses.dataclass
+class TritonSimFuncMeta(pfl.PFLCompileFuncMeta):
+    sim_kwargs: Optional[dict[str, Any]] = None
+    real_kwargs: Optional[dict[str, Any]] = None
+    raw_fn: Optional[Optional[Callable[[dict[str, Any]], float]]] = None
+
+
+def create_global_mem_from_kwargs(
+        kwargs: dict[str, Any]) -> tsim.SimMemoryStorage:
     global_mem_arrays: dict[str, np.ndarray] = {}
     for k, v in kwargs.items():
         if isinstance(v, np.ndarray):
-            global_mem_arrays[k] = v 
+            global_mem_arrays[k] = v
         elif isinstance(v, HostTensorDescriptor):
             global_mem_arrays[k] = v.data
     return tsim.create_sim_memory(global_mem_arrays)
 
-def _validate_and_convert_triton_kwargs(kwargs: dict[str, Any], global_mem: Optional[tsim.SimMemoryStorage] = None) -> tuple[dict[str, Any], Optional[tsim.SimMemoryStorage]]:
+
+def _validate_and_convert_triton_kwargs(
+    kwargs: dict[str, Any],
+    global_mem: Optional[tsim.SimMemoryStorage] = None
+) -> tuple[dict[str, Any], Optional[tsim.SimMemoryStorage]]:
     new_kwargs: dict[str, Any] = {}
     if global_mem is None:
         global_mem = create_global_mem_from_kwargs(kwargs)
@@ -1470,22 +1912,26 @@ def _validate_and_convert_triton_kwargs(kwargs: dict[str, Any], global_mem: Opti
         if isinstance(v, np.ndarray):
             # check v is contiguous
             v_dtype_tsim = DTypeEnum.from_numpy_dtype(v.dtype)
-            assert global_mem is not None 
+            assert global_mem is not None
             desc = global_mem.memory_blocks[k]
             ptr_float = desc.byte_offset_with_hole // desc.dtype.byte_size()
-            ts = tsim.create_pointer_scalar(v_dtype_tsim, ptr_float, global_mem)
+            ts = tsim.create_pointer_scalar(v_dtype_tsim, ptr_float,
+                                            global_mem)
             if ts.is_floating():
                 v_ptr = PointerScalarFloat(ts)
             else:
                 v_ptr = PointerScalarInt(ts)
-            new_kwargs[k] = v_ptr 
+            new_kwargs[k] = v_ptr
         elif isinstance(v, HostTensorDescriptor):
             v_dtype_tsim = DTypeEnum.from_numpy_dtype(v.data.dtype)
-            assert global_mem is not None 
+            assert global_mem is not None
             desc = global_mem.memory_blocks[k]
             ptr_float = desc.byte_offset_with_hole // desc.dtype.byte_size()
-            ts = tsim.create_pointer_scalar(v_dtype_tsim, ptr_float, global_mem)
-            tsd = tsim.create_tensor_block_pointer(ts, list(v.data.shape), [s // v.data.itemsize for s in v.data.strides], v.block_shape)
+            ts = tsim.create_pointer_scalar(v_dtype_tsim, ptr_float,
+                                            global_mem)
+            tsd = tsim.create_tensor_block_pointer(ts, list(
+                v.data.shape), [s // v.data.itemsize for s in v.data.strides],
+                                                   v.block_shape)
             new_kwargs[k] = TensorDescriptor(tsd)
         elif isinstance(v, PointerTensor):
             new_kwargs[k] = v
@@ -1495,12 +1941,16 @@ def _validate_and_convert_triton_kwargs(kwargs: dict[str, Any], global_mem: Opti
             new_kwargs[k] = v
         else:
             # TODO add support for string constexpr
-            assert isinstance(v, (int, float, bool)), f"Unsupported type {type(v)} for triton kwargs."
+            assert isinstance(
+                v, (int, float,
+                    bool)), f"Unsupported type {type(v)} for triton kwargs."
             new_kwargs[k] = v
-    
+
     return new_kwargs, global_mem
 
-def _create_metadata_from_triton_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+
+def _create_metadata_from_triton_kwargs(
+        kwargs: dict[str, Any]) -> dict[str, Any]:
     new_kwargs: dict[str, Any] = {}
     for k, v in kwargs.items():
         if isinstance(v, np.ndarray):
@@ -1511,132 +1961,481 @@ def _create_metadata_from_triton_kwargs(kwargs: dict[str, Any]) -> dict[str, Any
                 v_ptr = PointerScalarFloat(ts)
             else:
                 v_ptr = PointerScalarInt(ts)
-            new_kwargs[k] = v_ptr 
+            new_kwargs[k] = v_ptr
         elif isinstance(v, HostTensorDescriptor):
             v_dtype_tsim = DTypeEnum.from_numpy_dtype(v.data.dtype)
             ts = tsim.create_pointer_scalar_meta(v_dtype_tsim)
-            tsd = tsim.create_tensor_block_pointer(ts, list(v.data.shape), [s // v.data.itemsize for s in v.data.strides], v.block_shape)
+            tsd = tsim.create_tensor_block_pointer(ts, list(
+                v.data.shape), [s // v.data.itemsize for s in v.data.strides],
+                                                   v.block_shape)
             new_kwargs[k] = TensorDescriptor(tsd)
         elif isinstance(v, PointerTensor):
-            new_kwargs[k] = dataclasses.replace(v, _wrapped=v._wrapped.to_meta_tensor())
+            new_kwargs[k] = dataclasses.replace(
+                v, _wrapped=v._wrapped.to_meta_tensor())
         elif isinstance(v, TensorDescriptor):
-            new_kwargs[k] = dataclasses.replace(v, _wrapped=v._wrapped.to_meta_tensor())
+            new_kwargs[k] = dataclasses.replace(
+                v, _wrapped=v._wrapped.to_meta_tensor())
         elif isinstance(v, (PointerScalarFloat, PointerScalarInt)):
-            new_kwargs[k] = dataclasses.replace(v, _wrapped=v._wrapped.to_meta_tensor())
+            new_kwargs[k] = dataclasses.replace(
+                v, _wrapped=v._wrapped.to_meta_tensor())
         else:
             # TODO add support for string constexpr
-            assert isinstance(v, (int, float, bool)), f"Unsupported type {type(v)} for triton kwargs."
+            assert isinstance(
+                v, (int, float,
+                    bool)), f"Unsupported type {type(v)} for triton kwargs."
             new_kwargs[k] = v
-    
+
     return new_kwargs
 
 
-def _handle_triton_inline_data(inline_run_env_fn: Callable[[], pfl.PFLInlineRunEnv]):
+def _handle_triton_inline_data(
+        inline_run_env_fn: Callable[[], pfl.PFLInlineRunEnv]):
     env = inline_run_env_fn()
     # convert test data to triton sim
     prev_global_mem = env.get_userdata_typed(TritonSimInfo).global_mem
-    new_kwargs, global_mem = _validate_and_convert_triton_kwargs(env.kwargs, prev_global_mem)
+    new_kwargs, global_mem = _validate_and_convert_triton_kwargs(
+        env.kwargs, prev_global_mem)
     env.kwargs = new_kwargs
     if prev_global_mem is None:
-        env.get_userdata_typed(TritonSimInfo).global_mem = global_mem 
-    return env 
+        env.get_userdata_typed(TritonSimInfo).global_mem = global_mem
+    return env
+
 
 @overload
-def mark_triton_compilable(fn: T) -> T: ...
+def mark_triton_compilable(fn: T) -> T:
+    ...
+
 
 @overload
-def mark_triton_compilable(fn: None = None, *, inline_run_env_fn: Optional[Callable[[], pfl.PFLInlineRunEnv]] = None, is_template: bool = False) -> Callable[[T], T]: ...
+def mark_triton_compilable(
+        fn: None = None,
+        *,
+        inline_run_env_fn: Optional[Callable[..., pfl.PFLInlineRunEnv]] = None,
+        is_template: bool = False,
+        sim_kwargs: Optional[dict[str, Any]] = None,
+        real_kwargs: Optional[dict[str, Any]] = None,
+        raw_fn: Optional[Callable[[dict[str, Any]], Any]] = None) -> Callable[[T], T]:
+    ...
 
-@pfl.register_pfl_std(mapped_name="triton_compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
-def mark_triton_compilable(fn: Optional[T] = None, *, inline_run_env_fn: Optional[Callable[[], pfl.PFLInlineRunEnv]] = None, 
-                is_template: bool = False) -> Union[T, Callable[[T], T]]:
+
+@pfl.register_pfl_std(mapped_name="triton_compiler_mark_pfl_compilable",
+                      backend=None,
+                      _internal_disable_type_check=True)
+def mark_triton_compilable(
+        fn: Optional[T] = None,
+        *,
+        inline_run_env_fn: Optional[Callable[..., pfl.PFLInlineRunEnv]] = None,
+        is_template: bool = False,
+        sim_kwargs: Optional[dict[str, Any]] = None,
+        real_kwargs: Optional[dict[str, Any]] = None,
+        raw_fn: Optional[Callable[[dict[str, Any]], Any]] = None) -> Union[T, Callable[[T], T]]:
+
     def wrapper(fn_wrapped: T) -> T:
-        prev_meta: Optional[pfl.PFLCompileFuncMeta] = getattr(fn_wrapped, pfl.PFL_COMPILE_META_ATTR, None)
+        prev_meta: Optional[TritonSimFuncMeta] = getattr(
+            fn_wrapped, pfl.PFL_COMPILE_META_ATTR, None)
         inline_run_env_fn_ = inline_run_env_fn
-        if inline_run_env_fn_ is not None:
-            inline_run_env_fn_ = partial(_handle_triton_inline_data, inline_run_env_fn_)
+        # if inline_run_env_fn_ is not None:
+        #     inline_run_env_fn_ = partial(_handle_triton_inline_data, inline_run_env_fn_)
         if prev_meta is None:
-            prev_meta = pfl.PFLCompileFuncMeta(["triton"], inline_run_env_fn_, is_template=is_template)
+            prev_meta = TritonSimFuncMeta(["triton"],
+                                          inline_run_env_fn_,
+                                          is_template=is_template,
+                                          sim_kwargs=sim_kwargs,
+                                          real_kwargs=real_kwargs,
+                                          raw_fn=raw_fn)
             setattr(fn_wrapped, pfl.PFL_COMPILE_META_ATTR, prev_meta)
         else:
             prev_meta.backends = ["triton"]
             prev_meta.inline_run_env_fn = inline_run_env_fn_
             prev_meta.is_template = is_template
+            prev_meta.sim_kwargs = sim_kwargs
+            prev_meta.real_kwargs = real_kwargs
+            prev_meta.raw_fn = raw_fn
 
         return cast(T, fn_wrapped)
+
     if fn is None:
         return wrapper
     else:
         return wrapper(fn)
 
 
+@dataclasses.dataclass
+class TritonInlineRunEnv(PFLInlineRunEnv):
+    raw_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
 class TritonKernelRunner(pfl.PFLAsyncRunner):
+
     def __init__(self, library: pfl.PFLLibrary, inline_env: PFLInlineRunEnv):
         super().__init__(library)
         self.triton_sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+        self._init_inline_env = inline_env
 
-    async def run_kernel(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
+    def copy(self):
+        return TritonKernelRunner(self._library, self._init_inline_env)
+
+    def get_unwrapped_triton_fn(self, key: Callable) -> Callable:
+        return _may_triton_func(key)
+
+    def get_triton_fn_inline_env(
+            self, key: Union[str, Callable], exec_type: TritonSimExecType) -> TritonInlineRunEnv:
+        if not isinstance(key, str):
+            key = _may_triton_func(key)
+        kwargs = None 
+        specs = self._library.get_compiled_unit_specs(key)
+        assert len(specs) == 1 
+        fn_meta = specs[0].compile_info.meta
+        assert isinstance(fn_meta, TritonSimFuncMeta)
+        if exec_type == TritonSimExecType.SIM:
+            kwargs = fn_meta.sim_kwargs
+        elif exec_type == TritonSimExecType.REAL_TRITON:
+            kwargs = fn_meta.real_kwargs
+        else:
+            raise ValueError(f"Unsupported exec_type {exec_type}") 
+        res = self._library.get_compiled_unit_inline_env(key, kwargs)
+        sim_info = res.get_userdata_typed(TritonSimInfo)
+        kwargs, gmem = _validate_and_convert_triton_kwargs(
+            res.kwargs, sim_info.global_mem)
+        sim_info = dataclasses.replace(sim_info, global_mem=gmem)
+        return TritonInlineRunEnv(annotations=res.annotations,
+                                  contexts=res.contexts,
+                                  kwargs=kwargs,
+                                  raw_kwargs=res.kwargs,
+                                  userdata=sim_info)
+
+    async def run_kernel(self, fn: Any, grid_size: tuple[int, int, int],
+                         global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
+        fn_no_jit = _may_triton_func(fn)
+
         lib = self._library
         kwargs, _ = _validate_and_convert_triton_kwargs(kwargs, global_mem)
         for j in range(grid_size[0]):
             for k in range(grid_size[1]):
                 for l in range(grid_size[2]):
-                    with tsim.enter_tensorsim_context([j, k, l], grid_size, global_mem=global_mem):
+                    with tsim.enter_tensorsim_context([j, k, l],
+                                                      grid_size,
+                                                      global_mem=global_mem):
                         kwargs_cloned = kwargs.copy()
                         for key, v in kwargs_cloned.items():
-                            if isinstance(v, (PointerTensor, PointerScalarFloat, PointerScalarInt, TensorDescriptor)):
+                            if isinstance(
+                                    v, (PointerTensor, PointerScalarFloat,
+                                        PointerScalarInt, TensorDescriptor)):
                                 kwargs_cloned[key] = v.clone()
-                        await self.run_func(lib.get_compiled_unit_specs(fn)[0].uid, kwargs_cloned)
+                        await self.run_func(
+                            lib.get_compiled_unit_specs(fn_no_jit)[0].uid,
+                            kwargs_cloned)
 
-    def _run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, kwargs) -> None:
+    def _run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int],
+                                global_mem: tsim.SimMemoryStorage,
+                                kwargs) -> None:
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(self.run_kernel(fn, grid_size, global_mem, **kwargs))
+        loop.run_until_complete(
+            self.run_kernel(fn, grid_size, global_mem, **kwargs))
         loop.close()
         return
 
-    def run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int], global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
+    def run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int],
+                               global_mem: tsim.SimMemoryStorage,
+                               **kwargs) -> None:
+        fn_no_jit = _may_triton_func(fn)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(self._run_kernel_in_executor, fn, grid_size, global_mem, kwargs)
+            future = executor.submit(self._run_kernel_in_executor, fn_no_jit,
+                                     grid_size, global_mem, kwargs)
             future.result()
 
-    async def validate_kernel_by_test_data(self, fn: Any, res_comparer: Optional[Callable[[Any, Any], Any]] = None) -> None:
-        lib = self._library
-        inline_env = lib.get_compiled_unit_inline_env(fn)
+    async def validate_kernel_by_test_data(self,
+                                           fn: Any,
+                                           res_comparer: Optional[Callable[
+                                               [Any, Any], Any]] = None,
+                                           run_triton: bool = False) -> None:
+        fn_no_jit = _may_triton_func(fn)
+        inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
-        assert sim_info.global_mem is not None 
-        await self.run_kernel(fn, sim_info.grid_size, sim_info.global_mem, **inline_env.kwargs)
+        assert sim_info.global_mem is not None
+        await self.run_kernel(fn_no_jit, sim_info.grid_size,
+                              sim_info.global_mem, **inline_env.kwargs)
         if sim_info.global_mem is not None:
             for k, ref in sim_info.ref_results.items():
                 desc = sim_info.global_mem.memory_blocks[k]
                 print(k, np.linalg.norm(desc.get_data_view_checked() - ref))
                 if res_comparer is not None:
                     res_comparer(desc.get_data_view_checked(), ref)
+        if run_triton:
+            await self.validate_kernel_in_triton_process(fn)
+
+    def _get_triton_run_args(self, fn: Any):
+        fn_no_jit = _may_triton_func(fn)
+        path = inspect.getfile(fn_no_jit)
+        module_import_path = find_submodule_from_file(path)
+        is_func_id = True
+        func_id_or_path = path
+        if module_import_path is None:
+            is_func_id = False
+        else:
+            func_id_local = "::".join(fn_no_jit.__qualname__.split("."))
+            func_id_or_path = f"{module_import_path}::{func_id_local}"
+        return func_id_or_path,  is_func_id, fn_no_jit.__name__
+
+    async def validate_kernel_in_triton_process(self, fn: Any):
+        # TODO: this don't support ptr of ptr in real triton sim currently.
+        assert isinstance(
+            fn, (triton.JITFunction,
+                 triton.runtime.Autotuner)), "fn must be a triton JITFunction"
+        func_id_or_path, is_func_id, fn_name = self._get_triton_run_args(fn)
+        spawn_ctx = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(
+                1, mp_context=spawn_ctx) as ex:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(ex,
+                                        _run_triton_fn_for_validation,
+                                        func_id_or_path,
+                                        fn_name, is_func_id)
+
+    async def bench_kernel_in_triton_process(self, fn: Any,
+                                            warming_up: int = 2,
+                                            run_cnt: int = 3):
+        # TODO: this don't support ptr of ptr in real triton sim currently.
+        assert isinstance(
+            fn, (triton.JITFunction,
+                 triton.runtime.Autotuner)), "fn must be a triton JITFunction"
+        func_id_or_path, is_func_id, fn_name = self._get_triton_run_args(fn)
+        spawn_ctx = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(
+                1, mp_context=spawn_ctx) as ex:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(ex,
+                                              _run_triton_fn_for_bench,
+                                              func_id_or_path,
+                                              fn_name, is_func_id,
+                                              warming_up,
+                                              run_cnt)
+
+def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
+    if is_func_id:
+        fn = get_object_type_from_module_id(func_id_or_path)
+        assert fn is not None
+    else:
+        module = types.ModuleType(func_id_or_path)
+        spec = importlib.machinery.ModuleSpec(func_id_or_path,
+                                              None,
+                                              origin=func_id_or_path)
+        module.__spec__ = spec
+
+        with open(func_id_or_path, "r") as f:
+            code = f.read()
+        code_comp = compile(code, func_id_or_path, "exec")
+        module.__file__ = func_id_or_path
+        exec(code_comp, module.__dict__)
+        fn = module.__dict__[fn_name]
+    return fn
+
+def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
+                             is_func_id: bool):
+    import torch
+    fn = _get_triton_fn(func_id_or_path, fn_name, is_func_id)
+    fn_unwrapped = _may_triton_func(fn)
+    fn_sig = inspect.signature(fn_unwrapped)
+    all_triton_param_names = set(fn_sig.parameters.keys())
+    fn_meta = pfl.get_compilable_meta(fn_unwrapped)
+    assert isinstance(fn_meta, TritonSimFuncMeta), "fn must be a triton compilable function"
+    assert fn_meta.inline_run_env_fn is not None, "inline_run_env_fn must be set for real run."
+    if fn_meta.real_kwargs is not None:
+        inline_env = fn_meta.inline_run_env_fn(**fn_meta.real_kwargs)
+    else:
+        inline_env = fn_meta.inline_run_env_fn()
+    raw_fn = fn_meta.raw_fn
+    kwargs = inline_env.kwargs
+    kwargs = kwargs.copy()
+    if isinstance(fn, triton.runtime.Autotuner):
+        for cfg in fn.configs:
+            for k_to_rm in cfg.kwargs:
+                kwargs.pop(k_to_rm, None)
+            break
+    # TODO support tensor descriptor and host tensor descriptor
+    kwargs_triton: dict[str, torch.Tensor] = {}
+    kwargs_torch: dict[str, torch.Tensor] = {}
+    reserved_triton_param_names = {
+        "maxnreg", "num_warps", "num_stages", "num_ctas"
+    }
+    for k, v in kwargs.items():
+        if isinstance(v, np.ndarray):
+            kwargs_triton[k] = torch.from_numpy(v).cuda()
+            kwargs_torch[k] = kwargs_triton[k]
+        elif isinstance(v, HostTensorDescriptor):
+            # TODO
+            raise NotImplementedError
+        else:
+            if k in all_triton_param_names or k in reserved_triton_param_names:
+                kwargs_triton[k] = v
+            kwargs_torch[k] = v
+    return fn, fn_meta, kwargs_triton, kwargs_torch, inline_env
+
+@dataclasses.dataclass
+class TritonKernelCompileInfo:
+    asm: dict[str, str]
+    metadata: dict[str, Any]
+
+def _get_triton_compile_infos(kernel) -> TritonKernelCompileInfo:
+    from triton.runtime.driver import driver
+
+    device = driver.active.get_current_device()
+    if isinstance(kernel, triton.runtime.Autotuner):
+        kernel = kernel.fn
+    if hasattr(kernel, "device_caches"):
+        kernel_cache = kernel.device_caches[device]
+    else:
+        kernel_cache = kernel.cache
+
+    # Get the first cached compilation (or iterate over all)
+    cache_entry = kernel_cache[0]
+
+    compiled_kernel = list(cache_entry.values())[0]
+
+    # Access the 'asm' dictionary
+    asm_dict = compiled_kernel.asm.copy()
+    for k in list(asm_dict.keys()):
+        value = asm_dict[k]
+        if not isinstance(value, str):
+            # e.g. cubin
+            asm_dict.pop(k)
+    # List all keys in the 'asm' dictionary
+    all_keys = asm_dict.keys()
+    print("All keys in asm dictionary:", all_keys) # All keys in asm dictionary: dict_keys(['ttir', 'ttgir', 'llir', 'ptx', 'cubin'])
+    metadata_dict = compiled_kernel.metadata._asdict().copy()
+    metadata_dict.pop("target")
+    metadata_dict["n_regs"] = compiled_kernel.n_regs
+    return TritonKernelCompileInfo(asm_dict, metadata_dict)
+
+
+def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
+                                  is_func_id: bool):
+    fn, fn_meta, kwargs_th, _, inline_env = _get_triton_run_datas_from_path(
+        func_id_or_path, fn_name, is_func_id)
+    sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+    assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
+    fn[sim_info.grid_size_for_triton](**kwargs_th)
+    # compare result here.
+    for k, ref in sim_info.ref_results.items():
+        print(
+            f"{k} triton res: {np.linalg.norm(ref - kwargs_th[k].cpu().numpy())}"
+        )
+
+
+
+def _run_triton_fn_for_bench(func_id_or_path: str,
+                             fn_name: str,
+                             is_func_id: bool,
+                             warming_up: int = 2,
+                             run_cnt: int = 3):
+    import torch
+    fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
+        func_id_or_path, fn_name, is_func_id)
+    raw_fn = fn_meta.raw_fn
+    sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+    assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
+
+    for j in range(warming_up):
+        fn[sim_info.grid_size_for_triton](**kwargs_tt)
+    durations: list[float] = []
+    raw_durations: list[float] = []
+    stream = torch.cuda.current_stream()
+    for j in range(run_cnt):
+        start_ev = torch.cuda.Event(enable_timing=True)
+        end_ev = torch.cuda.Event(enable_timing=True)
+        start_ev.record(stream)
+        fn[sim_info.grid_size_for_triton](**kwargs_tt)
+        end_ev.record(stream)
+        start_ev.synchronize()
+        end_ev.synchronize()
+        duration = start_ev.elapsed_time(end_ev)
+        durations.append(duration)
+        print(f"{fn_name}(triton) duration: {duration} ms")
+    if raw_fn is not None:
+        for j in range(warming_up):
+            raw_fn(kwargs_th)
+        for j in range(run_cnt):
+            duration = raw_fn(kwargs_th)
+            assert isinstance(duration, float), \
+                "raw_fn must return a float duration"
+            raw_durations.append(duration)
+            print(f"{fn_name}(raw) duration: {duration} ms")
+    return durations, raw_durations, _get_triton_compile_infos(fn)
 
 def _may_triton_func(fn: Any) -> Any:
+    if isinstance(fn, triton.runtime.Autotuner):
+        fn = fn.fn
     if isinstance(fn, triton.JITFunction):
         return fn.fn
     return fn
 
-def parse_triton_compilable_to_runner(fn: triton.JITFunction, do_meta_eval: bool = True, 
-        module_code_getter: Optional[Callable[[Any], str]] = None) -> TritonKernelRunner:
+
+def parse_triton_compilable_to_runner(
+    fn: Union[triton.JITFunction, triton.runtime.Autotuner],
+    do_meta_eval: bool = True,
+    module_code_getter: Optional[Callable[[Any], str]] = None
+) -> TritonKernelRunner:
+    if isinstance(fn, triton.runtime.Autotuner):
+        fn = fn.fn
     fn_unwrapped = inspect.unwrap(fn.fn)
     fn_metadata = pfl.get_compilable_meta(fn_unwrapped)
-    assert fn_metadata is not None 
+    assert isinstance(fn_metadata, TritonSimFuncMeta)
     inline_run_env_fn = fn_metadata.inline_run_env_fn
-    assert inline_run_env_fn is not None 
-    env = inline_run_env_fn()
-    external_annos = {k: type(v) for k, v in env.kwargs.items()}
+    assert inline_run_env_fn is not None
+    if fn_metadata.sim_kwargs is not None:
+        env = inline_run_env_fn(**fn_metadata.sim_kwargs)
+    else:
+        env = inline_run_env_fn()
     meta_args = _create_metadata_from_triton_kwargs(env.kwargs)
+    external_annos = {k: type(v) for k, v in meta_args.items()}
+    sim_info = env.get_userdata_typed(TritonSimInfo)
+    kwargs, gmem = _validate_and_convert_triton_kwargs(
+        env.kwargs, sim_info.global_mem)
+    sim_info = dataclasses.replace(sim_info, global_mem=gmem)
+    env = TritonInlineRunEnv(annotations=env.annotations,
+                             contexts=env.contexts,
+                             kwargs=kwargs,
+                             raw_kwargs=env.kwargs,
+                             userdata=sim_info)
     type_hints = get_type_hints(fn_unwrapped)
     constexpr_args = {}
     for k, v in type_hints.items():
         if v is tl.constexpr:
-            constexpr_args[k] = env.kwargs[k]
-    lib = pfl.parse_func_to_pfl_library(fn, backend="triton", external_anno=(external_annos, None), func_unwrapper=_may_triton_func,
-        var_preproc=_may_triton_func, anno_transform=_triton_anno_transform, module_code_getter=module_code_getter,
-        constexpr_args=constexpr_args)
+            constexpr_args[k] = env.raw_kwargs[k]
+    lib = pfl.parse_func_to_pfl_library(fn.fn,
+                                        backend="triton",
+                                        external_anno=(external_annos, None),
+                                        func_unwrapper=_may_triton_func,
+                                        var_preproc=_may_triton_func,
+                                        anno_transform=_triton_anno_transform,
+                                        module_code_getter=module_code_getter,
+                                        constexpr_args=constexpr_args)
     if do_meta_eval:
         evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib)
         evaluator.eval_total_tree(fn.fn, meta_args)
     return TritonKernelRunner(lib, env)
-    
+
+@dataclasses.dataclass
+class Duration:
+    val: float = 0.0
+
+@contextlib.contextmanager
+def measure_duration_torch(*,
+                            stream: Optional[Any] = None,
+                            enable: bool = True):
+    import torch 
+    if not enable:
+        yield Duration()
+    else:
+        if stream is None:
+            stream = torch.cuda.current_stream()
+        start_ev = torch.cuda.Event(enable_timing=True)
+        end_ev = torch.cuda.Event(enable_timing=True)
+        start_ev.record(stream)
+        dur = Duration()
+        yield dur
+        end_ev.record(stream)
+        start_ev.synchronize()
+        end_ev.synchronize()
+        duration = start_ev.elapsed_time(end_ev)
+        dur.val = duration

@@ -1288,55 +1288,13 @@ class _EventSlotBase(Generic[TEventData]):
             ))
         return self
 
-    def add_frontend_handler(self, func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
+    def add_frontend_handler(self, dm: "DataModel", func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
         """use Python Frontend Language (subset of python) to handle event in frontend directly.
-        """
-        tail_kws = None
-        if isinstance(func, partial):
-            assert not func.args, "args isn't supported in partial, use keywords instead."
-            tail_kws = func.keywords
-            func = func.func
-        fing_sig = inspect.signature(func)
-        for k, p in fing_sig.parameters.items():
-            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
-        tail_args = undefined
-        if tail_kws is not None:
-            bind_args = fing_sig.bind_partial(**tail_kws)
-            bind_args.apply_defaults()
-            cnt = 0
-            tail_args = []
-            for k, p in fing_sig.parameters.items():
-                if cnt >= 2:
-                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
-                    tail_args.append(bind_args.arguments[k])
-                else:
-                    assert k not in tail_kws, "you can't use partial on first and second argument."
-                cnt += 1
-        else:
-            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
-        func_ast = pfl.parse_func_to_pfl_ast(func, backend="js")
-        # clean code since we use code as key.
-        func_code_lines = [line.rstrip() for line in func_ast.compile_info.code.splitlines()]
-        func_code_lines = clean_source_code(func_code_lines)
-        code = "\n".join(func_code_lines)
-        code = remove_common_indent_from_code(code)
-        op = EventFrontendUpdateOp(
-            attr="",
-            targetPath=targetPath,
-            pflAstJson=json.dumps(pfl.pfl_ast_to_dict(func_ast)),
-            pflCode=code,
-            partialTailArgs=tail_args,
-        )
-        if not use_immer:
-            op.dontUseImmer = True
-        self.comp._append_event_handler_update_op(
-            self.event_type,
-            update_op=op)
-        return self
 
-    def add_frontend_handler_v2(self, dm: "DataModel", func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
-        """use Python Frontend Language (subset of python) to handle event in frontend directly.
+        the func must be a function defined in DataModel, and the first argument must be self, the second argument is event data.
+        we only use func as a key here (and tail arg calculation), the whole library is already compiled in DataModel.
         """
+        # TODO use string targetPath can cause unexpected bugs, consider use draft expr and type check.
         assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
         assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
         tail_kws = None

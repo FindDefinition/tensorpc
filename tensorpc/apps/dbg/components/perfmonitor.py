@@ -339,7 +339,7 @@ class PerfMonitor(mui.FlexBox):
         canvas.event_viewport_change.add_frontend_draft_change(draft, "viewport")
 
         canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD"])
-        canvas.event_keyboard_hold.add_frontend_handler_v2(dm, VisModel._keyhold_handler_pfl, use_immer=False)
+        canvas.event_keyboard_hold.add_frontend_handler(dm, VisModel._keyhold_handler_pfl, use_immer=False)
         boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales")
         # VisModel.bind_scale_xy(perf_group)
         # devmesh.bind_fields(scale="$.whole_scales")

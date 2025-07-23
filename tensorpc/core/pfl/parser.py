@@ -145,10 +145,10 @@ class PFLLibrary:
         return self._func_uid_to_compiled_units[key]
 
     def get_compiled_unit_inline_env(
-            self, key: Union[str, Callable]) -> PFLInlineRunEnv:
+            self, key: Union[str, Callable], kwargs: Optional[dict[str, Any]] = None) -> PFLInlineRunEnv:
         if not isinstance(key, str):
             key = get_module_id_of_type(key)
-        if key in self._inline_env_cache:
+        if kwargs is None and key in self._inline_env_cache:
             return self._inline_env_cache[key]
         pfl_fns = self._func_uid_to_compiled_units[key]
         assert len(
@@ -157,11 +157,15 @@ class PFLLibrary:
         pfl_fn = pfl_fns[0]
         fn_meta = pfl_fn.compile_info.meta
         assert fn_meta is not None and fn_meta.inline_run_env_fn is not None
-        inline_env = fn_meta.inline_run_env_fn()
+        if kwargs is not None:
+            inline_env = fn_meta.inline_run_env_fn(**kwargs)
+        else:
+            inline_env = fn_meta.inline_run_env_fn()
         assert isinstance(
             inline_env,
             PFLInlineRunEnv), "inline run env must be PFLInlineRunEnv"
-        self._inline_env_cache[key] = inline_env
+        if kwargs is None:
+            self._inline_env_cache[key] = inline_env
         return inline_env
 
     def get_module_by_func(self, key: Callable) -> PFLModule:
@@ -217,10 +221,11 @@ _SUPPORTED_PYTHON_BUILTINS = {
     "abs": abs,
     "str": str,
     "isinstance": isinstance,
+
 }
 
 
-class MapAstNodeToConstant(ast.NodeTransformer):
+class MapAstNodeToConstant(ast.NodeVisitor):
     """map every ast name/attribute to a stdlib item.
     we don't map function args (annotations) because they will be 
     parsed after anno evaluation.
@@ -243,6 +248,22 @@ class MapAstNodeToConstant(ast.NodeTransformer):
         self._node_to_compile_constant: dict[ast.AST, PFLCompileConstant] = {}
 
         self.error_ctx = error_ctx
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        # visit func node except decorators
+        self.visit(node.args)
+        for stmt in node.body:
+            self.visit(stmt)
+        if node.returns is not None:
+            self.visit(node.returns)
+        for tp in node.type_params:
+            self.visit(tp)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        # visit annassign without annotation
+        self.visit(node.target)
+        if node.value is not None:
+            self.visit(node.value)
 
     def _visit_Attribute_or_name(self, node: Union[ast.Attribute, ast.Name]):
         # TODO block nesetd function def support
@@ -797,6 +818,22 @@ class PFLParser:
                         value = self._parse_expr_to_df_ast(stmt.value, scope)
                     else:
                         value = None
+
+                    anno_st: Optional[PFLExprInfo] = None
+                    if isinstance(stmt, ast.AnnAssign):
+                        assert value is not None 
+                        anno_in_ast = evaluate_annotation_expr(stmt.annotation)
+                        assert anno_in_ast is not None, "annotation must be evaluated to a valid type"
+                        if self._anno_transform is not None:
+                            anno_st = self._anno_transform(
+                                value.st, anno_in_ast)
+                        else:
+                            anno_st = PFLExprInfo.from_annotype(
+                                parse_type_may_optional_undefined(anno_in_ast))
+                        # TODO better unknown type handling
+                        # a: list[int] = [], value type is list[unknown], so we always assign value.st to anno_st
+                        # TODO may need to check if value.st is compatible with anno_st
+                        value.st = dataclasses.replace(anno_st)
                     if isinstance(stmt, ast.Assign):
                         tgt = stmt.targets[0]
                     else:
@@ -854,14 +891,7 @@ class PFLParser:
                         block.append(node)
                     else:
                         assert value is not None
-                        anno_in_ast = evaluate_annotation_expr(stmt.annotation)
-                        assert anno_in_ast is not None, "annotation must be evaluated to a valid type"
-                        if self._anno_transform is not None:
-                            anno_st = self._anno_transform(
-                                value.st, anno_in_ast)
-                        else:
-                            anno_st = PFLExprInfo.from_annotype(
-                                parse_type_may_optional_undefined(anno_in_ast))
+                        assert anno_st is not None
                         target.st = anno_st
                         node = PFLAnnAssign(PFLASTType.ANN_ASSIGN,
                                             source_loc,
@@ -1305,7 +1335,7 @@ class PFLParser:
             PFLErrorFormatContext(func_code_lines),
             backend=backend,
             var_preproc=self._var_preproc)
-        tree = ast.fix_missing_locations(transformer.visit(tree))
+        transformer.visit(tree)
         # find funcdef
         for node in tree.body:
             if isinstance(node,
@@ -1524,7 +1554,7 @@ class PFLParser:
                 PFLErrorFormatContext(expr_str_lines),
                 backend=backend,
                 var_preproc=self._var_preproc)
-            tree = ast.fix_missing_locations(transformer.visit(tree))
+            transformer.visit(tree)
             node_to_constants = transformer._node_to_compile_constant
             # tree = ast.fix_missing_locations(
             #     MapAstNodeToConstant(var_scope, PFLErrorFormatContext(expr_str_lines), backend=backend).visit(tree))

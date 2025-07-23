@@ -8,40 +8,59 @@ import triton
 from tensorpc.core import pfl
 from tensorpc.apps.mls.backends import tritonstd
 import triton.language as tl
+import torch 
 
 # np.seterr(all='raise')
+def _attn_fwd_grid(META, q_shape):
+    return (triton.cdiv(q_shape[2], META["BLOCK_M"]), q_shape[0] * q_shape[1], 1)
 
-def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
-    import torch 
+def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype = torch.float32, is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
     # TODO triton code don't support BLOCK_M < BLOCK_N
-    BATCH, H, N_CTX, HEAD_DIM = 1, 1, 256, 64
+    BATCH = 1
     BLOCK_M = 32
     BLOCK_N = 32
-    is_causal = True 
+    is_causal = False 
     stage = 3 if is_causal else 1
     sm_scale = 0.5
     torch.manual_seed(20)
-    
-    # q = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
-    # k = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
-    # v = torch.empty((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float16, device="cuda").normal_(mean=0.0, std=0.5).float().cpu().requires_grad_()
-    # dref = torch.randn_like(q, dtype=torch.float16, device="cuda").float().cpu()
-
-    q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
-    k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
-    v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=torch.float32).normal_(mean=0.0, std=0.5).requires_grad_()
-    dref = torch.randn_like(q)
-
     M = torch.empty((BATCH, H, N_CTX), dtype=torch.float32)
     M_np = M.detach().numpy()
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        q, k, v, dropout_p=0.0, is_causal=is_causal, scale=sm_scale
-    )
+
+    if N_CTX > 1000:
+        # random on cpu is very slow.
+        q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_()
+        k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_()
+        v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_()
+        dref = torch.randn_like(q)
+
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, dropout_p=0.0, is_causal=is_causal, scale=sm_scale
+        )
+        dref = dref.cpu()
+        ref = ref.cpu() 
+    else:
+        q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype).normal_(mean=0.0, std=0.5).requires_grad_()
+        k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype).normal_(mean=0.0, std=0.5).requires_grad_()
+        v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype).normal_(mean=0.0, std=0.5).requires_grad_()
+        dref = torch.randn_like(q)
+
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, dropout_p=0.0, is_causal=is_causal, scale=sm_scale
+        )
     ref.backward(dref)
     dref_np = dref.detach().numpy()
-    dq_np = q.grad.numpy()
-    dk_np = k.grad.numpy()
-    dv_np = v.grad.numpy()
+    if q.is_cuda:
+        dq_np = q.grad.cpu().numpy()
+        dk_np = k.grad.cpu().numpy()
+        dv_np = v.grad.cpu().numpy()
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+
+    else:
+        dq_np = q.grad.numpy()
+        dk_np = k.grad.numpy()
+        dv_np = v.grad.numpy()
     q_np = q.detach().numpy()
     k_np = k.detach().numpy()
     v_np = v.detach().numpy()
@@ -74,34 +93,35 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         "stride_oh": ref.stride(1),
         "stride_om": ref.stride(2),
         "stride_on": ref.stride(3),
-
         "STAGE": stage,
         "N_CTX": N_CTX,
         "HEAD_DIM": HEAD_DIM,
         "BLOCK_M": BLOCK_M,
         "BLOCK_N": BLOCK_N,
-        "warp_specialize": False,
     }
     if is_fwd:
         ref_kwargs = {
-            "Out": ref_np.reshape(y_dim, -1)
+            "Out": ref_np # .reshape(y_dim, -1)
         }
         vis_layout=[
             [None, "Q.T", None],
             ["K", "Out.T", "V"]
         ]
-        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=tritonstd.TritonSimInfo(fwd_grid, ref_kwargs, vis_layout=vis_layout))
+        sim_info = tritonstd.TritonSimInfo(fwd_grid, ref_kwargs, vis_layout=vis_layout, grid_size_for_triton=partial(_attn_fwd_grid, q_shape=q.shape))
+        return pfl.PFLInlineRunEnv(fwd_kwargs, userdata=sim_info)
     else:
         delta = torch.empty_like(M)
         delta = (ref * dref).sum(dim=-1)
 
         delta_np = delta.detach().numpy()
         # we have to run fwd kernel here to get correct M.
-        runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd, module_code_getter=lambda x: Path(__file__).read_text())
-        global_mem_fwd = tritonstd.create_global_mem_from_kwargs(fwd_kwargs)
-        runner.run_kernel_in_executor(
-            _attn_fwd.fn, grid_size=fwd_grid, global_mem=global_mem_fwd, **fwd_kwargs)
-        M_np = global_mem_fwd.memory_blocks["M"].get_data_view_checked().copy()
+        # when we run real triton kernel, we shouldn't run slow fwd kernel in simulation.
+        if N_CTX <= 1000:
+            runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd, module_code_getter=lambda x: Path(__file__).read_text())
+            global_mem_fwd = tritonstd.create_global_mem_from_kwargs(fwd_kwargs)
+            runner.run_kernel_in_executor(
+                _attn_fwd.fn, grid_size=fwd_grid, global_mem=global_mem_fwd, **fwd_kwargs)
+            M_np = global_mem_fwd.memory_blocks["M"].get_data_view_checked().copy()
         BLK_SLICE_FACTOR = 2
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
@@ -111,6 +131,7 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * H)
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
         grid = (N_CTX // BLOCK_N1, 1, BATCH * H)
+
         test_kwargs: dict[str, Any] = {
             "sm_scale": sm_scale,
             "Q": q_np,
@@ -127,7 +148,6 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
             "stride_tok": q.stride(2),
             "stride_d": q.stride(3),
             "H": H,
-
             "N_CTX": N_CTX,
             "HEAD_DIM": HEAD_DIM,
             "BLOCK_M1": BLOCK_M1,
@@ -135,13 +155,18 @@ def _attn_fwd_kernel_test_fn(is_fwd: bool = True) -> pfl.PFLInlineRunEnv:
             "BLOCK_M2": BLOCK_M2,
             "BLOCK_N2": BLOCK_N2,
             "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
+            "num_warps": 4,
+            "num_stages": 1,
+            "IS_CAUSAL": is_causal,
+            # "maxnreg": 128,
         }
         ref_kwargs = {
             "DV": dv_np,
             "DK": dk_np,
             "DQ": dq_np,
         }
-        return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo(grid, ref_kwargs))
+        return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo(grid, ref_kwargs, 
+            grid_size_for_triton=lambda META: (N_CTX // BLOCK_N1, 1, BATCH * H)))
 
 @triton.jit
 @tritonstd.mark_triton_compilable(is_template=True)
@@ -170,7 +195,8 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
         qk = tl.dot(q, k)
         if STAGE == 2:
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk = qk * qk_scale + tl.where(mask, 0.0, -1.0e6)
+            qk = qk * qk_scale + tl.where(mask, 0.0, -float("inf"))
+            # stable softmax: calc max of each row
             m_ij = tl.maximum(m_i, tl.max(qk, 1))
             qk -= m_ij[:, None]
         else:
@@ -188,7 +214,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
         if fp8_v:
             p = p.to(tl.float8e5)
         else:
-            p = p.to(tl.float16)
+            p = p.to(q.dtype)
         acc = tl.dot(p, v, acc)
         # update m_i and l_i
         m_i = m_ij
@@ -197,8 +223,53 @@ def _attn_fwd_inner(acc, l_i, m_i, q,  #
     return acc, l_i, m_i
 
 
+configs = [
+    triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w) \
+    for BM in [64, 128]\
+    for BN in [32, 64]\
+    for s in ([3, 4, 5, 6, 7])\
+    for w in [4, 8]\
+]
+
+def keep(conf):
+    BLOCK_M = conf.kwargs["BLOCK_M"]
+    BLOCK_N = conf.kwargs["BLOCK_N"]
+    if BLOCK_M * BLOCK_N < 128 * 128 and conf.num_warps == 8:
+        return False
+    return True
+
+def _torch_bench_fn_fwd(kwargs):
+    q = kwargs["Q"]
+    k = kwargs["K"]
+    v = kwargs["V"]
+    with tritonstd.measure_duration_torch() as dur:
+        res = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, dropout_p=0.0, is_causal=kwargs["STAGE"] == 3, scale=kwargs["sm_scale"]
+        )
+    return dur.val
+
+def _torch_bench_fn_bwd(kwargs):
+    q = kwargs["Q"].detach().clone()
+    k = kwargs["K"].detach().clone()
+    v = kwargs["V"].detach().clone()
+    q.requires_grad_()
+    k.requires_grad_()
+    v.requires_grad_()
+    res = torch.nn.functional.scaled_dot_product_attention(
+        q, k, v, dropout_p=0.0, is_causal=kwargs["IS_CAUSAL"], scale=kwargs["sm_scale"]
+    )
+    dres = torch.empty_like(res)
+    with tritonstd.measure_duration_torch() as dur:
+        res.backward(dres)
+    return dur.val
+
+
+@triton.autotune(list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM"])
 @triton.jit
-@tritonstd.mark_triton_compilable(inline_run_env_fn=_attn_fwd_kernel_test_fn)
+@tritonstd.mark_triton_compilable(inline_run_env_fn=_attn_fwd_kernel_test_fn, 
+    real_kwargs={"N_CTX": 30720, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
+    raw_fn=_torch_bench_fn_fwd,
+)
 def _attn_fwd(Q, K, V, sm_scale, M, Out,  #
               stride_qz, stride_qh, stride_qm, stride_qk,  #
               stride_kz, stride_kh, stride_kn, stride_kk,  #
@@ -210,8 +281,9 @@ def _attn_fwd(Q, K, V, sm_scale, M, Out,  #
               BLOCK_N: tl.constexpr,  #
               STAGE: tl.constexpr  #
               ):
-    dtype = tl.float16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
+    tl.static_assert(BLOCK_M >= BLOCK_N)
+
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -264,6 +336,7 @@ def _attn_fwd(Q, K, V, sm_scale, M, Out,  #
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
     q = tl.load(Q_block_ptr)
+    dtype = q.dtype
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -393,7 +466,10 @@ def _attn_bwd_dq(dq, q, K, V,  #
 
 
 @triton.jit
-@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_fwd=False))
+@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_fwd=False),
+    real_kwargs={"N_CTX": 30720, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
+    raw_fn=_torch_bench_fn_bwd,
+)
 def _attn_bwd(Q, K, V, sm_scale,  #
               DO,  #
               DQ, DK, DV,  #
@@ -406,7 +482,8 @@ def _attn_bwd(Q, K, V, sm_scale,  #
               BLOCK_M2: tl.constexpr,  #
               BLOCK_N2: tl.constexpr,  #
               BLK_SLICE_FACTOR: tl.constexpr,  #
-              HEAD_DIM: tl.constexpr):
+              HEAD_DIM: tl.constexpr,
+              IS_CAUSAL: tl.constexpr):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
     bhid = tl.program_id(2)
@@ -419,6 +496,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     K += adj
     V += adj
     DO += adj
+    
     DQ += adj
     DK += adj
     DV += adj
@@ -440,23 +518,24 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     # load K and V: they stay in SRAM throughout the inner loop.
     k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
     v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    if (IS_CAUSAL):
+        num_steps = BLOCK_N1 // MASK_BLOCK_M1
+        dk, dv = _attn_bwd_dkdv(dk, dv,  #
+                                Q, k, v, sm_scale,  #
+                                DO,  #
+                                M, D,  #
+                                stride_tok, stride_d,  #
+                                H, N_CTX,  #
+                                MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
+                                start_n, start_m, BLOCK_N1 // MASK_BLOCK_M1,  #
+                                MASK=True  #
+                                )
 
-    num_steps = BLOCK_N1 // MASK_BLOCK_M1
-
-    dk, dv = _attn_bwd_dkdv(dk, dv,  #
-                            Q, k, v, sm_scale,  #
-                            DO,  #
-                            M, D,  #
-                            stride_tok, stride_d,  #
-                            H, N_CTX,  #
-                            MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-                            start_n, start_m, num_steps,  #
-                            MASK=True  #
-                            )
-
-    start_m += num_steps * MASK_BLOCK_M1
-    num_steps = (N_CTX - start_m) // BLOCK_M1
-
+        start_m += num_steps * MASK_BLOCK_M1
+        num_steps = (N_CTX - start_m) // BLOCK_M1
+    else:
+        start_m = 0
+        num_steps = N_CTX // BLOCK_M1
     # Compute dK and dV for non-masked blocks.
     dk, dv = _attn_bwd_dkdv(  #
         dk, dv,  #
@@ -526,14 +605,16 @@ def _attn_bwd(Q, K, V, sm_scale,  #
 
 def test_attn_fwd():
     runner = tritonstd.parse_triton_compilable_to_runner(_attn_fwd)
-    asyncio.run(runner.validate_kernel_by_test_data(_attn_fwd.fn))
+    asyncio.run(runner.bench_kernel_in_triton_process(_attn_fwd,))
 
 def test_attn_bwd():
     runner = tritonstd.parse_triton_compilable_to_runner(_attn_bwd)
-    asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd.fn))
+    asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd))
+    asyncio.run(runner.bench_kernel_in_triton_process(_attn_bwd,))
+
 
 def _main():
-    test_attn_fwd()
+    # test_attn_fwd()
     test_attn_bwd()
 
 if __name__ == "__main__":

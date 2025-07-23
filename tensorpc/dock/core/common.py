@@ -143,10 +143,16 @@ async def handle_standard_event(comp: Component,
     # print("WTF", event.type, event.data, comp._flow_comp_status)
     if comp._flow_comp_status == UIRunStatus.Running.value:
         flowuid = comp._flow_uid
+        event_type_str = str(event.type)
+        try:
+            event_type_str = FrontendEventType(event.type).name 
+        except:
+            pass
+        
         if flowuid is not None:
-            LOGGER.warning("Component (%s) %s is running, ignore user event %s", type(comp).__name__, flowuid, event.type)
+            LOGGER.warning("Component (%s) %s is running, ignore user event %s", type(comp).__name__, flowuid, event_type_str)
         else:
-            LOGGER.warning("Component (%s) is running, ignore user event %s", type(comp).__name__, event.type)
+            LOGGER.warning("Component (%s) is running, ignore user event %s", type(comp).__name__, event_type_str)
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
         return

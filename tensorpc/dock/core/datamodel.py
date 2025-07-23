@@ -148,6 +148,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_draft_update: EventSlotEmitter[
             list[DraftUpdateOp]] = self._create_emitter_event_slot(
                 self._backend_draft_update_event_key)
+        # arg is prev model.
         self.event_storage_fetched: EventSlotEmitter[_T] = self._create_emitter_event_slot(
             self._backend_storage_fetched_event_key)
 

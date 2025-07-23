@@ -266,6 +266,7 @@ class TensorSimIoOp:
     ast_node: pfl.PFLCall
     shape: list[int]
     matrix_info: Optional[TensorSimIoMatrixInfo] = None
+    atomic_op: Optional[str] = None
 
 class TensorSimContext:
     def __init__(self, grid_id: Sequence[int], grid_size: Sequence[int], 

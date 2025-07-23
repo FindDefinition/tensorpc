@@ -20,6 +20,9 @@ class MatrixBase:
     height: float
     widthVis: float 
     heightVis: float
+    # for autolayout 
+    widthLayout: float 
+    heightLayout: float
 
     # tensor is always converted to a matrix, this store the shape of the tensor.
     shape: list[int]
@@ -101,6 +104,8 @@ class Matrix(MatrixBase):
             height=height,
             widthVis=height if transposed else width,
             heightVis=width if transposed else height,
+            widthLayout=0,
+            heightLayout=0,
             shape=raw_shape,
             offsetX=0.0,
             offsetY=0.0,
@@ -109,6 +114,8 @@ class Matrix(MatrixBase):
 
         desc_length = res.get_desc_length()
         layout_w, layout_h = res.get_vis_wh(padding=2)
+        res.widthLayout = layout_w
+        res.heightLayout = layout_h
         res.fontSize = min(max(1 + padding, layout_w / desc_length), layout_h)
         return res 
 
@@ -181,7 +188,7 @@ class Matrix(MatrixBase):
 class GlobalMemoryModel:
     matrices: dict[str, Matrix]
     minimap: plus.hud.MinimapModel
-
+    autolayout_width: float = -1
     @staticmethod 
     def empty():
         return GlobalMemoryModel(
@@ -189,6 +196,30 @@ class GlobalMemoryModel:
             minimap=plus.hud.MinimapModel(1, 1)
         )
 
+    @pfl.mark_pfl_compilable
+    def _do_autolayout(self, width: float):
+        if self.autolayout_width > 0:
+            whs: list[tuple[float, float]] = []
+            for m in self.matrices.values():
+                whs.append((m.widthLayout, m.heightLayout))
+            layout_res = pfl.js.MathUtil.binpack(whs, pfl.js.Math.min(self.autolayout_width, width))
+            cnt = 0
+            for m in self.matrices.values():
+                new_x, new_y = layout_res.result[cnt]
+                m.offsetX = new_x + m.widthLayout / 2 - layout_res.width / 2
+                m.offsetY = new_y + m.heightLayout / 2 - layout_res.height / 2
+                cnt += 1
+            self.minimap.width = layout_res.width
+            self.minimap.height = layout_res.height
+            self.minimap._do_layout()
+
+    @pfl.mark_pfl_compilable
+    def _handle_layout_event(self, ev: three.HudLayoutChangeEvent):
+        self._do_autolayout(ev.innerSizeX)
+
+    @pfl.mark_pfl_compilable
+    def _do_layout_event_on_model_change(self):
+        self._do_autolayout(self.minimap.layout.innerSizeX)
 
 class GlobalMemLayers(enum.IntEnum):
     BKGD = -8
@@ -227,7 +258,7 @@ class GlobalMatrixPanel(three.Group):
             dm = mui.DataModel.get_datamodel_from_draft(draft)
             self._hover_line_cond.bind_fields(condition=f"{draft.linePosX} != `null`")
             self._event_plane.event_leave.add_frontend_draft_set_none(draft, "linePosX")
-            self._event_plane.event_move.add_frontend_handler_v2(dm, Matrix._on_hover_pfl, targetPath=str(draft))
+            self._event_plane.event_move.add_frontend_handler(dm, Matrix._on_hover_pfl, targetPath=str(draft))
 
         self._border = three.LineShape(three.Shape.from_aabb(0, 0, 1, 1))
         self._border.prop(color="black", lineWidth=1)
@@ -403,6 +434,13 @@ class GlobalMemContainer(mui.FlexBox):
                 draft = dm.get_draft()
             minimap = plus.hud.MiniMap(draft.minimap, [])
         self.minimap = minimap
+        dm.install_model_update_callback("_gmem_do_auto_layout", GlobalMemoryModel._do_layout_event_on_model_change,   
+            submodel_draft=draft)
+        minimap.viewport_group.event_hud_layout_change.add_frontend_handler(
+            dm, 
+            GlobalMemoryModel._handle_layout_event,
+            use_immer=True,
+            targetPath=str(draft))
         self._draft = draft
         cam = three.OrthographicCamera(near=0.1, far=1000, children=[
             minimap,
@@ -502,13 +540,22 @@ class GlobalMemContainer(mui.FlexBox):
     async def set_matrix_dict(self, matrices: dict[str, np.ndarray], layout: Optional[list[list[Optional[str]]]] = None):
         matrixe_panels: dict[str, GlobalMatrixPanel] = {}
         gmatrices, max_width, max_height = self._get_global_matrix(matrices, layout)
+        await self.minimap.set_new_childs([])
+
         async with self._dm.draft_update():
+            self._draft.matrices = {}
+
+        async with self._dm.draft_update():
+            self._draft.matrices = {}
             for k, v in gmatrices.items():
                 self._draft.matrices[k] = v
                 matrixe_panels[k] = GlobalMatrixPanel(self._draft.matrices[k])
             self._draft.minimap.width = max_width
             self._draft.minimap.height = max_height
-
+            if layout is None:
+                self._draft.autolayout_width = 512
+            else:
+                self._draft.autolayout_width = -1
         await self.minimap.set_new_childs(matrixe_panels)
 
 

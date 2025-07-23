@@ -214,6 +214,7 @@ class MiniMap(three.Group):
 
         ])
         viewport_group.prop(top=0, left=0, padding=1, width="100%", height="100%", alignContent=False, alwaysPortal=False)
+        self.viewport_group = viewport_group
         line_minimap = three.Group([
             three.Line([(-0.0, 0.0, 0.0), ]).prop(color="blue", lineWidth=2, variant="aabb", aabbSizes=(1, 1, 1))
         ])
@@ -238,12 +239,12 @@ class MiniMap(three.Group):
         dm.install_model_update_callback("_minimap_do_layout", MinimapModel._do_layout,   
             submodel_draft=draft)
         # viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
-        viewport_group.event_hud_layout_change.add_frontend_handler_v2(
+        viewport_group.event_hud_layout_change.add_frontend_handler(
             dm, 
             MinimapModel._handle_layout_event, targetPath=str(draft))
         # image.event_move.add_frontend_draft_change(draft, "hover")
         # image.event_leave.add_frontend_draft_set_none(draft, "hover")
-        base_event_plane.event_wheel.add_frontend_handler_v2(dm, MinimapModel._wheel_handler_pfl_v2, targetPath=str(draft))
+        base_event_plane.event_wheel.add_frontend_handler(dm, MinimapModel._wheel_handler_pfl_v2, targetPath=str(draft))
         viewport_group.bind_fields(
             childWidth=draft.viewport_child_width, 
             childHeight=draft.viewport_child_height, 
@@ -261,7 +262,7 @@ class MiniMap(three.Group):
             "scale-y": draft.layout.scrollFactorY,
         })
 
-        minimap_event_plane.event_move.add_frontend_handler_v2(dm, MinimapModel._minimap_downmove_pfl, targetPath=str(draft))
+        minimap_event_plane.event_move.add_frontend_handler(dm, MinimapModel._minimap_downmove_pfl, targetPath=str(draft))
         
         
         minimap_event_plane.event_leave.add_frontend_draft_change(draft, "isMinimapDown", "`false`")
@@ -270,7 +271,7 @@ class MiniMap(three.Group):
         minimap_event_plane.event_down.configure(set_pointer_capture=True)
         minimap_event_plane.event_up.configure(release_pointer_capture=True)
 
-        minimap_event_plane.event_click.add_frontend_handler_v2(dm, MinimapModel._minimap_cllick_pfl, targetPath=str(draft))
+        minimap_event_plane.event_click.add_frontend_handler(dm, MinimapModel._minimap_cllick_pfl, targetPath=str(draft))
 
         super().__init__([
             viewport_group,  
@@ -282,7 +283,7 @@ class MiniMap(three.Group):
     def install_canvas_events(self, draft: Any, canvas: Union[three.Canvas, three.View]):
         dm = mui.DataModel.get_datamodel_from_draft(draft)
         canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD", "KeyZ", "KeyX", "Space"])
-        canvas.event_keyboard_hold.add_frontend_handler_v2(dm, MinimapModel._keyhold_handler_pfl, targetPath=str(draft))
+        canvas.event_keyboard_hold.add_frontend_handler(dm, MinimapModel._keyhold_handler_pfl, targetPath=str(draft))
 
     async def set_new_childs(self, childs: three.ThreeLayoutType):
         await self._child_group.set_new_layout(childs) # type: ignore

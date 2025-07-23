@@ -1138,10 +1138,10 @@ class PFLCompileFuncMeta:
     # indicate a function or class (TODO) can be compiled.
     backends: Optional[list[str]] = None
     # used by debugger/simulator.
-    inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None
+    inline_run_env_fn: Optional[Callable[..., PFLInlineRunEnv]] = None
     is_template: bool = False
     always_inline: bool = False
-
+    userdata: Optional[Any] = None
     def need_delayed_processing(self):
         return self.is_template or self.always_inline
 

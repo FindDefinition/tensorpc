@@ -9,7 +9,6 @@ from typing import Optional
 def find_submodule_from_file(file_path: str) -> Optional[str]:
     """Find submodule from a file."""
     file_path_p = Path(file_path)
-    print(file_path_p)
     if not file_path_p.is_file():
         raise ValueError(f"File {file_path} does not exist.")
     if file_path_p.stem == "__init__":

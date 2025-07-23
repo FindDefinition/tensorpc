@@ -3,7 +3,7 @@ import math
 import random
 import struct
 import time
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union, overload
 from ..core import mark_meta_infer, register_backend, PFLParseConfig
 from ..pfl_reg import register_pfl_std
 import numpy as np 
@@ -232,6 +232,14 @@ class TypedArray:
     @property 
     def length(self) -> int: ...
 
+@register_pfl_std(mapped_name="BinpackResult", backend="js")
+@dataclasses.dataclass
+class BinpackResult:
+    result: list[tuple[float, float]]
+    width: float
+    height: float 
+    fill: float
+
 @register_pfl_std(mapped_name="PerformanceUtil", backend="js", mapped=time)
 @dataclasses.dataclass
 class PerformanceUtil:
@@ -247,6 +255,18 @@ class MathUtil:
 
     @staticmethod
     def getTypedArray(x: np.ndarray) -> TypedArray: ...
+
+    @staticmethod
+    @overload
+    def binpack(boxes: list[tuple[float, float]]) -> BinpackResult: ...
+
+    @staticmethod
+    @overload
+    def binpack(boxes: list[tuple[float, float]], containerWidth: float) -> BinpackResult: ...
+
+    @staticmethod
+    def binpack(boxes: list[tuple[float, float]], containerWidth: Optional[float] = None) -> BinpackResult:
+        raise NotImplementedError
 
 @register_pfl_std(mapped_name="ColorUtil", backend="js")
 @dataclasses.dataclass

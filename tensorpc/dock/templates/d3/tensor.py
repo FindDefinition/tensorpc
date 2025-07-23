@@ -68,7 +68,7 @@ class TensorPanel(mui.FlexBox):
             # three.InfiniteGridHelper(5, 50, "gray"),
             # image,
         ]).prop(enablePerf=False, allowKeyboardEvent=True)
-        image.event_move.add_frontend_handler_v2(dm, Model._img_move_pfl)
+        image.event_move.add_frontend_handler(dm, Model._img_move_pfl)
         image.event_leave.add_frontend_draft_set_none(draft, "linePosX")
         image.event_leave.add_frontend_draft_set_none(draft, "linePosY")
 

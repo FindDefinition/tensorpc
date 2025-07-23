@@ -860,8 +860,11 @@ class PFLBinOp(PFLBinOpBase):
         is_custom_type, custom_res_type, op_func = self.resolve_custom_type(
             self.op, is_compare=False)
         if not is_custom_type:
-            promotion_type = self.left.st.check_support_binary_op_and_promotion(self.right.st)
-            self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
+            if self.op == BinOpType.DIV:
+                self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(float))
+            else:
+                promotion_type = self.left.st.check_support_binary_op_and_promotion(self.right.st)
+                self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
         else:
             assert custom_res_type is not None
             self.st = custom_res_type
@@ -1400,9 +1403,9 @@ class PFLAttribute(PFLExpr):
         else:
             if self.value.st.type == PFLExprType.OBJECT or self.value.st.type == PFLExprType.ARRAY:
                 annotype = self.value.st.childs[0].annotype
-                assert annotype is not None
+                assert annotype is not None and annotype.raw_type is not None 
                 methods = _dftype_with_gen_to_supported_methods(
-                    annotype.origin_type)[self.value.st.type]
+                    annotype.raw_type)[self.value.st.type]
             elif self.value.st.type == PFLExprType.STRING:
                 methods = _PFLTYPE_TO_SUPPORTED_METHODS[self.value.st.type]
             else:

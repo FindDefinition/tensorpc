@@ -1,8 +1,9 @@
 from collections.abc import Sequence
-from typing import Any, Optional, Type, Union, cast, overload
+from functools import partial
+from typing import Any, Callable, Optional, Type, Union, cast, overload
 import dataclasses
 import numpy as np
-from typing_extensions import Self
+from typing_extensions import Literal, Self
 
 from tensorpc.core import pfl
 from tensorpc.core.pfl.evaluator import get_pfl_runner_state
@@ -64,7 +65,9 @@ class MemoryBlockDesc:
         """
         indices = self.indices[k]
         element_shape = indices.shape[1:]
-        return indices.reshape(*self.get_data_view_checked().shape, *element_shape), element_shape
+        return indices.reshape(*self.get_data_view_checked().shape,
+                               *element_shape), element_shape
+
 
 def assign_random_memory_block_offset(
     descs: dict[str, MemoryBlockDesc],
@@ -87,6 +90,7 @@ def assign_random_memory_block_offset(
         start_with_hole = _align_up(start_with_hole, 128)
     return start
 
+
 @dataclasses.dataclass
 class _SimPointerMapResult:
     mapped: np.ndarray
@@ -95,11 +99,13 @@ class _SimPointerMapResult:
     all_masked: bool
     origin_pointer_with_mask: np.ndarray
 
+
 @dataclasses.dataclass(kw_only=True)
 class SimMemoryStorage(SimTensorStorage):
     memory_blocks: dict[str, MemoryBlockDesc]
 
-    def _map_pointer_data(self, pointer_data: np.ndarray, pointer_item_size: int):
+    def _map_pointer_data(self, pointer_data: np.ndarray,
+                          pointer_item_size: int):
         if pointer_data.size == 0:
             raise NotImplementedError
         pointer_data_max = pointer_data.max() * pointer_item_size
@@ -107,19 +113,16 @@ class SimMemoryStorage(SimTensorStorage):
         is_partial: bool = False
         # no need to use binary search because amount of memory blocks is small.
         for k, desc in self.memory_blocks.items():
-            min_in_range = (
-                pointer_data_min >= desc.byte_offset_with_hole
-                and pointer_data_min < desc.byte_offset_with_hole + desc.get_byte_size()
-            )
-            max_in_range = (
-                pointer_data_max >= desc.byte_offset_with_hole
-                and pointer_data_max < desc.byte_offset_with_hole + desc.get_byte_size()
-            )
+            min_in_range = (pointer_data_min >= desc.byte_offset_with_hole
+                            and pointer_data_min < desc.byte_offset_with_hole +
+                            desc.get_byte_size())
+            max_in_range = (pointer_data_max >= desc.byte_offset_with_hole
+                            and pointer_data_max < desc.byte_offset_with_hole +
+                            desc.get_byte_size())
             if min_in_range or max_in_range:
                 is_partial = not (max_in_range and min_in_range)
                 pointer_data_offset = (
-                    desc.byte_offset_with_hole
-                ) // desc.dtype.byte_size()
+                    desc.byte_offset_with_hole) // desc.dtype.byte_size()
                 return pointer_data_offset, k, is_partial
         block_ranges = [
             f"{k}: {v.byte_offset_with_hole} ~ {v.byte_offset_with_hole + v.get_byte_size()}"
@@ -143,7 +146,7 @@ class SimMemoryStorage(SimTensorStorage):
             origin_with_mask[~mask.storage.data] = -1
         else:
             pointer_data = pointer.storage.data
-        
+
         if pointer_data.size == 0:
             return _SimPointerMapResult(
                 mapped=np.array([], dtype=np.int64),
@@ -154,8 +157,8 @@ class SimMemoryStorage(SimTensorStorage):
             )
             # return pointer_data, "", True, True
         offset, k, is_partial = self._map_pointer_data(
-            pointer_data, DTypeEnum(pointer.dtype).byte_size()
-        )
+            pointer_data,
+            DTypeEnum(pointer.dtype).byte_size())
         if mask is not None and mask.storage is not None:
             origin_with_mask[mask.storage.data] = pointer_data - offset
         return _SimPointerMapResult(
@@ -205,9 +208,7 @@ class SimMemoryStorage(SimTensorStorage):
                 mask_ten.get_storage_checked().data[:] = mask
                 mask = mask_ten
             mask = broadcast_to(mask, pointer.shape)
-        map_result = self._boundry_check_and_map_pointers(
-            pointer, mask
-        )
+        map_result = self._boundry_check_and_map_pointers(pointer, mask)
         mapped_pointer_data = map_result.mapped
         block_name = map_result.block_name
         all_masked = map_result.all_masked
@@ -223,51 +224,55 @@ class SimMemoryStorage(SimTensorStorage):
         output = empty([*pointer.shape, pointer.num_element], pointer.dtype)
         output_data = output.get_storage_checked().data
         data_raw = block_data.view(pointer.dtype_to_np(pointer.dtype)).reshape(
-            -1, pointer.num_element
-        )
+            -1, pointer.num_element)
         pointer_data = mapped_pointer_data.reshape(-1)
         loaded_indices = mapped_pointer_data[
-            ..., None
-        ] * pointer.num_element + np.arange(pointer.num_element, dtype=np.int32)
+            ..., None] * pointer.num_element + np.arange(pointer.num_element,
+                                                         dtype=np.int32)
         # js don't support int64, so we use int32
         loaded_indices = loaded_indices.astype(np.int32)
         runner_ctx = get_pfl_runner_state()
         tensor_sim_ctx = get_tensorsim_context()
         if tensor_sim_ctx is not None and runner_ctx is not None:
-            assert isinstance(runner_ctx.cur_expr, pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
-            indices_for_record = loaded_indices.reshape(-1, pointer.num_element).copy()
+            assert isinstance(
+                runner_ctx.cur_expr,
+                pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
+            indices_for_record = loaded_indices.reshape(
+                -1, pointer.num_element).copy()
             if mask is not None:
-                indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
-            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(True, block_name,
-                indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape,
-                matrix_info=matrix_info))
+                indices_for_record[~mask.get_storage_checked().data.
+                                   reshape(-1)] = -1
+            tensor_sim_ctx._recorded_io_ops.append(
+                TensorSimIoOp(True,
+                              block_name,
+                              indices_for_record.reshape(-1),
+                              runner_ctx.cur_expr,
+                              pointer.shape,
+                              matrix_info=matrix_info))
         if mask is None:
             output_data[:] = data_raw[pointer_data].reshape(
-                *pointer.shape, pointer.num_element
-            )
+                *pointer.shape, pointer.num_element)
         else:
             mask_view = mask.get_storage_checked().data.reshape(-1)
             output_data.reshape(-1, pointer.num_element)[mask_view] = data_raw[
-                pointer_data[mask_view]
-            ]
+                pointer_data[mask_view]]
             if other is not None:
                 if isinstance(other, SimTensor):
-                    output_data.reshape(-1, pointer.num_element)[
-                        ~mask_view
-                    ] = other.get_storage_checked().data.reshape(
+                    output_data.reshape(
                         -1, pointer.num_element
-                    )[
-                        ~mask_view
-                    ]
+                    )[~mask_view] = other.get_storage_checked().data.reshape(
+                        -1, pointer.num_element)[~mask_view]
                 else:
-                    output_data.reshape(-1, pointer.num_element)[~mask_view] = other
+                    output_data.reshape(
+                        -1, pointer.num_element)[~mask_view] = other
             loaded_indices.reshape(-1, pointer.num_element)[~mask_view] = -1
         loaded_indices = loaded_indices.reshape(-1, pointer.num_element)
         # print(block_desc, block_data, pointer_data, output_data)
         if pointer.num_element == 1:
             loaded_indices = loaded_indices[..., 0]
             output = output[..., 0]
-        res_indices: dict[str, np.ndarray] = output.get_storage_checked().indices
+        res_indices: dict[str,
+                          np.ndarray] = output.get_storage_checked().indices
         block_indices = block_desc.indices
         for k in block_indices.keys():
             _, element_shape = block_desc.get_unflatten_inds(k)
@@ -287,9 +292,8 @@ class SimMemoryStorage(SimTensorStorage):
             if pointer.num_element == 1:
                 inds = inds.reshape(*pointer.shape, *element_shape)
             else:
-                inds = inds.reshape(
-                    *pointer.shape, pointer.num_element, *element_shape
-                )
+                inds = inds.reshape(*pointer.shape, pointer.num_element,
+                                    *element_shape)
             res_indices[k] = inds.reshape(-1, *element_shape)
         res_indices[block_name] = loaded_indices
         return output
@@ -300,37 +304,49 @@ class SimMemoryStorage(SimTensorStorage):
         value: Union[SimTensor, int, float],
         mask: Optional[Union[SimTensor, bool]] = None,
         matrix_info: Optional[TensorSimIoMatrixInfo] = None,
-    ):
-        assert (
-            pointer.num_element == 1
-        ), "Pointer must be a single element pointer for now"
+        atomic_op: Optional[Literal["add", "and", "cas", "max", "min", "or",
+                                    "xor", "xchg"]] = None,
+        atomic_cas_cmp: Optional[Union[SimTensor, int, float]] = None,
+    ) -> Optional[SimTensor]:
+        assert (pointer.num_element == 1
+                ), "Pointer must be a single element pointer for now"
         if pointer.storage is None:
+            if mask is None:
+                old = SimTensor(pointer.shape, pointer.dtype)
+                return old
             return
 
         if isinstance(mask, bool):
             mask_ten = zeros([], DTypeEnum.bool_)
             mask_ten.get_storage_checked().data[:] = mask
             mask = mask_ten
-        map_result = self._boundry_check_and_map_pointers(
-            pointer, mask
-        )
+        map_result = self._boundry_check_and_map_pointers(pointer, mask)
         mapped_pointer_data = map_result.mapped
         block_name = map_result.block_name
         all_masked = map_result.all_masked
         if all_masked:
-            return 
+            return
         block_desc = self.memory_blocks[block_name]
         block_data = block_desc.get_data_view_checked()
         runner_ctx = get_pfl_runner_state()
         tensor_sim_ctx = get_tensorsim_context()
         if tensor_sim_ctx is not None and runner_ctx is not None:
-            assert isinstance(runner_ctx.cur_expr, pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
-            indices_for_record = mapped_pointer_data.reshape(-1, pointer.num_element).copy()
+            assert isinstance(
+                runner_ctx.cur_expr,
+                pfl.PFLCall), f"shouldn't happen, {type(runner_ctx.cur_expr)}"
+            indices_for_record = mapped_pointer_data.reshape(
+                -1, pointer.num_element).copy()
             if mask is not None:
-                indices_for_record[~mask.get_storage_checked().data.reshape(-1)] = -1
-            tensor_sim_ctx._recorded_io_ops.append(TensorSimIoOp(False, block_name,
-                 indices_for_record.reshape(-1), runner_ctx.cur_expr, pointer.shape,
-                 matrix_info=matrix_info))
+                indices_for_record[~mask.get_storage_checked().data.
+                                   reshape(-1)] = -1
+            tensor_sim_ctx._recorded_io_ops.append(
+                TensorSimIoOp(False,
+                              block_name,
+                              indices_for_record.reshape(-1),
+                              runner_ctx.cur_expr,
+                              pointer.shape,
+                              matrix_info=matrix_info,
+                              atomic_op=atomic_op))
 
         if DTypeEnum(pointer.dtype).to_numpy_dtype() != block_data.dtype:
             raise NotImplementedError
@@ -342,16 +358,17 @@ class SimMemoryStorage(SimTensorStorage):
             if not block_desc.indices:
                 # lazy create indices based on first store value
                 for k in value.storage.indices.keys():
-                    value_inds, element_shape = value.storage.get_unflatten_inds(k)
+                    value_inds, element_shape = value.storage.get_unflatten_inds(
+                        k)
                     block_desc.indices[k] = np.full(
-                        [*block_data.shape, *element_shape], -1, dtype=np.int32
-                    ).reshape(-1, *element_shape)
+                        [*block_data.shape, *element_shape],
+                        -1,
+                        dtype=np.int32).reshape(-1, *element_shape)
             else:
                 # validate indices
                 if len(block_desc.indices) != len(value.storage.indices):
                     raise ValueError(
-                        "Cannot store value with different number of indices"
-                    )
+                        "Cannot store value with different number of indices")
                 for k in value.storage.indices.keys():
                     _, element_shape = value.storage.get_unflatten_inds(k)
                     _, stored_element_shape = block_desc.get_unflatten_inds(k)
@@ -363,14 +380,56 @@ class SimMemoryStorage(SimTensorStorage):
             value_ten = full(pointer.shape, value, pointer.dtype)
             value = value_ten
         assert value.storage is not None
-        data_raw = block_data.view(pointer.dtype_to_np(pointer.dtype)).reshape(-1)
+        data_raw = block_data.view(pointer.dtype_to_np(
+            pointer.dtype)).reshape(-1)
         pointer_data = mapped_pointer_data.reshape(-1)
         stored_data_raw = value.storage.data.reshape(-1)
+        old = zeros(pointer.shape, pointer.dtype)
+
         if mask is None:
-            data_raw[pointer_data] = stored_data_raw
+            pointer_data_masked = pointer_data
+            stored_data_raw_masked = stored_data_raw
+            old_data = data_raw[pointer_data].reshape(pointer.shape)
+            old.get_storage_checked().data[:] = old_data
         else:
             mask_view = mask.get_storage_checked().data.reshape(-1)
-            data_raw[pointer_data[mask_view]] = stored_data_raw[mask_view]
+            pointer_data_masked = pointer_data[mask_view]
+            stored_data_raw_masked = stored_data_raw[mask_view]
+            old_data = old.get_storage_checked().data.reshape(-1)
+            old_data[mask_view] = data_raw[pointer_data_masked]
+
+        if atomic_op == "add":
+            data_raw[pointer_data] += stored_data_raw
+        elif atomic_op == "and":
+            data_raw[pointer_data] &= stored_data_raw
+        elif atomic_op == "cas":
+            assert atomic_cas_cmp is not None, "CAS operation requires atomic_cas_cmp"
+            if isinstance(atomic_cas_cmp, SimTensor):
+                atomic_cas_cmp_val = atomic_cas_cmp.get_storage_checked(
+                ).data
+            else:
+                atomic_cas_cmp_val = atomic_cas_cmp
+            store_cas = np.where(
+                data_raw[pointer_data] == atomic_cas_cmp_val,
+                stored_data_raw, data_raw[pointer_data])
+            data_raw[pointer_data] = store_cas
+        elif atomic_op == "max":
+            data_raw[pointer_data] = np.maximum(data_raw[pointer_data],
+                                                stored_data_raw)
+        elif atomic_op == "min":
+            data_raw[pointer_data] = np.minimum(data_raw[pointer_data],
+                                                stored_data_raw)
+        elif atomic_op == "or":
+            data_raw[pointer_data] |= stored_data_raw
+        elif atomic_op == "xor":
+            data_raw[pointer_data] ^= stored_data_raw
+        elif atomic_op == "xchg":
+            # exchange operation, swap the data
+            tmp = data_raw[pointer_data].copy()
+            data_raw[pointer_data] = stored_data_raw
+            stored_data_raw[:] = tmp
+        else:
+            data_raw[pointer_data_masked] = stored_data_raw_masked
         # all inds are stored in flatten array.
         for k, inds in block_desc.indices.items():
             value_inds = value.storage.indices[k]
@@ -378,7 +437,9 @@ class SimMemoryStorage(SimTensorStorage):
                 inds[pointer_data] = value_inds.reshape(-1)
             else:
                 mask_view = mask.get_storage_checked().data.reshape(-1)
-                inds[pointer_data[mask_view]] = value_inds.reshape(-1)[mask_view]
+                inds[pointer_data[mask_view]] = value_inds.reshape(
+                    -1)[mask_view]
+        return old
 
 
 def create_sim_memory_single(name: str, data: np.ndarray):
@@ -388,16 +449,15 @@ def create_sim_memory_single(name: str, data: np.ndarray):
 def create_sim_memory(data_dict: dict[str, np.ndarray]):
     block_dict: dict[str, MemoryBlockDesc] = {}
     for k, v in data_dict.items():
-        block_dict[k] = MemoryBlockDesc(
-            size=v.size, dtype=DTypeEnum.from_numpy_dtype(v.dtype)
-        )
+        block_dict[k] = MemoryBlockDesc(size=v.size,
+                                        dtype=DTypeEnum.from_numpy_dtype(
+                                            v.dtype))
     total_contiguous_size = assign_random_memory_block_offset(block_dict)
     total_data = np.empty(total_contiguous_size, dtype=np.uint8)
     for k, v in data_dict.items():
         desc = block_dict[k]
-        data_view = total_data[
-            desc.byte_offset : desc.byte_offset + desc.get_byte_size()
-        ]
+        data_view = total_data[desc.byte_offset:desc.byte_offset +
+                               desc.get_byte_size()]
         data_view[:] = v.view(np.uint8).reshape(-1)
         desc.data_view = data_view.view(v.dtype).reshape(v.shape)
     return SimMemoryStorage(total_data, memory_blocks=block_dict)
@@ -413,9 +473,8 @@ class SimPointerTensor(SimTensorBase):
 
     def __post_init__(self):
         if self.storage is not None:
-            assert (
-                self.storage.data.dtype == np.int64
-            ), "Pointer tensor storage must be of int64 type"
+            assert (self.storage.data.dtype == np.int64
+                    ), "Pointer tensor storage must be of int64 type"
 
     def to_meta_tensor(self):
         return dataclasses.replace(self, storage=None, memory_storage=None)
@@ -437,17 +496,29 @@ class SimPointerTensor(SimTensorBase):
         if self.memory_storage is None:
             # create a meta tensor from self
             return SimTensor(shape=self.shape, dtype=self.dtype, storage=None)
-        return self.memory_storage.load(self, mask, other, matrix_info=matrix_info)
+        return self.memory_storage.load(self,
+                                        mask,
+                                        other,
+                                        matrix_info=matrix_info)
 
     def store(
         self,
         value: Union[SimTensor, int, float],
         mask: Optional[Union[bool, SimTensor]] = None,
         matrix_info: Optional[TensorSimIoMatrixInfo] = None,
+        atomic_op: Optional[Literal["add", "and", "cas", "max", "min", "or",
+                                    "xor", "xchg"]] = None,
+        atomic_cas_cmp: Optional[Union[SimTensor, int, float]] = None,
     ):
         if self.memory_storage is None:
-            return
-        return self.memory_storage.store(self, value, mask, matrix_info=matrix_info)
+            old = SimTensor(shape=self.shape, dtype=self.dtype)
+            return old
+        return self.memory_storage.store(self,
+                                         value,
+                                         mask,
+                                         matrix_info=matrix_info,
+                                         atomic_op=atomic_op,
+                                         atomic_cas_cmp=atomic_cas_cmp)
 
     def __add__(self, other: Union[SimTensor, int]) -> Self:
         res = self._binary_base(cast(Self, other), BinOpType.ADD, False)
@@ -490,9 +561,8 @@ class SimPointerScalarBase(SimTensorBase):
     def __post_init__(self):
         assert self.is_scalar()
         if self.storage is not None:
-            assert (
-                self.storage.data.dtype == np.int64
-            ), "Pointer tensor storage must be of int64 type"
+            assert (self.storage.data.dtype == np.int64
+                    ), "Pointer tensor storage must be of int64 type"
 
     def _to_pointer_tensor(self) -> SimPointerTensor:
         return SimPointerTensor(
@@ -524,17 +594,21 @@ class SimPointerScalarBase(SimTensorBase):
             new_res = lfs - other
         else:
             raise ValueError(f"Unsupported binary operation: {op_type}")
-        new_storage = dataclasses.replace(
-            self.storage, data=np.array(new_res, dtype=np.int64)
-        )
+        new_storage = dataclasses.replace(self.storage,
+                                          data=np.array(new_res,
+                                                        dtype=np.int64))
         return dataclasses.replace(self, storage=new_storage)
 
     @overload
-    def __add__(self, other: SimTensor) -> SimPointerTensor: ...
-    @overload
-    def __add__(self, other: int) -> Self: ...
+    def __add__(self, other: SimTensor) -> SimPointerTensor:
+        ...
 
-    def __add__(self, other: Union[SimTensor, int]) -> Union[Self, SimPointerTensor]:
+    @overload
+    def __add__(self, other: int) -> Self:
+        ...
+
+    def __add__(self, other: Union[SimTensor,
+                                   int]) -> Union[Self, SimPointerTensor]:
         if isinstance(other, int):
             return self._scalar_bin_op(other, BinOpType.ADD)
         res = self._to_pointer_tensor() + other
@@ -544,22 +618,31 @@ class SimPointerScalarBase(SimTensorBase):
         return self._scalar_bin_op(other, BinOpType.ADD)
 
     @overload
-    def __radd__(self, other: SimTensor) -> SimPointerTensor: ...
-    @overload
-    def __radd__(self, other: int) -> Self: ...
+    def __radd__(self, other: SimTensor) -> SimPointerTensor:
+        ...
 
-    def __radd__(self, other: Union[SimTensor, int]) -> Union[Self, SimPointerTensor]:
+    @overload
+    def __radd__(self, other: int) -> Self:
+        ...
+
+    def __radd__(
+            self, other: Union[SimTensor,
+                               int]) -> Union[Self, SimPointerTensor]:
         if isinstance(other, int):
             return self._scalar_bin_op(other, BinOpType.ADD)
         res = other + self._to_pointer_tensor()
         return res
 
     @overload
-    def __sub__(self, other: SimTensor) -> SimPointerTensor: ...
-    @overload
-    def __sub__(self, other: int) -> Self: ...
+    def __sub__(self, other: SimTensor) -> SimPointerTensor:
+        ...
 
-    def __sub__(self, other: Union[SimTensor, int]) -> Union[Self, SimPointerTensor]:
+    @overload
+    def __sub__(self, other: int) -> Self:
+        ...
+
+    def __sub__(self, other: Union[SimTensor,
+                                   int]) -> Union[Self, SimPointerTensor]:
         if isinstance(other, int):
             return self._scalar_bin_op(other, BinOpType.SUB)
         res = self._to_pointer_tensor() - other
@@ -569,11 +652,16 @@ class SimPointerScalarBase(SimTensorBase):
         return self._scalar_bin_op(other, BinOpType.SUB)
 
     @overload
-    def __rsub__(self, other: SimTensor) -> SimPointerTensor: ...
-    @overload
-    def __rsub__(self, other: int) -> Self: ...
+    def __rsub__(self, other: SimTensor) -> SimPointerTensor:
+        ...
 
-    def __rsub__(self, other: Union[SimTensor, int]) -> Union[Self, SimPointerTensor]:
+    @overload
+    def __rsub__(self, other: int) -> Self:
+        ...
+
+    def __rsub__(
+            self, other: Union[SimTensor,
+                               int]) -> Union[Self, SimPointerTensor]:
         if isinstance(other, int):
             return self._scalar_bin_op(other, BinOpType.SUB)
         res = other - self._to_pointer_tensor()
@@ -582,9 +670,10 @@ class SimPointerScalarBase(SimTensorBase):
 
 @dataclasses.dataclass
 class SimPointerScalar(SimPointerScalarBase):
-    def load(
-        self, mask: Optional[bool] = None, other: Optional[Union[float, int]] = None
-    ) -> Union[float, int]:
+
+    def load(self,
+             mask: Optional[bool] = None,
+             other: Optional[Union[float, int]] = None) -> Union[float, int]:
         if self.memory_storage is None or self.storage is None:
             raise ValueError("can't load scalar meta")
         res = self.memory_storage.load(self, mask, other)
@@ -592,22 +681,37 @@ class SimPointerScalar(SimPointerScalarBase):
         assert res.storage is not None
         return res.storage.data.item()
 
-    def store(self, value: Union[float, int], mask: Optional[bool] = None):
+    def store(
+        self,
+        value: Union[float, int],
+        mask: Optional[bool] = None,
+        atomic_op: Optional[Literal["add", "and", "cas", "max", "min", "or",
+                                    "xor", "xchg"]] = None,
+        atomic_cas_cmp: Optional[Union[SimTensor, int, float]] = None,
+    ):
         if self.memory_storage is None:
             return
-        return self.memory_storage.store(self, value, mask)
+        res = self.memory_storage.store(self,
+                                        value,
+                                        mask,
+                                        atomic_op=atomic_op,
+                                        atomic_cas_cmp=atomic_cas_cmp)
+        assert isinstance(res, SimTensor)
+        return res.get_storage_checked().data.item()
 
 
-def create_pointer_tensor_meta(
-    dtype: int, shape: list[int], num_element: int = 1
-) -> SimPointerTensor:
+def create_pointer_tensor_meta(dtype: int,
+                               shape: list[int],
+                               num_element: int = 1) -> SimPointerTensor:
     """Create a pointer tensor with a single scalar value."""
-    return SimPointerTensor(
-        shape=shape, dtype=dtype, num_element=num_element, storage=None
-    )
+    return SimPointerTensor(shape=shape,
+                            dtype=dtype,
+                            num_element=num_element,
+                            storage=None)
 
 
-def create_pointer_scalar_meta(dtype: int, num_element: int = 1) -> SimPointerScalar:
+def create_pointer_scalar_meta(dtype: int,
+                               num_element: int = 1) -> SimPointerScalar:
     """Create a pointer tensor with a single scalar value."""
     return SimPointerScalar(shape=[], dtype=dtype, num_element=num_element)
 
@@ -631,11 +735,10 @@ def create_pointer_tensor(
         data = np.array(ptr, dtype=np.int64)
     storage = SimTensorStorage(data=data)
     mapped_data, mapped_key, _ = memory._map_pointer_data(
-        data, DTypeEnum(dtype).byte_size()
-    )
-    assert (
-        DTypeEnum(dtype) == memory.memory_blocks[mapped_key].dtype
-    ), "Pointer tensor dtype must match memory storage dtype"
+        data,
+        DTypeEnum(dtype).byte_size())
+    assert (DTypeEnum(dtype) == memory.memory_blocks[mapped_key].dtype
+            ), "Pointer tensor dtype must match memory storage dtype"
     return SimPointerTensor(
         shape=list(data.shape),
         dtype=dtype,
@@ -645,9 +748,10 @@ def create_pointer_tensor(
     )
 
 
-def create_pointer_scalar(
-    dtype: int, ptr: int, memory: SimMemoryStorage, num_element: int = 1
-) -> SimPointerScalar:
+def create_pointer_scalar(dtype: int,
+                          ptr: int,
+                          memory: SimMemoryStorage,
+                          num_element: int = 1) -> SimPointerScalar:
     """Create a pointer tensor with a single scalar value."""
     assert ptr >= 0
     assert (
@@ -656,11 +760,10 @@ def create_pointer_scalar(
     data = np.array(ptr, dtype=np.int64)
     storage = SimTensorStorage(data=data)
     mapped_data, mapped_key, _ = memory._map_pointer_data(
-        data, DTypeEnum(dtype).byte_size()
-    )
-    assert (
-        DTypeEnum(dtype) == memory.memory_blocks[mapped_key].dtype
-    ), "Pointer tensor dtype must match memory storage dtype"
+        data,
+        DTypeEnum(dtype).byte_size())
+    assert (DTypeEnum(dtype) == memory.memory_blocks[mapped_key].dtype
+            ), "Pointer tensor dtype must match memory storage dtype"
     return SimPointerScalar(
         shape=[],
         dtype=dtype,
@@ -679,19 +782,16 @@ class SimTensorBlockPointer:
     block_shape: list[int]
     # state
     offset: list[int]
+
     def __repr__(self):
-        return (
-            f"SimTensorBlockPointer(shape={self.shape}, "
-            f"strides={self.strides}, block_shape={self.block_shape}, "
-            f"offset={self.offset})"
-        )
+        return (f"SimTensorBlockPointer(shape={self.shape}, "
+                f"strides={self.strides}, block_shape={self.block_shape}, "
+                f"offset={self.offset})")
 
     def __post_init__(self):
         assert (
-            len(self.shape)
-            == len(self.strides)
-            == len(self.block_shape)
-            == len(self.offset)
+            len(self.shape) == len(self.strides) == len(
+                self.block_shape) == len(self.offset)
         ), "base ndim must match shape, strides, block_shape and offset length"
 
     def to_meta_tensor(self):
@@ -707,23 +807,28 @@ class SimTensorBlockPointer:
 
     def advance(self, offsets: list[int]) -> Self:
         if self.base.storage is None:
-            # meta advance 
-            return dataclasses.replace(self) 
-        assert len(offsets) == len(self.shape), "Offsets must match shape length"
-        new_offset = [self.offset[i] + offsets[i] for i in range(len(self.offset))]
+            # meta advance
+            return dataclasses.replace(self)
+        assert len(offsets) == len(
+            self.shape), "Offsets must match shape length"
+        new_offset = [
+            self.offset[i] + offsets[i] for i in range(len(self.offset))
+        ]
         return dataclasses.replace(self, offset=new_offset)
 
     def get_current_pointer_tensor_and_mask(
-        self, offsets: Optional[list[int]] = None
+        self,
+        offsets: Optional[list[int]] = None
     ) -> tuple[SimPointerTensor, SimTensor]:
         pointer_base = self.base
         if offsets is None:
             offsets = self.offset
         else:
             assert len(offsets) == len(
-                self.offset
-            ), "Offsets must match current offset length"
-            offsets = [self.offset[i] + offsets[i] for i in range(len(self.offset))]
+                self.offset), "Offsets must match current offset length"
+            offsets = [
+                self.offset[i] + offsets[i] for i in range(len(self.offset))
+            ]
         offsets_blocks = np.meshgrid(
             *[
                 np.arange(o, o + s, dtype=np.int64)
@@ -732,12 +837,13 @@ class SimTensorBlockPointer:
             indexing="ij",
         )
         offset_data = cast(
-            np.ndarray, sum(o * s for o, s in zip(offsets_blocks, self.strides))
-        )
+            np.ndarray,
+            sum(o * s for o, s in zip(offsets_blocks, self.strides)))
         pointer_tensor = pointer_base + from_numpy(offset_data)
-        mask_arr = np.logical_and.reduce(
-            [np.logical_and(o >= 0, o < s) for o, s in zip(offsets_blocks, self.shape)]
-        )
+        mask_arr = np.logical_and.reduce([
+            np.logical_and(o >= 0, o < s)
+            for o, s in zip(offsets_blocks, self.shape)
+        ])
         return pointer_tensor, from_numpy(mask_arr)
 
     def load(
@@ -746,33 +852,49 @@ class SimTensorBlockPointer:
         other: Optional[Union[SimTensor, float, int, bool]] = None,
     ) -> SimTensor:
         if self.base.storage is None:
-            # meta load 
+            # meta load
             return SimTensor(shape=self.block_shape, dtype=self.base.dtype)
         cur_pointer_tensor, mask_tensor = self.get_current_pointer_tensor_and_mask(
-            offsets
-        )
-        matrix_info = None 
+            offsets)
+        matrix_info = None
         if len(self.shape) == 2:
             matrix_info = TensorSimIoMatrixInfo(
-                offsets=(offsets[0] + self.offset[0], offsets[1] + self.offset[1]),
+                offsets=(offsets[0] + self.offset[0],
+                         offsets[1] + self.offset[1]),
                 shape=(self.block_shape[0], self.block_shape[1]),
             )
-        return cur_pointer_tensor.load(mask=mask_tensor, other=other, matrix_info=matrix_info)
+        return cur_pointer_tensor.load(mask=mask_tensor,
+                                       other=other,
+                                       matrix_info=matrix_info)
 
-    def store(self, offsets: list[int], value: Union[SimTensor, int, float]):
+    def store(
+        self,
+        offsets: list[int],
+        value: Union[SimTensor, int, float],
+        atomic_op: Optional[Literal["add", "and", "cas", "max", "min", "or",
+                                    "xor", "xchg"]] = None,
+        atomic_cas_cmp: Optional[Union[SimTensor, int, float]] = None,
+    ):
         if self.base.storage is None:
-            # meta load 
-            return
+            # meta load
+            old = SimTensor(shape=self.block_shape,
+                            dtype=self.base.dtype,
+                            storage=None)
+            return old
         cur_pointer_tensor, mask_tensor = self.get_current_pointer_tensor_and_mask(
-            offsets
-        )
-        matrix_info = None 
+            offsets)
+        matrix_info = None
         if len(self.shape) == 2:
             matrix_info = TensorSimIoMatrixInfo(
-                offsets=(offsets[0] + self.offset[0], offsets[1] + self.offset[1]),
+                offsets=(offsets[0] + self.offset[0],
+                         offsets[1] + self.offset[1]),
                 shape=(self.block_shape[0], self.block_shape[1]),
             )
-        return cur_pointer_tensor.store(mask=mask_tensor, value=value, matrix_info=matrix_info)
+        return cur_pointer_tensor.store(mask=mask_tensor,
+                                        value=value,
+                                        matrix_info=matrix_info,
+                                        atomic_op=atomic_op,
+                                        atomic_cas_cmp=atomic_cas_cmp)
 
 
 def create_tensor_block_pointer(
@@ -788,9 +910,12 @@ def create_tensor_block_pointer(
     assert (
         len(shape) == len(strides) == len(block_shape) == len(offset)
     ), "Shape, strides, block_shape and offset must have the same length"
-    return SimTensorBlockPointer(
-        base=base, shape=shape, strides=strides, block_shape=block_shape, offset=offset
-    )
+    return SimTensorBlockPointer(base=base,
+                                 shape=shape,
+                                 strides=strides,
+                                 block_shape=block_shape,
+                                 offset=offset)
+
 
 def create_tensor_block_pointer_meta(
     base: SimPointerScalar,
@@ -803,6 +928,8 @@ def create_tensor_block_pointer_meta(
     strides = [1] * ndim
     assert len(block_shape) == ndim, "Block shape must match ndim"
     offset = [0] * ndim
-    return SimTensorBlockPointer(
-        base=base, shape=shape, strides=strides, block_shape=block_shape, offset=offset
-    )
+    return SimTensorBlockPointer(base=base,
+                                 shape=shape,
+                                 strides=strides,
+                                 block_shape=block_shape,
+                                 offset=offset)

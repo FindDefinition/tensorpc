@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Mapping
 import enum
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Sequence, Tuple, Type, TypeVar, Union)
@@ -43,9 +44,9 @@ _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
 ThreeLayoutType: TypeAlias = Union[Sequence["ThreeComponentType"],
-                                   dict[str, "ThreeComponentType"]]
+                                   Mapping[str, "ThreeComponentType"]]
 ThreeEffectType: TypeAlias = Union[Sequence["ThreeEffectBase"],
-                                   dict[str, "ThreeEffectBase"]]
+                                   Mapping[str, "ThreeEffectBase"]]
 
 P = ParamSpec('P')
 
@@ -377,7 +378,7 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
             self,
             base_type: UIType,
             prop_cls: Type[T_o3d_container_prop],
-            children: Dict[str, T_child],
+            children: Mapping[str, T_child],
             allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         super().__init__(base_type,
                          prop_cls,
@@ -439,7 +440,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             self,
             base_type: UIType,
             prop_cls: Type[T_o3d_container_prop],
-            children: Dict[str, T_child],
+            children: Mapping[str, T_child],
             allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         if allowed_events is None:
             allowed_events = []

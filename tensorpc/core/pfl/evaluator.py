@@ -964,6 +964,13 @@ class PFLAsyncRunner:
     def get_state(self) -> PFLAsyncRunnerState:
         return self._state
 
+    def get_cur_bkpt_checked(self) -> PFLBreakpoint:
+        """Get the current breakpoint, raise if not in breakpoint state."""
+        if self._state.type != PFLAsyncRunnerStateType.PAUSE:
+            raise RuntimeError(f"Cannot get current breakpoint in state {self._state.type}, expected PAUSE.")
+        assert self._state.cur_bkpt is not None, "Current breakpoint should not be None in PAUSE state."
+        return self._state.cur_bkpt
+
     def is_paused(self) -> bool:
         return self._state.type == PFLAsyncRunnerStateType.PAUSE
 

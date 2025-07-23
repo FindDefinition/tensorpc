@@ -4,15 +4,21 @@ from collections.abc import Sequence
 import enum
 from functools import partial
 import importlib
+import inspect
 import json
 import linecache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+import threading
 import time
 import traceback
 import types
-from typing import Any, Union, cast
-import uuid
+from typing import Any, Callable, Union, cast
+import watchdog
+import watchdog.events
+from watchdog.observers import Observer
+from watchdog.observers.api import ObservedWatch
+import dataclasses as dataclasses_plain
 from tensorpc.core.astex.sourcecache import SCDItem, SourceChangeDiffCache
 from tensorpc.apps.mls import tsim
 from tensorpc.apps.mls.components.global_mem import GlobalMatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix
@@ -20,7 +26,7 @@ from tensorpc.apps.mls.tsim.core import TensorSimIoOp, get_flush_sim_io_ops
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.annolib import is_undefined
 from tensorpc.core.astex.astcache import AstCache, AstCacheItem
-from tensorpc.core.datamodel.draft import DraftBase
+from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno, find_toplevel_func_node_container_by_lineno
 from tensorpc.core.moduleid import get_module_id_of_type
 from tensorpc.core.pfl.evaluator import PFLAsyncRunnerStateType, PFLBreakpoint, PFLCtrlFor, PFLCtrlBase
@@ -29,6 +35,8 @@ from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, appctx
 from typing import Annotated, Any, Optional, Union
 from tensorpc.core import pfl
+from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal
+from tensorpc.dock.flowapp.appstorage import AppDraftFileStoreBackend
 
 from tensorpc.apps.mls.backends import tritonstd
 import numpy as np 
@@ -37,6 +45,8 @@ from tensorpc.dock.core.appcore import AppSpecialEventType
 from tensorpc.dock.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcMessageType
 from tensorpc.utils.package_finder import find_submodule_from_file
 import importlib.machinery
+
+from tensorpc.utils.wait_tools import debounce
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class LocalMatrix(Matrix):
@@ -85,7 +95,6 @@ class LocalMemContainer(mui.TooltipFlexBox):
                 height="100%",
                 overflow="hidden",
                 followCursor=True)
-
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class TritonSimModel:
@@ -192,44 +201,109 @@ def get_key_from_prefix_data(prefix: InlineCompPrefix, data: str) -> str:
     """
     return f"{prefix.value}-{data}"
 
-class TritonKernelRunner:
-    def __init__(self, item: AstCacheItem, path: str, lineno: int):
-        self._compiled_tmp_file_path: Optional[str] = None
-        mod_dict = self._get_module_dict_init(path, item.content)
-        func_nodes = find_toplevel_func_node_container_by_lineno(cast(ast.Module, item.tree), lineno)
-        assert func_nodes is not None 
+_WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
+                                     watchdog.events.FileModifiedEvent]
 
-        fn_node = func_nodes[-1]
-        assert isinstance(fn_node, ast.FunctionDef), "Function node must be a FunctionDef"
-        fn = mod_dict[fn_node.name]
-        self._fn = fn
-        self._fn_name = fn_node.name
-        self._path = path
-        self._content = item.content
-        self._content_lines = item.content.split("\n")
+class _WatchDogForKernelFile(watchdog.events.FileSystemEventHandler):
 
-        runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, module_code_getter=lambda x: item.content)
+    def __init__(
+            self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES],
+                                        None]) -> None:
+        super().__init__()
+        self._on_modified = on_modified
+
+    def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
+        if isinstance(event, watchdog.events.FileModifiedEvent):
+            return self._on_modified(event)
+
+
+@dataclasses_plain.dataclass
+class TritonKernelManagerState:
+    fn: Callable 
+    cur_fn_name: str 
+    fn_names: list[str]
+    path: str 
+    content: str 
+    content_lines: list[str]
+    lib: pfl.PFLLibrary
+    module_dict: dict[str, Any]
+    runner: tritonstd.TritonKernelRunner
+    finder_dict: dict[str, pfl.PFLTreeNodeFinder]
+    runner_task: Optional[asyncio.Task] = None
+    mapper_new_to_old: Optional[SCDItem] = None
+    watchdog_watcher: Optional[_WatchDogForKernelFile] = None
+    watchdog_observer: Optional[Any] = None
+
+    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None]) -> None:
+        assert self.watchdog_observer is None and self.watchdog_watcher is None
+        self.watchdog_watcher = _WatchDogForKernelFile(debounce(0.1)(handler))
+        self.watchdog_observer = Observer()
+        self.watchdog_observer.schedule(self.watchdog_watcher, self.path, recursive=False)
+        self.watchdog_observer.start()
+
+    def close(self):
+        if self.watchdog_observer is not None:
+            self.watchdog_observer.stop()
+            self.watchdog_observer.join()
+        self.watchdog_observer = None 
+        self.watchdog_watcher = None
+
+    def switch_lib_in_same_file(self, new_fn_name: str):
+        new_fn = self.module_dict[new_fn_name]
+        runner = tritonstd.parse_triton_compilable_to_runner(new_fn, do_meta_eval=True, module_code_getter=lambda x: self.content)
         # print(ast.ret_st)
         lib = runner._library
-        self.lib = lib
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
         for k, v in lib.all_compiled.items():
             finder_dict[k] = pfl.PFLTreeNodeFinder(v, (pfl.PFLName, pfl.PFLAttribute, pfl.PFLArg)) 
-        self.finder_dict = finder_dict
+        self.fn = new_fn
+        self.cur_fn_name = new_fn_name
+        self.lib = lib
         self.runner = runner
-        self._runner_task: Optional[asyncio.Task] = None
+        self.finder_dict = finder_dict
+        self.mapper_new_to_old = None
+
+class TritonKernelManager:
+    def __init__(self, item: AstCacheItem, path: str, lineno: int, fn_name: Optional[str] = None):
+        self._compiled_tmp_file_path: Optional[str] = None
+        if fn_name is None:
+            func_nodes = find_toplevel_func_node_container_by_lineno(cast(ast.Module, item.tree), lineno)
+            assert func_nodes is not None 
+
+            fn_node = func_nodes[-1]
+            assert isinstance(fn_node, ast.FunctionDef), "Function node must be a FunctionDef"
+
+            fn_name = fn_node.name
+        self.state = self._get_state_from_code(path, item.content, fn_name)
         self._runner_task_ev = asyncio.Event()
 
-        self.grid_size = runner.triton_sim_info.grid_size
+    @property 
+    def grid_size(self):
+        return self.state.runner.triton_sim_info.grid_size 
 
-        self._mapper_new_to_old: Optional[SCDItem] = None
+    @property 
+    def runner(self):
+        return self.state.runner 
 
+    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None]) -> None:
+        self.state.setup_watchdog(handler)
+
+    async def validate(self):
+        await self.runner.copy().validate_kernel_by_test_data(self.state.fn)
+
+    async def _run_triton_bench(self):
+        _, _, compile_info = await self.runner.bench_kernel_in_triton_process(self.state.fn)
+        return compile_info
+
+    async def run_triton_bench_sync(self):
+        return await self._run_triton_bench()
 
     def close(self):
         if self._compiled_tmp_file_path is not None:
             # remove from linecache
             linecache.checkcache(self._compiled_tmp_file_path)
             self._compiled_tmp_file_path = None
+        self.state.close()
 
     def _get_module_dict_init(self, path: str, code: Optional[str] = None):
         module_import_path = find_submodule_from_file(path)
@@ -238,7 +312,15 @@ class TritonKernelRunner:
             mod_dict = self._get_module_dict_by_code(path, code)
         else:
             mod_dict = importlib.import_module(module_import_path).__dict__
-        return mod_dict
+        fn_options: list[str] = []
+        for k, v in mod_dict.items():
+            v = tritonstd._may_triton_func(v)
+            meta = pfl.get_compilable_meta(v)
+            
+            if meta is not None and isinstance(meta, tritonstd.TritonSimFuncMeta):
+                if meta.inline_run_env_fn is not None:
+                    fn_options.append(k)
+        return mod_dict, fn_options
 
     def _get_module_dict_by_code(self, path: str, code: str):
         # use dynamic file import
@@ -266,28 +348,36 @@ class TritonKernelRunner:
         mod_dict = module.__dict__
         return mod_dict
 
-    def recompile(self, new_code: str):
-        self._runner_task_ev.clear()
-        mod_dict = self._get_module_dict_by_code(self._path, new_code)
-        fn = mod_dict[self._fn_name]
-        runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, module_code_getter=lambda x: new_code)
-        self._fn = fn
+    def _get_state_from_code(self, path: str, code: str, fn_name: str):
+        mod_dict, fn_names = self._get_module_dict_init(path, code)
+        fn = mod_dict[fn_name]
+        runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, module_code_getter=lambda x: code)
         # print(ast.ret_st)
         lib = runner._library
-        self.lib = lib
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
         for k, v in lib.all_compiled.items():
             finder_dict[k] = pfl.PFLTreeNodeFinder(v, (pfl.PFLName, pfl.PFLAttribute, pfl.PFLArg)) 
-        self.finder_dict = finder_dict
-        self.runner = runner
-        self._runner_task = None
-        self._content = new_code
-        self.grid_size = runner.triton_sim_info.grid_size
-        self._content_lines = new_code.split("\n")
-        self._mapper_new_to_old = None 
+        state = TritonKernelManagerState(
+            fn=fn,
+            module_dict=mod_dict,
+            cur_fn_name=fn_name,
+            fn_names=fn_names,
+            path=path,
+            content=code,
+            content_lines=code.split("\n"),
+            lib=lib,
+            finder_dict=finder_dict,
+            runner=runner,
+        )
+        return state
+
+    def recompile(self, new_code: str):
+        self._runner_task_ev.clear()
+        self.state = self._get_state_from_code(self.state.path, new_code, self.state.cur_fn_name)
 
     async def run_to(self, grid_idxes: Sequence[int], lineno: int):
-        stmt = self.lib.find_stmt_by_path_lineno(self.lib.get_module_by_func(self._fn.fn).uid, lineno)
+        unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
+        stmt = self.state.lib.find_stmt_by_path_lineno(self.state.lib.get_module_by_func(unwrapped_fn).uid, lineno)
         if stmt is not None:
             if self.runner.is_paused():
                 # if paused, continue from the current position
@@ -297,30 +387,31 @@ class TritonKernelRunner:
                 assert self.runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
                     f"Runner is not in IDLE state, current state: {self.runner._state.type}"
                 with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
-                    inline_env = self.lib.get_compiled_unit_inline_env(self._fn.fn)
+                    inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
                     # use data in inline_env to create tensor visualization.
-                    func_node = self.runner._library.get_compiled_unit_specs(self._fn.fn)[0]
+                    func_node = self.runner._library.get_compiled_unit_specs(unwrapped_fn)[0]
                     self._runner_task = asyncio.create_task(self.runner.run_until(lineno, func_node.uid, 
                         exit_event=self._runner_task_ev, external_inline_env=inline_env))
                     return inline_env
         return None 
 
     async def run_single_block(self, grid_idxes: Sequence[int]):
+        unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
         assert not self.runner.is_paused()
         self._runner_task_ev.clear()
         assert self.runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
             f"Runner is not in IDLE state, current state: {self.runner._state.type}"
         with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
-            inline_env = self.lib.get_compiled_unit_inline_env(self._fn.fn)
+            inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
             # use data in inline_env to create tensor visualization.
-            func_node = self.runner._library.get_compiled_unit_specs(self._fn.fn)[0]
+            func_node = self.runner._library.get_compiled_unit_specs(unwrapped_fn)[0]
             self._runner_task = asyncio.create_task(self.runner.run_func(func_node.uid, 
                 exit_event=self._runner_task_ev, external_inline_env=inline_env))
             return inline_env
         return None 
 
     def find_nearest_node_by_line_col(self, lineno: int, col_offset: int):
-        for k, finder in self.finder_dict.items():
+        for k, finder in self.state.finder_dict.items():
             res = finder.find_nearest_node_by_line_col(lineno, col_offset)
             if res is not None:
                 return k, res
@@ -331,11 +422,68 @@ class TritonKernelRunner:
             self.runner.release_breakpoint(stop=True)
             await self._runner_task_ev.wait()
 
+    def get_cur_func_pfl_node(self):
+        unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
+        func_node = self.runner._library.get_compiled_unit_specs(unwrapped_fn)[0]
+        return func_node
+
+class TritonCompiledViewer(mui.FlexBox):
+    def __init__(self):
+        self.editor = mui.MonacoEditor("", "c", "")
+        self.editor.prop(readOnly=True, minWidth=0, minHeight=0)
+        self.select = mui.Autocomplete("triton", [], self._on_select)
+        self.select.prop(size="small", 
+                textFieldProps=mui.TextFieldProps(
+                            muiMargin="dense",
+                            variant="outlined")
+            )
+        self._json_viewer = mui.JsonViewer()
+        super().__init__([
+            mui.VBox([
+                self.select,
+                self.editor.prop(flex=1)
+
+            ]).prop(flex=3),
+            mui.HBox([
+                self._json_viewer
+            ]).prop(minWidth=0, minHeight=0, flex=1, overflow="auto"),
+        ])
+        self.prop(flexFlow="row nowrap", overflow="hidden")
+        self._asm_dict: dict[str, str] = {}
+
+    async def _on_select(self, option):
+        content = self._asm_dict[option["label"]]
+        await self.editor.write(content, path=option["path"])
+
+    async def set_triton_compile_info(self, func_id: str, info: tritonstd.TritonKernelCompileInfo):
+        asm_dict = info.asm
+        self._asm_dict = asm_dict.copy()
+        options = []
+        for k, v in asm_dict.items():
+            options.append({
+                "label": k,
+                "path": f"{func_id}-{k}",
+            })
+        await self.select.update_options(options, 0)
+        await self.editor.write(asm_dict[options[0]["label"]], path=options[0]["path"])
+        await self._json_viewer.write(info.metadata)
+
+
+@dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
+class TritonSimAppModel:
+    path: Optional[str] = None 
+    fn_name: Optional[str] = None
+    lineno: Optional[int] = None
+    fn_options: Annotated[list[Any], DraftFieldMeta(is_store_external=True)]  = dataclasses.field(default_factory=list)
+    cur_fn_option: Annotated[Optional[Any], DraftFieldMeta(is_store_external=True)] = None
+
 class TritonSim:
     @mark_create_layout
     def my_layout(self):
         self.dm = mui.DataModel(TritonSimModel(global_mem=GlobalMemoryModel.empty(), local_matrices={}), [])
         draft = self.dm.get_draft()
+        self.app_dm = mui.DataModel(TritonSimAppModel(), [self.dm])
+        self.app_dm.connect_draft_store("_tensorpc_mls_triton_sim", AppDraftFileStoreBackend())
         self.editor = mui.MonacoEditor("", "python", "")
         self.tree = plus.ObjectInspector(with_builtins=False, show_terminal=False, default_tab_preview=False, default_sizes=[100, 100])
         self.io_ops_tree = mui.TanstackJsonLikeTree().prop(ignoreRoot=True)
@@ -346,12 +494,20 @@ class TritonSim:
                 "background": "lightblue"
             }
         })
+        self.app_dm.event_storage_fetched.on(self._handle_app_dm_storage_fetched)
         editor_acts: list[mui.MonacoEditorAction] = [
             mui.MonacoEditorAction(id="Run To", 
                 label="Run Towards Here", contextMenuOrder=1.5,
                 contextMenuGroupId="tensorpc-pfl-editor-action", 
                 keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
         ]
+        self._triton_viewer = TritonCompiledViewer()
+        self._ptx_viewer_dialog = mui.Dialog([
+            self._triton_viewer.prop(flex=1),
+
+        ]).prop(dialogMaxWidth=False, fullWidth=False,
+            width="75vw", height="75vh", display="flex")
+
         debug_toolbar = mui.HBox([
             mui.IconButton(mui.IconType.PlayArrow, self._on_debug_just_run)
                 .prop(tooltip="Run Single Block", size="small", iconSize="small", muiColor="primary")
@@ -368,6 +524,13 @@ class TritonSim:
             mui.IconButton(mui.IconType.Stop, self._on_debug_stop)
                 .prop(tooltip="Stop", size="small", iconSize="small", muiColor="error")
                 .bind_fields(disabled=f"!({draft.is_paused})"),
+            mui.HBox([]).prop(flex=1),
+            mui.IconButton(mui.IconType.QueryStats, self._on_launch_triton)
+                .prop(tooltip="Run Triton Kernel", size="small", iconSize="small", muiColor="error", 
+                      progressColor="primary", progressSize=28),
+            mui.IconButton(mui.IconType.DataObject, lambda: self._ptx_viewer_dialog.set_open(True))
+                .prop(tooltip="Check Triton Viewer", size="small", iconSize="small", muiColor="error", 
+                      progressColor="primary"),
         ])
         self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts)
         self.editor.event_editor_hover_query.on(self.hover_query)
@@ -377,7 +540,31 @@ class TritonSim:
         self.editor.event_editor_save.on(self._handle_editor_save)
         self.editor.event_change.on(self._handle_editor_debounced_change)
 
-        self._runner: Optional[TritonKernelRunner] = None
+        # tabdefs = [
+        #     mui.TabDef("kernel",
+        #                "kernel",
+        #                self.editor.prop(width="100%", height="100%", overflow="hidden"),
+        #                tooltip="kernel"),
+        #     mui.TabDef("ptx",
+        #                "ptx",
+        #                self._triton_viewer.prop(width="100%", height="100%", overflow="hidden"),
+        #                tooltip="ptx"),
+        #     # mui.TabDef("debug",
+        #     #            "debug",
+        #     #            mui.HBox([
+        #     #                mui.JsonViewer().bind_fields(data="$")
+        #     #            ]).prop(width="100%", height="100%", overflow="auto", minHeight=0, minWidth=0),
+        #     #            tooltip="debug"),
+        # ]
+        # tab_theme = get_tight_icon_tab_theme_horizontal(padding="5px")
+
+        # tabs = mui.Tabs(tabdefs, init_value="kernel").prop(
+        #             panelProps=mui.FlexBoxProps(flex=3, padding=0, overflow="hidden"),
+        #             borderBottom=1,
+        #             borderColor='divider',
+        #             tooltipPlacement="bottom")
+
+        self._runner: Optional[TritonKernelManager] = None
         self._global_mem = GlobalMemContainer(external_dm=self.dm, external_draft=draft.global_mem, use_view=True)
         self._ast_cache = AstCache()
         self._editor_lock = asyncio.Lock()
@@ -403,8 +590,26 @@ class TritonSim:
         self._cur_observed_local_tensor_key: Optional[tuple[str, str]] = None
         self._next_bkpt_set_lineno: bool = False
 
+        self._watchdog_lock = threading.Lock()
+        # some network based fs modify event may trigger multiple times
+        # during write, so we need to debounce it to avoid incomplete write.
+        self._fs_event_debounce = 0.1
+        self._kernel_select = mui.Autocomplete("kernel", [])
+        self._kernel_select.prop(size="small", 
+                                textFieldProps=mui.TextFieldProps(
+                                                muiMargin="dense",
+                                                variant="outlined")
+                                )
+        self._kernel_select.bind_fields(options=self.app_dm.get_draft().fn_options)
+        self._kernel_select.bind_draft_change(self.app_dm.get_draft().cur_fn_option)
+        self._kernel_select.event_change.on(self._handle_kernel_select_change)
         self.dm.init_add_layout([
             mui.VBox([
+                mui.DataPortal([self.app_dm], [
+                    self._kernel_select
+                ]),
+                mui.HDivider(),
+
                 debug_toolbar,
                 mui.HDivider(),
                 x_slider,
@@ -417,18 +622,51 @@ class TritonSim:
             ]).prop(flex=1),
             mui.VDivider(),
             mui.VBox([
+                # mui.ThemeProvider([
+                #     tabs
+                # ], tab_theme),
+                self._ptx_viewer_dialog,
                 self.editor.prop(flex=3),
                 mui.HDivider(),
                 mui.AppTerminal().prop(flex=1),
-            ]).prop(flex=2),
+            ]).prop(flex=2, minWidth=0, minHeight=0, overflow="hidden"),
             mui.VDivider(),
             self._global_mem.prop(flex=2),
         ])
         return mui.VBox([
             three.ViewCanvas([
-                self.dm
-            ]).prop(display="flex", flexFlow="row nowrap", flex=1)
-        ]).prop(width="100%", height="100%", overflow="hidden")
+                self.app_dm,
+            ]).prop(display="flex", flexFlow="row nowrap", flex=1, overflow="hidden"),
+        ]).prop(width="100%", height="100%", overflow="hidden", minWidth=0, minHeight=0)
+
+    async def _handle_app_dm_storage_fetched(self, prev_model: TritonSimAppModel):
+        # fetch from storage
+        model = self.app_dm.model
+        if model.path is not None and model.fn_name is not None and model.lineno is not None:
+            try:
+                runner = TritonKernelManager(
+                    self._ast_cache.query_path(Path(model.path)),
+                    model.path,
+                    model.lineno,
+                    model.fn_name
+                )
+                async with self.app_dm.draft_update() as draft:
+                    draft.fn_options = [{"label": fn_name} for fn_name in runner.state.fn_names]
+                    draft.cur_fn_option = {
+                        "label": runner.state.cur_fn_name,
+                    }
+            except:
+                async with self.app_dm.draft_update() as draft:
+                    draft.path = None
+                    draft.fn_name = None
+                    draft.lineno = None
+                    draft.fn_options = []
+                    draft.cur_fn_option = None
+                raise 
+            await self._init_new_runner(
+                runner,
+                model.lineno
+            )
 
     async def _on_debug_continue(self):
         if self._runner is None:
@@ -479,28 +717,73 @@ class TritonSim:
     async def _handle_editor_save(self, ev: mui.MonacoSaveEvent):
         assert self._runner is not None, "Runner must be initialized before saving"
         prev_is_paused = self._runner.runner.is_paused()
-        # print(0)
-        await self._on_debug_stop()
-        # print(1)
-        with open(self._runner._path, "w", encoding="utf-8") as f:
-            f.write(ev.value)
-        self._runner.recompile(ev.value)
-        await self._init_sim_info()
-        self._install_event_handlers_to_runner(self._runner)
-
+        new_bkpt_lineno = None 
         if prev_is_paused:
             decors = ev.decorationsRanges
             if decors is not None:
                 common_ranges = decors["common"]
                 assert len(common_ranges) == 1
                 new_bkpt_lineno = common_ranges[0].startLineNumber
-                cur_grid_idxes = [self.x_slider.int(), self.y_slider.int(), self.z_slider.int()]
-                for j in range(len(cur_grid_idxes)):
-                    cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
-                    cur_grid_idxes[j] = min(cur_grid_idxes[j], self._runner.grid_size[j] - 1)
-                await self._runner.run_to(cur_grid_idxes, new_bkpt_lineno)
-    
-    def _install_event_handlers_to_runner(self, runner: TritonKernelRunner):
+        return await self._recompile(ev.value, bkpt_lineno=new_bkpt_lineno)
+
+    def _handle_external_file_change(self, event: _WATCHDOG_MODIFY_EVENT_TYPES, loop: asyncio.AbstractEventLoop):
+        if self._runner is None:
+            return 
+        if isinstance(event, watchdog.events.FileModifiedEvent):
+            with self._watchdog_lock:
+                if isinstance(event.src_path, bytes):
+                    src_path = event.src_path.decode()
+                else:
+                    src_path = cast(str, event.src_path)
+                content = Path(src_path).read_text(encoding="utf-8")
+                asyncio.run_coroutine_threadsafe(
+                    self._recompile(content),
+                    loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.editor.write(content),
+                    loop
+                )
+
+    async def _recompile(self, new_content: str, bkpt_lineno: Optional[int] = None):
+        assert self._runner is not None, "Runner must be initialized before saving"
+        prev_is_paused = self._runner.runner.is_paused()
+        # print(0)
+        await self._on_debug_stop()
+        # print(1)
+        self._runner.close()
+        with open(self._runner.state.path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        self._runner.recompile(new_content)
+        await self._runner.validate()
+        await self._init_sim_info()
+        self._runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()))
+        self._install_event_handlers_to_runner(self._runner)
+        if prev_is_paused:
+            if bkpt_lineno is None:
+                bkpt_lineno = self._runner.runner.get_cur_bkpt_checked().node.source_loc[0]
+            cur_grid_idxes = [self.x_slider.int(), self.y_slider.int(), self.z_slider.int()]
+            for j in range(len(cur_grid_idxes)):
+                cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
+                cur_grid_idxes[j] = min(cur_grid_idxes[j], self._runner.grid_size[j] - 1)
+            await self._runner.run_to(cur_grid_idxes, bkpt_lineno)
+            
+    async def _handle_kernel_select_change(self, option):
+        new_fn_name = option["label"]
+        assert self._runner is not None, "Runner must be initialized before saving"
+        await self._on_debug_stop()
+        self._runner.state.switch_lib_in_same_file(new_fn_name)
+        await self._runner.validate()
+        lineno = self._runner.get_cur_func_pfl_node().source_loc[0]
+        await self.editor.set_line_number(lineno)
+
+        await self._init_sim_info()
+        async with self.app_dm.draft_update() as draft:
+            draft.path = self._runner.state.path
+            draft.fn_name = self._runner.state.cur_fn_name
+            draft.lineno = lineno
+
+    def _install_event_handlers_to_runner(self, runner: TritonKernelManager):
         runner.runner.event_eval_start.on(self._handle_eval_start)
         runner.runner.event_eval_stop.on(self._handle_eval_stop)
         runner.runner.event_enter_bkpt.on(self._handle_enter_bkpt)
@@ -519,12 +802,30 @@ class TritonSim:
             assert path.startswith("file://"), "Current URI must be a file URI"
             path = path[7:]
             item = self._ast_cache.query_path(Path(path))
-            self._runner = TritonKernelRunner(item, path, lineno)
-            self._install_event_handlers_to_runner(self._runner)
+            runner = TritonKernelManager(item, path, lineno)
 
-            await self.editor.write(item.content, path, "python")
-            await self.editor.set_line_number(data.selections[0].start.line)
-            await self._init_sim_info()
+            async with self.app_dm.draft_update() as draft:
+                draft.path = path
+                draft.fn_name = runner.state.cur_fn_name
+                draft.lineno = lineno
+                draft.fn_options = [{"label": fn_name} for fn_name in runner.state.fn_names]
+                draft.cur_fn_option = {
+                    "label": runner.state.cur_fn_name,
+                }
+            await self._init_new_runner(runner, lineno)
+
+    async def _init_new_runner(self, runner: TritonKernelManager, lineno: int):
+        self._runner = runner
+        # do simple validate in each recompile 
+        # use copy to avoid trigger ui events
+        await self._runner.validate()
+
+        self._install_event_handlers_to_runner(self._runner)
+        await self.editor.write(runner.state.content, runner.state.path, "python")
+        await self.editor.set_line_number(lineno)
+        self._cur_observed_local_tensor_key = None
+        await self._init_sim_info()
+        runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()))
 
     async def _handle_slider_change(self, value: Any, axis: int):
         if self._runner is None:
@@ -534,7 +835,7 @@ class TritonSim:
         old_value[axis] = value
 
         if self._runner.runner.is_paused():
-            cur_bkpt_lineno = self._runner.runner.get_state().cur_bkpt.node.source_loc[0]
+            cur_bkpt_lineno = self._runner.runner.get_cur_bkpt_checked().node.source_loc[0]
             await self._runner.stop_run()
             await self._runner.run_to(old_value, cur_bkpt_lineno)
         else:
@@ -763,7 +1064,6 @@ class TritonSim:
         if new > old:
             ctrl.step = new
             ctrl.should_pause = False
-            print("RELEASE", old, new)
             self._runner.runner.release_breakpoint()
     
     def _get_cur_grid_idxes(self) -> tuple[int, int, int]:
@@ -772,7 +1072,7 @@ class TritonSim:
     def _validate_editor_has_unsave(self):
         if self._runner is None:
             return False
-        cur_content = self._runner._content
+        cur_content = self._runner.state.content
         editor_value = self.editor.props.value
         assert isinstance(editor_value, str)
         if editor_value != cur_content:
@@ -801,8 +1101,8 @@ class TritonSim:
         try:
             lineno = ev.selections[0].startLineNumber # 1-based in monaco.Selection
             col = ev.selections[0].startColumn # 1-based
-            if self._runner._mapper_new_to_old is not None:
-                lineno_mapped = self._runner._mapper_new_to_old.bisect_mapped_lineno(lineno)
+            if self._runner.state.mapper_new_to_old is not None:
+                lineno_mapped = self._runner.state.mapper_new_to_old.bisect_mapped_lineno(lineno)
                 if lineno_mapped != -1:
                     lineno = lineno_mapped
             func_uid, node = self._runner.find_nearest_node_by_line_col(lineno, col - 1)
@@ -836,8 +1136,8 @@ class TritonSim:
             key = f"{func_local_qname}-{obj_name}"
             container = LocalMemContainer(key, draft.local_matrices[obj_key], use_view=True)
             container.prop(border="1px solid blue")
-            container.panel._event_plane.event_move.add_frontend_handler_v2(self.dm, partial(TritonSimModel._on_hover_pfl, key=obj_key))
-            container.panel._event_plane.event_leave.add_frontend_handler_v2(self.dm, partial(TritonSimModel._on_hover_leave_pfl, key=obj_key))
+            container.panel._event_plane.event_move.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_pfl, key=obj_key))
+            container.panel._event_plane.event_leave.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_leave_pfl, key=obj_key))
             local_container = mui.MatchCase.binary_selection(True, container)
             local_container.bind_fields(condition=f"{draft.local_matrices[obj_key]} != null")
             if self._runner.runner.is_paused():
@@ -859,8 +1159,8 @@ class TritonSim:
         lineno = hqevent.position.lineNumber
 
         col = hqevent.position.column
-        if self._runner._mapper_new_to_old is not None:
-            lineno_mapped = self._runner._mapper_new_to_old.bisect_mapped_lineno(lineno)
+        if self._runner.state.mapper_new_to_old is not None:
+            lineno_mapped = self._runner.state.mapper_new_to_old.bisect_mapped_lineno(lineno)
             if lineno_mapped != -1:
                 lineno = lineno_mapped
         func_uid, node = self._runner.find_nearest_node_by_line_col(lineno, col - 1)
@@ -897,11 +1197,11 @@ class TritonSim:
             if new_value is not None:
                 new_value_lines = new_value.split("\n")
                 # mapper = SourceChangeDiffCache.get_raw_item_for_mapping(new_value_lines, self._runner._content_lines, )
-                mapper = SourceChangeDiffCache.get_raw_item_for_mapping(self._runner._content_lines, new_value_lines, )
+                mapper = SourceChangeDiffCache.get_raw_item_for_mapping(self._runner.state.content_lines, new_value_lines, )
 
             stack = self._runner.runner.get_state().stack
             for s in stack:
-                finder = self._runner.finder_dict[s.node.uid]
+                finder = self._runner.state.finder_dict[s.node.uid]
 
                 for node in finder._all_nodes:
                     if isinstance(node, pfl.PFLName) and node.id in s.scope :
@@ -935,4 +1235,12 @@ class TritonSim:
             return 
         new_value = change["value"]
         new_value_lines = new_value.split("\n")
-        self._runner._mapper_new_to_old = SourceChangeDiffCache.get_raw_item_for_mapping(new_value_lines, self._runner._content_lines)
+        self._runner.state.mapper_new_to_old = SourceChangeDiffCache.get_raw_item_for_mapping(new_value_lines, self._runner.state.content_lines)
+
+    async def _on_launch_triton(self):
+        if self._runner is None:
+            return
+        res = await self._runner.run_triton_bench_sync()
+        if res is not None:
+            await self._triton_viewer.set_triton_compile_info(self._runner.state.cur_fn_name, res)
+    
