@@ -2194,7 +2194,8 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
 
     async def bench_kernel_in_triton_process(self, fn: Any,
                                             warming_up: int = 2,
-                                            run_cnt: int = 3):
+                                            run_cnt: int = 3,
+                                            override_kwargs: Optional[dict[str, Any]] = None):
         # TODO: this don't support ptr of ptr in real triton sim currently.
         assert isinstance(
             fn, (triton.JITFunction,
@@ -2209,7 +2210,8 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                               func_id_or_path,
                                               fn_name, is_func_id,
                                               warming_up,
-                                              run_cnt)
+                                              run_cnt,
+                                              override_kwargs)
 
 def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
     if is_func_id:
@@ -2231,7 +2233,7 @@ def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
     return fn
 
 def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
-                             is_func_id: bool):
+                             is_func_id: bool, override_kwargs: Optional[dict[str, Any]] = None):
     import torch
     fn = _get_triton_fn(func_id_or_path, fn_name, is_func_id)
     fn_unwrapped = _may_triton_func(fn)
@@ -2247,6 +2249,8 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
     raw_fn = fn_meta.raw_fn
     kwargs = inline_env.kwargs
     kwargs = kwargs.copy()
+    if override_kwargs is not None:
+        kwargs.update(override_kwargs)
     if isinstance(fn, triton.runtime.Autotuner):
         for cfg in fn.configs:
             for k_to_rm in cfg.kwargs:
@@ -2263,8 +2267,12 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
             kwargs_triton[k] = torch.from_numpy(v).cuda()
             kwargs_torch[k] = kwargs_triton[k]
         elif isinstance(v, HostTensorDescriptor):
-            # TODO
-            raise NotImplementedError
+            # only support triton 3.4 and sm_90 above.
+            from triton.tools.tensor_descriptor import TensorDescriptor
+            v_th = torch.from_numpy(v.data).cuda()
+            desc = TensorDescriptor(v_th, shape=v.data.shape, strides=v_th.stride(), block_shape=v.block_shape)
+            kwargs_triton[k] = desc
+            kwargs_torch[k] = v_th
         else:
             if k in all_triton_param_names or k in reserved_triton_param_names:
                 kwargs_triton[k] = v
@@ -2327,10 +2335,11 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                              fn_name: str,
                              is_func_id: bool,
                              warming_up: int = 2,
-                             run_cnt: int = 3):
+                             run_cnt: int = 3,
+                             override_kwargs: Optional[dict[str, Any]] = None):
     import torch
     fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
-        func_id_or_path, fn_name, is_func_id)
+        func_id_or_path, fn_name, is_func_id, override_kwargs)
     raw_fn = fn_meta.raw_fn
     sim_info = inline_env.get_userdata_typed(TritonSimInfo)
     assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
@@ -2338,7 +2347,7 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
     for j in range(warming_up):
         fn[sim_info.grid_size_for_triton](**kwargs_tt)
     durations: list[float] = []
-    raw_durations: list[float] = []
+    raw_durations: list[dict[str, float]] = []
     stream = torch.cuda.current_stream()
     for j in range(run_cnt):
         start_ev = torch.cuda.Event(enable_timing=True)
@@ -2350,16 +2359,24 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
         end_ev.synchronize()
         duration = start_ev.elapsed_time(end_ev)
         durations.append(duration)
-        print(f"{fn_name}(triton) duration: {duration} ms")
+        print(f"{fn_name}(triton) dur: {duration:.3f} ms")
     if raw_fn is not None:
         for j in range(warming_up):
             raw_fn(kwargs_th)
         for j in range(run_cnt):
             duration = raw_fn(kwargs_th)
-            assert isinstance(duration, float), \
-                "raw_fn must return a float duration"
-            raw_durations.append(duration)
-            print(f"{fn_name}(raw) duration: {duration} ms")
+            if isinstance(duration, float):
+                duration_dict = {
+                    "raw": duration,
+                }
+            else:
+                assert isinstance(duration, dict), \
+                    "raw_fn must return a float or dict with float values"
+                duration_dict = duration
+            raw_durations.append(duration_dict)
+            raw_dur_msg = ", ".join(
+                f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
+            print(f"{fn_name}(raw) dur: {raw_dur_msg}")
     return durations, raw_durations, _get_triton_compile_infos(fn)
 
 def _may_triton_func(fn: Any) -> Any:
