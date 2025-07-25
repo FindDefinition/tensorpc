@@ -16,6 +16,7 @@ import abc
 import asyncio
 import base64
 import bisect
+import aiohttp.client_exceptions
 from collections.abc import MutableMapping
 import enum
 import gzip
@@ -72,6 +73,7 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType, ComponentEvent
                                         UIEvent, UISaveStateEvent,
                                         app_event_from_data)
 from tensorpc.dock.jsonlike import JsonLikeNode, JsonLikeType, parse_obj_to_jsonlike
+from tensorpc.dock.serv.common import APP_LOGGER
 from tensorpc.dock.serv_names import serv_names
 from tensorpc.dock.templates import get_all_app_templates
 from tensorpc.utils.address import get_url_port
@@ -1802,11 +1804,18 @@ class Flow:
                            node_id: str,
                            ui_ev_dict: Dict[str, Any],
                            is_sync: bool = False):
-        return await self.run_single_event(graph_id,
-                                           node_id,
-                                           AppEventType.UIEvent.value,
-                                           ui_ev_dict,
-                                           is_sync=is_sync)
+        try:
+            return await self.run_single_event(graph_id,
+                                            node_id,
+                                            AppEventType.UIEvent.value,
+                                            ui_ev_dict,
+                                            is_sync=is_sync)
+        except aiohttp.client_exceptions.ServerDisconnectedError:
+            APP_LOGGER.info("Ignore ui event due to server disconnected.")
+            return
+        except Exception as e:
+            APP_LOGGER.error(f"run_ui_event {ui_ev_dict} failed: {e}")
+            raise e
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
                                    ui_ev_dict: Dict[str, Any]):

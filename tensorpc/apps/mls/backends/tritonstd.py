@@ -27,6 +27,8 @@ from tensorpc.core.moduleid import get_object_type_from_module_id
 from tensorpc.core.pfl.core import PFLInlineRunEnv
 from tensorpc.utils.package_finder import find_submodule_from_file
 
+TRITON_VERSION_TUPLE = tuple(int(x) for x in triton.__version__.split(".")[:2])
+
 pfl.register_backend(
     "triton",
     pfl.PFLParseConfig(
@@ -98,7 +100,8 @@ def range_func(start: int,
 
 def _print_meta_infer(fn: Callable, *args: pfl.PFLExprInfo):
     print(
-        f"[pfl.staticanalysis]Types: {args}, metadatas: {[x.metadata for x in args]}"
+        f"[pfl.staticanalysis]Types: {args}, metadatas: {[x.metadata for x in args]}, "
+        f"constexprs: {[x._constexpr_data for x in args]}"
     )
     return None
 
@@ -1289,6 +1292,8 @@ class triton_std(triton_std_math):
     def load(pointer: PointerScalarFloat,
              mask: Optional[bool] = None,
              other: Optional[Union[int, float]] = None,
+             boundary_check: Optional[tuple[int, ...]] = None,
+             padding_option: Optional[str] = None,
              cache_modifier: Optional[str] = None,
              eviction_policy: Optional[str] = None) -> float:
         ...
@@ -1298,6 +1303,8 @@ class triton_std(triton_std_math):
     def load(pointer: PointerScalarInt,
              mask: Optional[bool] = None,
              other: Optional[Union[int, float]] = None,
+             boundary_check: Optional[tuple[int, ...]] = None,
+             padding_option: Optional[str] = None,
              cache_modifier: Optional[str] = None,
              eviction_policy: Optional[str] = None) -> int:
         ...
@@ -1307,6 +1314,8 @@ class triton_std(triton_std_math):
     def load(pointer: PointerTensor,
              mask: Optional[Tensor] = None,
              other: Optional[Union[int, float, Tensor]] = None,
+             boundary_check: Optional[tuple[int, ...]] = None,
+             padding_option: Optional[str] = None,
              cache_modifier: Optional[str] = None,
              eviction_policy: Optional[str] = None) -> Tensor:
         ...
@@ -1314,6 +1323,8 @@ class triton_std(triton_std_math):
     @staticmethod
     @overload
     def load(pointer: BlockPointer,
+             boundary_check: Optional[tuple[int, ...]] = None,
+             padding_option: Optional[str] = None,
              cache_modifier: Optional[str] = None,
              eviction_policy: Optional[str] = None) -> Tensor:
         ...
@@ -1325,6 +1336,8 @@ class triton_std(triton_std_math):
                        BlockPointer],
         mask: Optional[Union[Tensor, bool]] = None,
         other: Optional[Union[int, float, Tensor]] = None,
+        boundary_check: Optional[tuple[int, ...]] = None,
+        padding_option: Optional[str] = None,
         cache_modifier: Optional[str] = None,
         eviction_policy: Optional[str] = None
     ) -> Union[Tensor, int, float]:
@@ -1342,33 +1355,51 @@ class triton_std(triton_std_math):
             return pointer._wrapped.load(mask_wrapped, other_wrapped)
         elif isinstance(pointer, BlockPointer):
             assert mask is None, "BlockPointer does not support (don't need) mask"
-            return Tensor(pointer._wrapped.load([0, 0], other_wrapped))
+            assert other is None, "BlockPointer does not support other"
+            other_for_block = None 
+            if padding_option == "zero":
+                other_for_block = 0 
+            elif padding_option == "nan":
+                other_for_block = float("nan")
+            return Tensor(pointer._wrapped.load([0, 0], other_for_block))
         return Tensor(pointer._wrapped.load(mask_wrapped, other_wrapped))
 
     @staticmethod
     @overload
     def store(pointer: PointerScalarFloat,
               value: float,
-              mask: Optional[bool] = None) -> None:
+              mask: Optional[bool] = None,
+              boundary_check: Optional[tuple[int, ...]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> None:
         ...
 
     @staticmethod
     @overload
     def store(pointer: PointerScalarInt,
               value: int,
-              mask: Optional[bool] = None) -> None:
+              mask: Optional[bool] = None,
+              boundary_check: Optional[tuple[int, ...]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> None:
         ...
 
     @staticmethod
     @overload
     def store(pointer: PointerTensor,
               value: Tensor,
-              mask: Optional[Tensor] = None) -> None:
+              mask: Optional[Tensor] = None,
+              boundary_check: Optional[tuple[int, ...]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> None:
         ...
 
     @staticmethod
     @overload
-    def store(pointer: BlockPointer, value: Tensor) -> None:
+    def store(pointer: BlockPointer, value: Tensor,
+              boundary_check: Optional[tuple[int, ...]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> None:
         ...
 
     @staticmethod
@@ -1376,7 +1407,10 @@ class triton_std(triton_std_math):
     def store(pointer: Union[PointerTensor, PointerScalarFloat,
                              PointerScalarInt, BlockPointer],
               value: Union[int, float, Tensor],
-              mask: Optional[Union[Tensor, bool]] = None) -> None:
+              mask: Optional[Union[Tensor, bool]] = None,
+              boundary_check: Optional[tuple[int, ...]] = None,
+             cache_modifier: Optional[str] = None,
+             eviction_policy: Optional[str] = None) -> None:
         mask_wrapped = mask._wrapped if isinstance(mask, Tensor) else mask
         value_wrapped = value._wrapped if isinstance(value, Tensor) else value
         if isinstance(pointer, PointerScalarFloat):
@@ -2195,7 +2229,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
     async def bench_kernel_in_triton_process(self, fn: Any,
                                             warming_up: int = 2,
                                             run_cnt: int = 3,
-                                            override_kwargs: Optional[dict[str, Any]] = None):
+                                            override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None):
         # TODO: this don't support ptr of ptr in real triton sim currently.
         assert isinstance(
             fn, (triton.JITFunction,
@@ -2211,7 +2245,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                               fn_name, is_func_id,
                                               warming_up,
                                               run_cnt,
-                                              override_kwargs)
+                                              override_kwargs_set)
 
 def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
     if is_func_id:
@@ -2246,7 +2280,6 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
         inline_env = fn_meta.inline_run_env_fn(**fn_meta.real_kwargs)
     else:
         inline_env = fn_meta.inline_run_env_fn()
-    raw_fn = fn_meta.raw_fn
     kwargs = inline_env.kwargs
     kwargs = kwargs.copy()
     if override_kwargs is not None:
@@ -2276,6 +2309,7 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
         else:
             if k in all_triton_param_names or k in reserved_triton_param_names:
                 kwargs_triton[k] = v
+
             kwargs_torch[k] = v
     return fn, fn_meta, kwargs_triton, kwargs_torch, inline_env
 
@@ -2326,7 +2360,7 @@ def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
     # compare result here.
     for k, ref in sim_info.ref_results.items():
         print(
-            f"{k} triton res: {np.linalg.norm(ref - kwargs_th[k].cpu().numpy())}"
+            f"{k}-{ref.shape} triton res: {np.linalg.norm(ref - kwargs_th[k].cpu().numpy())}"
         )
 
 
@@ -2336,47 +2370,53 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                              is_func_id: bool,
                              warming_up: int = 2,
                              run_cnt: int = 3,
-                             override_kwargs: Optional[dict[str, Any]] = None):
+                             override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None):
     import torch
-    fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
-        func_id_or_path, fn_name, is_func_id, override_kwargs)
-    raw_fn = fn_meta.raw_fn
-    sim_info = inline_env.get_userdata_typed(TritonSimInfo)
-    assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
-
-    for j in range(warming_up):
-        fn[sim_info.grid_size_for_triton](**kwargs_tt)
+    if override_kwargs_set is None:
+        override_kwargs_set = {
+            "": None
+        }
     durations: list[float] = []
     raw_durations: list[dict[str, float]] = []
-    stream = torch.cuda.current_stream()
-    for j in range(run_cnt):
-        start_ev = torch.cuda.Event(enable_timing=True)
-        end_ev = torch.cuda.Event(enable_timing=True)
-        start_ev.record(stream)
-        fn[sim_info.grid_size_for_triton](**kwargs_tt)
-        end_ev.record(stream)
-        start_ev.synchronize()
-        end_ev.synchronize()
-        duration = start_ev.elapsed_time(end_ev)
-        durations.append(duration)
-        print(f"{fn_name}(triton) dur: {duration:.3f} ms")
-    if raw_fn is not None:
+
+    for kw_set_name, override_kwargs in override_kwargs_set.items():
+        fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
+            func_id_or_path, fn_name, is_func_id, override_kwargs)
+        raw_fn = fn_meta.raw_fn
+        sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+        assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
+
         for j in range(warming_up):
-            raw_fn(kwargs_th)
+            fn[sim_info.grid_size_for_triton](**kwargs_tt)
+        stream = torch.cuda.current_stream()
         for j in range(run_cnt):
-            duration = raw_fn(kwargs_th)
-            if isinstance(duration, float):
-                duration_dict = {
-                    "raw": duration,
-                }
-            else:
-                assert isinstance(duration, dict), \
-                    "raw_fn must return a float or dict with float values"
-                duration_dict = duration
-            raw_durations.append(duration_dict)
-            raw_dur_msg = ", ".join(
-                f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
-            print(f"{fn_name}(raw) dur: {raw_dur_msg}")
+            start_ev = torch.cuda.Event(enable_timing=True)
+            end_ev = torch.cuda.Event(enable_timing=True)
+            start_ev.record(stream)
+            fn[sim_info.grid_size_for_triton](**kwargs_tt)
+            end_ev.record(stream)
+            start_ev.synchronize()
+            end_ev.synchronize()
+            duration = start_ev.elapsed_time(end_ev)
+            durations.append(duration)
+            print(f"{fn_name} {kw_set_name}(triton) dur: {duration:.3f} ms")
+        if raw_fn is not None:
+            for j in range(warming_up):
+                raw_fn(kwargs_th)
+            for j in range(run_cnt):
+                duration = raw_fn(kwargs_th)
+                if isinstance(duration, float):
+                    duration_dict = {
+                        "raw": duration,
+                    }
+                else:
+                    assert isinstance(duration, dict), \
+                        "raw_fn must return a float or dict with float values"
+                    duration_dict = duration
+                raw_durations.append(duration_dict)
+                raw_dur_msg = ", ".join(
+                    f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
+                print(f"{fn_name}(raw) dur: {raw_dur_msg}")
     return durations, raw_durations, _get_triton_compile_infos(fn)
 
 def _may_triton_func(fn: Any) -> Any:

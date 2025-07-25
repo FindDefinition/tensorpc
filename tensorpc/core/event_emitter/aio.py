@@ -98,10 +98,9 @@ class AsyncIOEventEmitter(EventEmitter[KT, Unpack[VTs]]):
     ):
         try:
             coro: Any = f(*args)
-        except Exception as exc:
-            self.emit_exception(ExceptionParam(exc))
-        else:
             if iscoroutine(coro):
                 await coro
             else:
                 return
+        except BaseException as exc:
+            self.emit_exception(ExceptionParam(exc))

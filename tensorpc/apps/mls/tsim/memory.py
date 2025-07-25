@@ -315,11 +315,12 @@ class SimMemoryStorage(SimTensorStorage):
                 old = SimTensor(pointer.shape, pointer.dtype)
                 return old
             return
-
-        if isinstance(mask, bool):
-            mask_ten = zeros([], DTypeEnum.bool_)
-            mask_ten.get_storage_checked().data[:] = mask
-            mask = mask_ten
+        if mask is not None:
+            if isinstance(mask, bool):
+                mask_ten = zeros([], DTypeEnum.bool_)
+                mask_ten.get_storage_checked().data[:] = mask
+                mask = mask_ten
+            mask = broadcast_to(mask, pointer.shape)
         map_result = self._boundry_check_and_map_pointers(pointer, mask)
         mapped_pointer_data = map_result.mapped
         block_name = map_result.block_name

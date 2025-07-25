@@ -7,6 +7,7 @@ from collections import OrderedDict
 import dataclasses
 import inspect
 from threading import Lock
+import traceback
 from typing import (Any, Callable, Dict, Generic, List, Mapping, Optional, Set,
                     Tuple, TypeVar, Union, cast)
 
@@ -289,9 +290,16 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
 
         with self._lock:
             funcs = list(self._exc_event_handlers.values())
-        for f in funcs:
-            self._emit_exc_run(f, args)
-            handled = True
+        if not funcs:
+            tb = traceback.format_exception(
+                type(args.exc), args.exc, args.exc.__traceback__)
+            print("Uncaught exception in event emitter:")
+            print("".join(tb))
+            return False 
+        else:
+            for f in funcs:
+                self._emit_exc_run(f, args)
+                handled = True
 
         return handled
 

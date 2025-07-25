@@ -208,12 +208,20 @@ class _WatchDogForKernelFile(watchdog.events.FileSystemEventHandler):
 
     def __init__(
             self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES],
-                                        None]) -> None:
+                                        None],
+                ignore_mtime: float) -> None:
         super().__init__()
         self._on_modified = on_modified
+        self._ignore_mtime = ignore_mtime
 
     def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
         if isinstance(event, watchdog.events.FileModifiedEvent):
+            src_path = event.src_path
+            if isinstance(src_path, bytes):
+                src_path = src_path.decode("utf-8")
+            cur_mtime = Path(src_path).stat().st_mtime
+            if cur_mtime == self._ignore_mtime and self._ignore_mtime != -1:
+                return 
             return self._on_modified(event)
 
 
@@ -234,14 +242,14 @@ class TritonKernelManagerState:
     watchdog_watcher: Optional[_WatchDogForKernelFile] = None
     watchdog_observer: Optional[Any] = None
 
-    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None]) -> None:
+    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None], ignore_mtime: float) -> None:
         assert self.watchdog_observer is None and self.watchdog_watcher is None
-        self.watchdog_watcher = _WatchDogForKernelFile(debounce(0.1)(handler))
+        self.watchdog_watcher = _WatchDogForKernelFile(debounce(0.1)(handler), ignore_mtime)
         self.watchdog_observer = Observer()
         self.watchdog_observer.schedule(self.watchdog_watcher, self.path, recursive=False)
         self.watchdog_observer.start()
 
-    def close(self):
+    def stop_watchdog(self):
         if self.watchdog_observer is not None:
             self.watchdog_observer.stop()
             self.watchdog_observer.join()
@@ -285,8 +293,11 @@ class TritonKernelManager:
     def runner(self):
         return self.state.runner 
 
-    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None]) -> None:
-        self.state.setup_watchdog(handler)
+    def setup_watchdog(self, handler: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None], ignore_mtime: float) -> None:
+        self.state.setup_watchdog(handler, ignore_mtime)
+
+    def stop_watchdog(self) -> None:
+        self.state.stop_watchdog()
 
     async def validate(self):
         await self.runner.copy().validate_kernel_by_test_data(self.state.fn)
@@ -303,7 +314,7 @@ class TritonKernelManager:
             # remove from linecache
             linecache.checkcache(self._compiled_tmp_file_path)
             self._compiled_tmp_file_path = None
-        self.state.close()
+        self.state.stop_watchdog()
 
     def _get_module_dict_init(self, path: str, code: Optional[str] = None):
         module_import_path = find_submodule_from_file(path)
@@ -703,9 +714,9 @@ class TritonSim:
             draft.grid_size_x_range = (0, self._runner.grid_size[0] - 1, 1)
             draft.grid_size_y_range = (0, self._runner.grid_size[1] - 1, 1)
             draft.grid_size_z_range = (0, self._runner.grid_size[2] - 1, 1)
-            draft.grid_idx_x = 0
-            draft.grid_idx_y = 0
-            draft.grid_idx_z = 0
+            draft.grid_idx_x = min(self.dm.model.grid_idx_x, self._runner.grid_size[0] - 1)
+            draft.grid_idx_y = min(self.dm.model.grid_idx_y, self._runner.grid_size[1] - 1)
+            draft.grid_idx_z = min(self.dm.model.grid_idx_z, self._runner.grid_size[2] - 1)
         sim_info = self._runner.runner.triton_sim_info
         gmem = sim_info.global_mem
         assert gmem is not None 
@@ -736,32 +747,42 @@ class TritonSim:
                 else:
                     src_path = cast(str, event.src_path)
                 content = Path(src_path).read_text(encoding="utf-8")
-                asyncio.run_coroutine_threadsafe(
-                    self._recompile(content),
-                    loop
-                )
-                asyncio.run_coroutine_threadsafe(
-                    self.editor.write(content),
-                    loop
-                )
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self.editor.write(content),
+                        loop
+                    )
+                    fut.result()
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._recompile(content, write_to_file=False),
+                        loop
+                    )
+                    fut.result()
+                except BaseException as e:
+                    traceback.print_exc()
 
-    async def _recompile(self, new_content: str, bkpt_lineno: Optional[int] = None):
+    async def _recompile(self, new_content: str, bkpt_lineno: Optional[int] = None, write_to_file: bool = True):
         assert self._runner is not None, "Runner must be initialized before saving"
         prev_is_paused = self._runner.runner.is_paused()
-        # print(0)
-        await self._on_debug_stop()
-        # print(1)
-        self._runner.close()
-        with open(self._runner.state.path, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        self._runner.recompile(new_content)
-        await self._runner.validate()
-        await self._init_sim_info()
-        self._runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()))
-        self._install_event_handlers_to_runner(self._runner)
         if prev_is_paused:
             if bkpt_lineno is None:
                 bkpt_lineno = self._runner.runner.get_cur_bkpt_checked().node.source_loc[0]
+
+        # print(0)
+        await self._on_debug_stop()
+        # print(1)
+        # always write to file even if bug.
+        if write_to_file:
+            self._runner.stop_watchdog()
+            with open(self._runner.state.path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            file_cur_mtime = Path(self._runner.state.path).stat().st_mtime
+            self._runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()), file_cur_mtime)
+        self._runner.recompile(new_content)
+        await self._runner.validate()
+        await self._init_sim_info()
+        self._install_event_handlers_to_runner(self._runner)
+        if prev_is_paused:
             cur_grid_idxes = [self.x_slider.int(), self.y_slider.int(), self.z_slider.int()]
             for j in range(len(cur_grid_idxes)):
                 cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
@@ -825,7 +846,7 @@ class TritonSim:
         await self.editor.set_line_number(lineno)
         self._cur_observed_local_tensor_key = None
         await self._init_sim_info()
-        runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()))
+        runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()), -1)
 
     async def _handle_slider_change(self, value: Any, axis: int):
         if self._runner is None:
@@ -863,9 +884,11 @@ class TritonSim:
                         data = data.astype(np.int32 if data.dtype == np.int64 else np.uint32)
                     draft.local_matrices[local_key].matrix.data = data
                     draft.local_matrices[local_key].matrix.global_indices = storage.indices
-                    local_pos, local_color = Matrix.get_value_pos_and_color_gray(storage.data)
+                    local_pos, local_color, mask_pos = Matrix.get_value_pos_and_color_gray(storage.data)
                     draft.local_matrices[local_key].matrix.persist_fill_pos = local_pos
                     draft.local_matrices[local_key].matrix.persist_fill_color = local_color
+                    draft.local_matrices[local_key].matrix.temp_mask_pos = mask_pos
+
                     indices_dict = storage.indices
                     for global_key, inds in indices_dict.items():
                         inds_no_invalid = inds[inds != -1]
@@ -1220,6 +1243,7 @@ class TritonSim:
                                 end_lineno = end_lineno_mapped
                         if end_lineno < query_range.startLineNumber or end_lineno > query_range.endLineNumber:
                             continue
+                        # print(end_lineno, node.get_source_loc_checked()[3] + 1)
                         res.append(mui.MonacoInlayHint(
                             label=f":{val_str}",
                             position=mui.MonacoPosition(end_lineno, node.get_source_loc_checked()[3] + 1),

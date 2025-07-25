@@ -139,8 +139,9 @@ class Matrix(MatrixBase):
         mat = tensor.reshape(shape)
         if mat.dtype.kind != "f":
             mat = mat.astype(np.float32)
-        mat_max = np.max(mat)
-        mat_min = np.min(mat)
+        mat_inf_nan_mask = np.isinf(mat) | np.isnan(mat)
+        mat_no_inf_nan_mask = ~(mat_inf_nan_mask.reshape(-1))
+        mat_no_inf_nan = mat.reshape(-1)[mat_no_inf_nan_mask]
         width = shape[1]
         height = shape[0]
         mat_flat_inds = np.arange(mat.size, dtype=np.int32)
@@ -149,6 +150,10 @@ class Matrix(MatrixBase):
         if transposed:
             fill_pos_x, fill_pos_y = fill_pos_y, fill_pos_x
         fill_pos = np.stack([fill_pos_x, -fill_pos_y * height_scale], axis=-1)
+        if mat_no_inf_nan.size == 0:
+            return None, None, fill_pos
+        mat_max = np.max(mat_no_inf_nan)
+        mat_min = np.min(mat_no_inf_nan)
 
         # get gray color based on value
         mat_flat = mat.flatten()
@@ -163,8 +168,12 @@ class Matrix(MatrixBase):
             color_res[:, 0] = 0.5  # R
             color_res[:, 1] = 0.5  # G
             color_res[:, 2] = 0.5  # B
-
-        return fill_pos, color_res
+        if mat_no_inf_nan.size != mat_flat.size:
+            # has mask 
+            mask_pos = fill_pos[~mat_no_inf_nan_mask]
+        else:
+            mask_pos = None
+        return fill_pos[mat_no_inf_nan_mask], color_res[mat_no_inf_nan_mask], mask_pos
 
     def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True):
         inds_flat = inds.reshape(-1).astype(np.float32)

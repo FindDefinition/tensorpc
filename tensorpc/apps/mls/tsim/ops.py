@@ -17,7 +17,13 @@ def where(cond: SimTensor, x: Union[int, float, bool, SimTensor], y: Union[int, 
     assert x_dtype == y_dtype, f"where(, x, y) dtype of x, y must be same, get {x_dtype.name} and {y_dtype.name}."
 
     if cond.storage is None:
-        return dataclasses.replace(cond, dtype=x_dtype)
+        shapes = [cond.shape]
+        if isinstance(x, SimTensor):
+            shapes.append(x.shape)
+        if isinstance(y, SimTensor):
+            shapes.append(y.shape)
+        final_shape = np.broadcast_shapes(*shapes)
+        return dataclasses.replace(cond, dtype=x_dtype, shape=list(final_shape))
     if isinstance(x, SimTensor):
         assert x.storage is not None 
         x_data = x.storage.data 
