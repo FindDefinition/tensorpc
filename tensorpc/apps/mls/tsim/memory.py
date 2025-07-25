@@ -400,9 +400,9 @@ class SimMemoryStorage(SimTensorStorage):
             old_data[mask_view] = data_raw[pointer_data_masked]
 
         if atomic_op == "add":
-            data_raw[pointer_data] += stored_data_raw
+            data_raw[pointer_data_masked] += stored_data_raw_masked
         elif atomic_op == "and":
-            data_raw[pointer_data] &= stored_data_raw
+            data_raw[pointer_data_masked] &= stored_data_raw_masked
         elif atomic_op == "cas":
             assert atomic_cas_cmp is not None, "CAS operation requires atomic_cas_cmp"
             if isinstance(atomic_cas_cmp, SimTensor):
@@ -411,24 +411,24 @@ class SimMemoryStorage(SimTensorStorage):
             else:
                 atomic_cas_cmp_val = atomic_cas_cmp
             store_cas = np.where(
-                data_raw[pointer_data] == atomic_cas_cmp_val,
-                stored_data_raw, data_raw[pointer_data])
-            data_raw[pointer_data] = store_cas
+                data_raw[pointer_data_masked] == atomic_cas_cmp_val,
+                stored_data_raw_masked, data_raw[pointer_data_masked])
+            data_raw[pointer_data_masked] = store_cas
         elif atomic_op == "max":
-            data_raw[pointer_data] = np.maximum(data_raw[pointer_data],
-                                                stored_data_raw)
+            data_raw[pointer_data_masked] = np.maximum(data_raw[pointer_data_masked],
+                                                stored_data_raw_masked)
         elif atomic_op == "min":
-            data_raw[pointer_data] = np.minimum(data_raw[pointer_data],
-                                                stored_data_raw)
+            data_raw[pointer_data_masked] = np.minimum(data_raw[pointer_data_masked],
+                                                stored_data_raw_masked)
         elif atomic_op == "or":
-            data_raw[pointer_data] |= stored_data_raw
+            data_raw[pointer_data_masked] |= stored_data_raw_masked
         elif atomic_op == "xor":
-            data_raw[pointer_data] ^= stored_data_raw
+            data_raw[pointer_data_masked] ^= stored_data_raw_masked
         elif atomic_op == "xchg":
             # exchange operation, swap the data
-            tmp = data_raw[pointer_data].copy()
-            data_raw[pointer_data] = stored_data_raw
-            stored_data_raw[:] = tmp
+            tmp = data_raw[pointer_data_masked].copy()
+            data_raw[pointer_data_masked] = stored_data_raw_masked
+            stored_data_raw_masked[:] = tmp
         else:
             data_raw[pointer_data_masked] = stored_data_raw_masked
         # all inds are stored in flatten array.
