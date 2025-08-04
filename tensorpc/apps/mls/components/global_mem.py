@@ -175,7 +175,7 @@ class Matrix(MatrixBase):
             mask_pos = None
         return fill_pos[mat_no_inf_nan_mask], color_res[mat_no_inf_nan_mask], mask_pos
 
-    def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True):
+    def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True, color_advance: Optional[np.ndarray] = None):
         inds_flat = inds.reshape(-1).astype(np.float32)
         fill_pos_x = (inds_flat % self.width) + 0.5 - self.width / 2
         fill_pos_y = (np.floor(inds_flat / self.width) + 0.5 - self.height / 2)
@@ -187,10 +187,13 @@ class Matrix(MatrixBase):
             color = ColorUtil.getPerfettoColorRGB(global_key)
         else:
             color = ColorUtil.getPerfettoVariantColorRGB(global_key)
-
-        fill_color[:, 0] = color[0] / 255
-        fill_color[:, 1] = color[1] / 255
-        fill_color[:, 2] = color[2] / 255
+        if color_advance is None:
+            color_advance_val = 0
+        else:
+            color_advance_val = color_advance
+        fill_color[:, 0] = (color[0] / 255 + color_advance_val) % 1.0
+        fill_color[:, 1] = (color[1] / 255 + color_advance_val) % 1.0
+        fill_color[:, 2] = (color[2] / 255 + color_advance_val) % 1.0
         return fill_pos,  fill_color
 
 @dataclasses.dataclass
@@ -202,18 +205,18 @@ class GlobalMemoryModel:
     def empty():
         return GlobalMemoryModel(
             matrices={},
-            minimap=plus.hud.MinimapModel(1, 1)
+            minimap=plus.hud.MinimapModel(1, 1, fit_mode=int(plus.hud.MinimapFitMode.WIDTH))
         )
 
     @pfl.mark_pfl_compilable
     def _do_autolayout(self, width: float):
         if self.autolayout_width > 0:
             whs: list[tuple[float, float]] = []
-            for m in self.matrices.values():
+            for k, m in self.matrices.items():
                 whs.append((m.widthLayout, m.heightLayout))
             layout_res = pfl.js.MathUtil.binpack(whs, pfl.js.Math.min(self.autolayout_width, width))
             cnt = 0
-            for m in self.matrices.values():
+            for k, m in self.matrices.items():
                 new_x, new_y = layout_res.result[cnt]
                 m.offsetX = new_x + m.widthLayout / 2 - layout_res.width / 2
                 m.offsetY = new_y + m.heightLayout / 2 - layout_res.height / 2
@@ -241,7 +244,7 @@ class GlobalMemLayers(enum.IntEnum):
     TEXT = -2
     INDICATOR = -1
 
-class GlobalMatrixPanel(three.Group):
+class MatrixPanel(three.Group):
     def __init__(self, draft: Matrix, enable_hover_line: bool = False):
         assert isinstance(draft, DraftBase)
         trs_empty = np.zeros((0, 2), dtype=np.float32)
@@ -429,7 +432,7 @@ class GlobalMemContainer(mui.FlexBox):
             dm = mui.DataModel(empty_model, [])
             draft = dm.get_draft()
             minimap = plus.hud.MiniMap(draft.minimap, {
-                k: GlobalMatrixPanel(draft.matrices[k]) for k, v in matrices.items()
+                k: MatrixPanel(draft.matrices[k]) for k, v in matrices.items()
             })
         else:
             if external_draft is not None:
@@ -547,7 +550,7 @@ class GlobalMemContainer(mui.FlexBox):
 
 
     async def set_matrix_dict(self, matrices: dict[str, np.ndarray], layout: Optional[list[list[Optional[str]]]] = None):
-        matrixe_panels: dict[str, GlobalMatrixPanel] = {}
+        matrixe_panels: dict[str, MatrixPanel] = {}
         gmatrices, max_width, max_height = self._get_global_matrix(matrices, layout)
         await self.minimap.set_new_childs([])
 
@@ -558,7 +561,7 @@ class GlobalMemContainer(mui.FlexBox):
             self._draft.matrices = {}
             for k, v in gmatrices.items():
                 self._draft.matrices[k] = v
-                matrixe_panels[k] = GlobalMatrixPanel(self._draft.matrices[k])
+                matrixe_panels[k] = MatrixPanel(self._draft.matrices[k])
             self._draft.minimap.width = max_width
             self._draft.minimap.height = max_height
             if layout is None:

@@ -8,6 +8,8 @@ import math
 import importlib.machinery
 import concurrent
 import multiprocessing
+import time
+import traceback
 import types
 import triton
 from tensorpc.apps.mls.tsim import get_tensorsim_context_checked
@@ -679,6 +681,10 @@ class TensorDescriptor:
         value_wrapped = value._wrapped if isinstance(value, Tensor) else value
         self._wrapped.store(offset, value_wrapped)
 
+    def atomic_add(self, offset: list[int], value: Tensor) -> Tensor:
+        res = self._wrapped.store(offset, value._wrapped, atomic_op="add")
+        assert res is not None
+        return Tensor(res)
 
 @pfl.register_pfl_std(mapped_name="TritonBlockPointer", backend="triton")
 @dataclasses.dataclass
@@ -1323,6 +1329,8 @@ class triton_std(triton_std_math):
     @staticmethod
     @overload
     def load(pointer: BlockPointer,
+             mask: Optional[Tensor] = None,
+             other: Optional[Union[int, float, Tensor]] = None,
              boundary_check: Optional[tuple[int, ...]] = None,
              padding_option: Optional[str] = None,
              cache_modifier: Optional[str] = None,
@@ -1877,17 +1885,21 @@ class triton_std(triton_std_math):
             res = Tensor(res1)
         else:
             res1 = pointer._wrapped.store(value_wrapped, mask_wrapped, atomic_op="add")
-            assert isinstance(res1, tsim.SimTensor)
+            assert isinstance(res1, tsim.SimTensor), str(type(res1))
             res = Tensor(res1)
         assert res is not None 
         return res
 
 T = TypeVar("T")
-tl.atomic_add
 
 def _triton_anno_transform(inferred: pfl.PFLExprInfo,
-                           anno_in_ast: Any) -> pfl.PFLExprInfo:
+                           anno_in_ast: Any,
+                           default: Union[Undefined, Any]) -> pfl.PFLExprInfo:
     if anno_in_ast is tl.constexpr:
+        # handle arg: tl.constexpr = xxx
+        # if not isinstance(default, Undefined):
+        #     pass 
+        # print("_triton_anno_transform", anno_in_ast, inferred)
         inferred = dataclasses.replace(inferred)
         inferred.anno_metadatas_ext.append(ConstExpr())
     return inferred
@@ -1910,7 +1922,8 @@ class TritonSimInfo:
     vis_layout: Optional[list[list[Optional[str]]]] = None
     grid_size_for_triton: Optional[Callable[[Any], tuple[int, int,
                                                          int]]] = None
-
+    postprocess_fn: Optional[Callable[[str, np.ndarray], Any]] = None
+    kwargs_for_raw: Optional[dict[str, Any]] = None
 
 class TritonSimExecType(enum.IntEnum):
     SIM = 0
@@ -1977,7 +1990,7 @@ def _validate_and_convert_triton_kwargs(
             # TODO add support for string constexpr
             assert isinstance(
                 v, (int, float,
-                    bool)), f"Unsupported type {type(v)} for triton kwargs."
+                    bool, str)), f"Unsupported type {type(v)} for triton kwargs."
             new_kwargs[k] = v
 
     return new_kwargs, global_mem
@@ -2016,7 +2029,7 @@ def _create_metadata_from_triton_kwargs(
             # TODO add support for string constexpr
             assert isinstance(
                 v, (int, float,
-                    bool)), f"Unsupported type {type(v)} for triton kwargs."
+                    bool, str)), f"Unsupported type {type(v)} for triton kwargs {k}."
             new_kwargs[k] = v
 
     return new_kwargs
@@ -2144,21 +2157,28 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
 
         lib = self._library
         kwargs, _ = _validate_and_convert_triton_kwargs(kwargs, global_mem)
-        for j in range(grid_size[0]):
-            for k in range(grid_size[1]):
-                for l in range(grid_size[2]):
-                    with tsim.enter_tensorsim_context([j, k, l],
-                                                      grid_size,
-                                                      global_mem=global_mem):
-                        kwargs_cloned = kwargs.copy()
-                        for key, v in kwargs_cloned.items():
-                            if isinstance(
-                                    v, (PointerTensor, PointerScalarFloat,
-                                        PointerScalarInt, TensorDescriptor)):
-                                kwargs_cloned[key] = v.clone()
-                        await self.run_func(
-                            lib.get_compiled_unit_specs(fn_no_jit)[0].uid,
-                            kwargs_cloned)
+        jkl_arr_tuple = np.meshgrid(
+            range(grid_size[0]), range(grid_size[1]), range(grid_size[2]),
+            indexing="ij")
+        jkl_arr = np.stack(jkl_arr_tuple, axis=-1).reshape(
+            -1, 3)
+        jkl_arr = jkl_arr[::-1]
+        for jkl in jkl_arr:
+            j = int(jkl[0])
+            k = int(jkl[1])
+            l = int(jkl[2])
+            with tsim.enter_tensorsim_context([j, k, l],
+                                                grid_size,
+                                                global_mem=global_mem):
+                kwargs_cloned = kwargs.copy()
+                for key, v in kwargs_cloned.items():
+                    if isinstance(
+                            v, (PointerTensor, PointerScalarFloat,
+                                PointerScalarInt, TensorDescriptor)):
+                        kwargs_cloned[key] = v.clone()
+                await self.run_func(
+                    lib.get_compiled_unit_specs(fn_no_jit)[0].uid,
+                    kwargs_cloned)
 
     def _run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int],
                                 global_mem: tsim.SimMemoryStorage,
@@ -2183,6 +2203,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                            res_comparer: Optional[Callable[
                                                [Any, Any], Any]] = None,
                                            run_triton: bool = False) -> None:
+
         fn_no_jit = _may_triton_func(fn)
         inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
@@ -2192,9 +2213,12 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
         if sim_info.global_mem is not None:
             for k, ref in sim_info.ref_results.items():
                 desc = sim_info.global_mem.memory_blocks[k]
-                print(k, np.linalg.norm(desc.get_data_view_checked() - ref))
+                res = desc.get_data_view_checked()
+                if sim_info.postprocess_fn is not None:
+                    res = sim_info.postprocess_fn(k, res)
+                print(k, np.linalg.norm(res - ref))
                 if res_comparer is not None:
-                    res_comparer(desc.get_data_view_checked(), ref)
+                    res_comparer(res, ref)
         if run_triton:
             await self.validate_kernel_in_triton_process(fn)
 
@@ -2289,6 +2313,7 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
             for k_to_rm in cfg.kwargs:
                 kwargs.pop(k_to_rm, None)
             break
+    sim_info = inline_env.get_userdata_typed(TritonSimInfo)
     # TODO support tensor descriptor and host tensor descriptor
     kwargs_triton: dict[str, torch.Tensor] = {}
     kwargs_torch: dict[str, torch.Tensor] = {}
@@ -2311,28 +2336,33 @@ def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
                 kwargs_triton[k] = v
 
             kwargs_torch[k] = v
+    if sim_info.kwargs_for_raw is not None:
+        kwargs_torch.update(sim_info.kwargs_for_raw)
     return fn, fn_meta, kwargs_triton, kwargs_torch, inline_env
 
 @dataclasses.dataclass
 class TritonKernelCompileInfo:
     asm: dict[str, str]
     metadata: dict[str, Any]
+    best_config: Any = None
 
-def _get_triton_compile_infos(kernel) -> TritonKernelCompileInfo:
+def _get_triton_compile_infos(kernel, **kwargs_tt) -> TritonKernelCompileInfo:
     from triton.runtime.driver import driver
 
     device = driver.active.get_current_device()
+    best_config = {}
     if isinstance(kernel, triton.runtime.Autotuner):
+        best_config = kernel.best_config.all_kwargs()
         kernel = kernel.fn
     if hasattr(kernel, "device_caches"):
-        kernel_cache = kernel.device_caches[device]
+        cache_entry, target, backend, binder = kernel.device_caches[device]
     else:
-        kernel_cache = kernel.cache
-
+        cache_entry, target, backend, binder = kernel.cache
+    bound_args, specialization, options = binder(**kwargs_tt, **best_config, debug=False)
+    # compute cache key
+    key = str(specialization) + str(options)
     # Get the first cached compilation (or iterate over all)
-    cache_entry = kernel_cache[0]
-
-    compiled_kernel = list(cache_entry.values())[0]
+    compiled_kernel = cache_entry[key]
 
     # Access the 'asm' dictionary
     asm_dict = compiled_kernel.asm.copy()
@@ -2342,27 +2372,36 @@ def _get_triton_compile_infos(kernel) -> TritonKernelCompileInfo:
             # e.g. cubin
             asm_dict.pop(k)
     # List all keys in the 'asm' dictionary
-    all_keys = asm_dict.keys()
-    print("All keys in asm dictionary:", all_keys) # All keys in asm dictionary: dict_keys(['ttir', 'ttgir', 'llir', 'ptx', 'cubin'])
     metadata_dict = compiled_kernel.metadata._asdict().copy()
     metadata_dict.pop("target")
     metadata_dict["n_regs"] = compiled_kernel.n_regs
-    return TritonKernelCompileInfo(asm_dict, metadata_dict)
+    return TritonKernelCompileInfo(asm_dict, metadata_dict, best_config)
 
 
 def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
                                   is_func_id: bool):
-    fn, fn_meta, kwargs_th, _, inline_env = _get_triton_run_datas_from_path(
+    fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
         func_id_or_path, fn_name, is_func_id)
     sim_info = inline_env.get_userdata_typed(TritonSimInfo)
     assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
-    fn[sim_info.grid_size_for_triton](**kwargs_th)
+    fn[sim_info.grid_size_for_triton](**kwargs_tt)
     # compare result here.
+    run_info = _get_triton_compile_infos(fn, **kwargs_tt)
+    print(run_info.best_config)
     for k, ref in sim_info.ref_results.items():
+        if isinstance(ref, HostTensorDescriptor):
+            ref_data = ref.data
+        else:
+            ref_data = ref
+        res = kwargs_th[k].cpu().numpy()
+        if sim_info.postprocess_fn is not None:
+            res = sim_info.postprocess_fn(k, res)
+        
         print(
-            f"{k}-{ref.shape} triton res: {np.linalg.norm(ref - kwargs_th[k].cpu().numpy())}"
+            f"{k}-{ref_data.shape} triton res: {np.linalg.norm(ref_data.astype(np.float32) - res.astype(np.float32))}"
         )
-
+        # error = np.abs(ref_data.astype(np.float32) - res.astype(np.float32))
+        # print(error)
 
 
 def _run_triton_fn_for_bench(func_id_or_path: str,
@@ -2378,16 +2417,21 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
         }
     durations: list[float] = []
     raw_durations: list[dict[str, float]] = []
-
+    run_info: Optional[TritonKernelCompileInfo] = None
     for kw_set_name, override_kwargs in override_kwargs_set.items():
         fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
             func_id_or_path, fn_name, is_func_id, override_kwargs)
         raw_fn = fn_meta.raw_fn
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
         assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
+        try:
 
-        for j in range(warming_up):
-            fn[sim_info.grid_size_for_triton](**kwargs_tt)
+            for j in range(warming_up):
+                fn[sim_info.grid_size_for_triton](**kwargs_tt)
+        except:
+            traceback.print_exc()
+            continue 
+
         stream = torch.cuda.current_stream()
         for j in range(run_cnt):
             start_ev = torch.cuda.Event(enable_timing=True)
@@ -2400,6 +2444,7 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
             duration = start_ev.elapsed_time(end_ev)
             durations.append(duration)
             print(f"{fn_name} {kw_set_name}(triton) dur: {duration:.3f} ms")
+            time.sleep(0.01)
         if raw_fn is not None:
             for j in range(warming_up):
                 raw_fn(kwargs_th)
@@ -2417,7 +2462,10 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                 raw_dur_msg = ", ".join(
                     f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
                 print(f"{fn_name}(raw) dur: {raw_dur_msg}")
-    return durations, raw_durations, _get_triton_compile_infos(fn)
+        run_info = _get_triton_compile_infos(fn, **kwargs_tt)
+        print("nregs:", run_info.metadata["n_regs"], "shared:", run_info.metadata["shared"], "cfg", run_info.best_config)
+    assert run_info is not None
+    return durations, raw_durations, run_info
 
 def _may_triton_func(fn: Any) -> Any:
     if isinstance(fn, triton.runtime.Autotuner):

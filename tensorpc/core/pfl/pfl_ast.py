@@ -608,6 +608,28 @@ class PFLBoolOp(PFLExpr):
         for v in self.values:
             assert v.st.support_bool_op()
         self.st = PFLExprInfo(PFLExprType.BOOL)
+        # handle exprs such as `a or True`
+        if self.op == BoolOpType.OR:
+            # if any of the values is True, the result is True
+            has_true = False 
+            for v in self.values:
+                if v.st.type == PFLExprType.BOOL and v.st._constexpr_data is True:
+                    has_true = True
+                    break
+            if has_true:
+                self.st._constexpr_data = True 
+                return self 
+        # handle exprs such as `a and False`
+        if self.op == BoolOpType.AND:
+            # if any of the values is False, the result is False
+            has_false = False 
+            for v in self.values:
+                if v.st.type == PFLExprType.BOOL and v.st._constexpr_data is False:
+                    has_false = True
+                    break
+            if has_false:
+                self.st._constexpr_data = False 
+                return self
         is_const = PFLExpr.all_constexpr(*self.values)
         if is_const:
             self.st._constexpr_data = self.run(*[v.st._constexpr_data for v in self.values])
@@ -1174,7 +1196,6 @@ class PFLCall(PFLExpr):
             assert len(self.args) <= len(
                 func_args
             ), f"func {self.func.st} expect {len(func_args)} args, but got {len(self.args)}"
-        
         func_arg_st_param = self._match_arg_sts_to_sig(func_args, last_is_vaarg)
         match_score = 0
         cnt = 0

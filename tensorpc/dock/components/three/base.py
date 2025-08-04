@@ -723,6 +723,7 @@ class HudGroupProps(Object3dContainerBaseProps):
     scrollValueX: Union[NumberType, Undefined] = undefined
     scrollValueY: Union[NumberType, Undefined] = undefined
     alwaysPortal: Union[bool, Undefined] = undefined
+    anchor: Union[tuple[int, int], Undefined] = undefined
 
 class HudGroup(O3dContainerWithEventBase[HudGroupProps, ThreeComponentType]):
     """Group that used in HUD (must be child of camera)

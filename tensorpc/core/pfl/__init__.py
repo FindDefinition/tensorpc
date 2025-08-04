@@ -17,7 +17,7 @@ from .core import (PFLCompileFuncMeta, PFLExprInfo, PFLExprType,
                    PFLVariableMeta, configure_std_func,
                    get_parse_cache_checked, get_parse_context, mark_meta_infer,
                    mark_pfl_compilable, register_backend, get_compilable_meta)
-from .evaluator import (PFLAsyncRunner, PFLAsyncRunnerStateType,
+from .evaluator import (PFLAsyncRunner, PFLRunnerStateType,
                         PFLStaticEvaluator, consteval_expr)
 from .parser import (ast_dump, iter_child_nodes, parse_expr_to_df_ast,
                      parse_func_to_pfl_ast, parse_func_to_pfl_library,

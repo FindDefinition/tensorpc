@@ -97,7 +97,7 @@ class TensorPanel(mui.FlexBox):
         return Model(
             (np.random.rand(320, 320, 4) * 255).astype(np.uint8),
             # img,
-            plus.hud.MinimapModel(320, 320 + 0),
+            plus.hud.MinimapModel(320, 320 + 0, fit_mode=int(plus.hud.MinimapFitMode.AUTO)),
             0.0,
             0.0,
             None)

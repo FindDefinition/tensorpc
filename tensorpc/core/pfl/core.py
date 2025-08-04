@@ -13,7 +13,7 @@ from typing_extensions import Literal, Self, get_overloads
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
-                                   Undefined,
+                                   Undefined, is_undefined,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
@@ -472,7 +472,9 @@ class PFLExprFuncArgInfo:
         return dataclasses.replace(self, type=self.type.typevar_substitution(typevar_map))
 
     def __repr__(self) -> str:
-        return f"{self.arg_name}={self.type}"
+        if not is_undefined(self.default):
+            return f"{self.arg_name}:{self.type}={self.default}"
+        return f"{self.arg_name}:{self.type}"
 
     def to_dict(self):
         return {
@@ -503,10 +505,15 @@ class PFLExprFuncInfo:
             if arg.is_vaargs:
                 args_str.append(f"...{arg}")
             else:
-                if not isinstance(arg.type._constexpr_data, Undefined):
-                    args_str.append(f"{arg.type}={arg.type._constexpr_data}")
+                if not is_undefined(arg.default):
+                    prefix = f"{arg.type}[{arg.default}]"
                 else:
-                    args_str.append(str(arg.type))
+                    prefix = str(arg.type)
+
+                if not isinstance(arg.type._constexpr_data, Undefined):
+                    args_str.append(f"{prefix}={arg.type._constexpr_data}")
+                else:
+                    args_str.append(prefix)
         args = ", ".join(args_str)
         res = f"({args}) => {self.return_type}"
         return res

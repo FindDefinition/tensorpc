@@ -42,8 +42,11 @@ class MinimapModel:
 
     isMinimapDown: bool = False
 
-    viewport_child_width: float = 1.0
-    viewport_child_height: float = 1.0
+    viewport_canvas_width: float = 1.0
+    viewport_canvas_height: float = 1.0
+
+    viewport_canvas_scale_w: float = 1.0
+    viewport_canvas_scale_h: float = 1.0
 
     child_scale: float = 1.0 
 
@@ -117,33 +120,15 @@ class MinimapModel:
         prev_scroll_value_y = self.scrollValueY
         new_scale = MathUtil.clamp(dx + prev, 1.0, 100.0)
         self.scale = new_scale
-        viewport_unified_height = self.layout.innerSizeY / self.layout.innerSizeX
-        child_unified_height = self.height / self.width
-        fit_mode = self.fit_mode
-        if self.fit_mode == MinimapFitMode.AUTO:
-            fit_mode = MinimapFitMode.WIDTH if viewport_unified_height > child_unified_height else MinimapFitMode.HEIGHT
         scale_x_prev = 1
         scale_y_prev = 1
         new_scale_x = 1
         new_scale_y = 1
-        if fit_mode == MinimapFitMode.WIDTH:
-            # all_rate = Math.max(child_unified_height / viewport_unified_height, 1.0)
-            all_rate = child_unified_height / viewport_unified_height
+        scale_x_prev = prev * self.viewport_canvas_scale_w
+        scale_y_prev = prev * self.viewport_canvas_scale_h
+        new_scale_x = new_scale * self.viewport_canvas_scale_w
+        new_scale_y = new_scale * self.viewport_canvas_scale_h
 
-            scale_x_prev = prev 
-            scale_y_prev = prev * all_rate
-            new_scale_x = new_scale
-            new_scale_y = new_scale * all_rate
-        else:
-            viewport_unified_width = self.layout.innerSizeX / self.layout.innerSizeY
-            child_unified_width = self.width / self.height
-            # all_rate = Math.max(child_unified_width / viewport_unified_width, 1.0)
-            all_rate = child_unified_width / viewport_unified_width
-
-            scale_x_prev = prev * all_rate
-            scale_y_prev = prev
-            new_scale_x = new_scale * all_rate
-            new_scale_y = new_scale
         real_dx = new_scale_x - scale_x_prev
         real_dy = new_scale_y - scale_y_prev
         rprev_x = 1 / scale_x_prev
@@ -155,7 +140,6 @@ class MinimapModel:
         # print("PxPy", Px, Py, (data.pointLocal[0] + 0.5), (-data.pointLocal[1] + 0.5))
         self.scrollValueX = MathUtil.clamp((Px - prev_scroll_value_x) * real_dx / Math.max(new_scale_x - 1.0, 1e-6) + prev_scroll_value_x, 0.0, 1.0)
         self.scrollValueY = MathUtil.clamp((Py - prev_scroll_value_y) * real_dy / Math.max(new_scale_y - 1.0, 1e-6) + prev_scroll_value_y, 0.0, 1.0)
-        # print("scrollValue", self.scrollValueX, self.scrollValueY, all_rate)
         self._do_layout()
 
     @pfl.mark_pfl_compilable
@@ -168,26 +152,21 @@ class MinimapModel:
 
     @pfl.mark_pfl_compilable
     def _do_layout(self):
-        if self.fit_mode == MinimapFitMode.WIDTH:
-            self.viewport_child_width = self.scale * self.layout.innerSizeX
-            self.viewport_child_height = self.scale * self.layout.innerSizeX * self.height / self.width
-            self.child_scale = self.scale * self.layout.innerSizeX / self.width
-        elif self.fit_mode == MinimapFitMode.HEIGHT:
-            self.viewport_child_width = self.scale * self.layout.innerSizeY * self.width / self.height
-            self.viewport_child_height = self.scale * self.layout.innerSizeY
-            self.child_scale = self.scale * self.layout.innerSizeY / self.height
-        else:
-            if (self.layout.innerSizeY / self.layout.innerSizeX) > (self.height / self.width):
-                # width is larger
-                self.viewport_child_width = self.scale * self.layout.innerSizeX
-                self.viewport_child_height = self.scale * self.layout.innerSizeX * self.height / self.width
-                self.child_scale = self.scale * self.layout.innerSizeX / self.width
-            else:
-                # height is larger
-                self.viewport_child_width = self.scale * self.layout.innerSizeY * self.width / self.height
-                self.viewport_child_height = self.scale * self.layout.innerSizeY
-                self.child_scale = self.scale * self.layout.innerSizeY / self.height
-
+        w_scale_rate = self.layout.innerSizeX / self.width
+        h_scale_rate = self.layout.innerSizeY / self.height
+        self.viewport_canvas_scale_w = 1.0
+        self.viewport_canvas_scale_h = 1.0
+        is_auto_w = (self.layout.innerSizeY / self.layout.innerSizeX) > (self.height / self.width)
+        if self.fit_mode == MinimapFitMode.WIDTH or is_auto_w:
+            self.viewport_canvas_scale_h = Math.max(1.0, self.height * w_scale_rate / self.layout.innerSizeY)
+            self.viewport_canvas_width = self.scale * self.layout.innerSizeX
+            self.viewport_canvas_height = self.scale * self.layout.innerSizeY * self.viewport_canvas_scale_h
+            self.child_scale = self.scale * w_scale_rate
+        elif self.fit_mode == MinimapFitMode.HEIGHT or (not is_auto_w):
+            self.viewport_canvas_scale_w = Math.max(1.0, self.width * h_scale_rate / self.layout.innerSizeX)
+            self.viewport_canvas_width = self.scale * self.layout.innerSizeX * self.viewport_canvas_scale_w
+            self.viewport_canvas_height = self.scale * self.layout.innerSizeY
+            self.child_scale = self.scale * h_scale_rate
 
 class MinimapLayer(enum.IntEnum):
     BKGD_LAYER = -100
@@ -246,8 +225,8 @@ class MiniMap(three.Group):
         # image.event_leave.add_frontend_draft_set_none(draft, "hover")
         base_event_plane.event_wheel.add_frontend_handler(dm, MinimapModel._wheel_handler_pfl_v2, targetPath=str(draft))
         viewport_group.bind_fields(
-            childWidth=draft.viewport_child_width, 
-            childHeight=draft.viewport_child_height, 
+            childWidth=draft.viewport_canvas_width, 
+            childHeight=draft.viewport_canvas_height, 
             scrollValueY=draft.scrollValueY, scrollValueX=draft.scrollValueX)
         # child_group.bind_fields(scale=draft.child_scale)
         child_group.bind_fields_unchecked_dict({

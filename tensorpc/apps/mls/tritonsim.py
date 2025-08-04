@@ -21,7 +21,7 @@ from watchdog.observers.api import ObservedWatch
 import dataclasses as dataclasses_plain
 from tensorpc.core.astex.sourcecache import SCDItem, SourceChangeDiffCache
 from tensorpc.apps.mls import tsim
-from tensorpc.apps.mls.components.global_mem import GlobalMatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix
+from tensorpc.apps.mls.components.global_mem import MatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix
 from tensorpc.apps.mls.tsim.core import TensorSimIoOp, get_flush_sim_io_ops
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.annolib import is_undefined
@@ -29,7 +29,7 @@ from tensorpc.core.astex.astcache import AstCache, AstCacheItem
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno, find_toplevel_func_node_container_by_lineno
 from tensorpc.core.moduleid import get_module_id_of_type
-from tensorpc.core.pfl.evaluator import PFLAsyncRunnerStateType, PFLBreakpoint, PFLCtrlFor, PFLCtrlBase
+from tensorpc.core.pfl.evaluator import PFLRunnerStateType, PFLRunnerBreakpoint, PFLRunnerCtrlFor, PFLRunnerCtrlBase
 from tensorpc.core.pfl.backends.js import ColorUtil, Math, MathUtil
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, appctx
@@ -62,7 +62,7 @@ class LocalMemoryModel:
 class LocalMemContainer(mui.TooltipFlexBox):
     def __init__(self, key: str, draft: LocalMemoryModel, use_view: bool = False):
         assert isinstance(draft, DraftBase)
-        panel = GlobalMatrixPanel(draft.matrix, enable_hover_line=True)
+        panel = MatrixPanel(draft.matrix, enable_hover_line=True)
         minimap = plus.hud.MiniMap(draft.minimap, [
             panel
         ])
@@ -166,15 +166,17 @@ class TritonSimModel:
             mat.temp_aabb_line_pos = None
             mat.temp_aabb_line_size = None
 
-    def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True):
+    def get_global_fill(self, global_key: str, inds: np.ndarray, is_persist: bool = True, color_advance: Optional[np.ndarray] = None):
         global_mat = self.global_mem.matrices[global_key]
-        return global_mat.get_global_fill(global_key, inds, is_persist=is_persist)
+        return global_mat.get_global_fill(global_key, inds, is_persist=is_persist, color_advance=color_advance)
 
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class SingleBlockRunState:
     # used to record all memory access in history.
     global_access_indices: dict[str, np.ndarray]
+    global_access_advances: dict[str, np.ndarray]
+    global_access_cnt: dict[str, int]
 
 
 class InlineCompPrefix(enum.Enum):
@@ -213,16 +215,21 @@ class _WatchDogForKernelFile(watchdog.events.FileSystemEventHandler):
         super().__init__()
         self._on_modified = on_modified
         self._ignore_mtime = ignore_mtime
+        self._disable = False
+        self._lock = threading.Lock()
 
     def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
-        if isinstance(event, watchdog.events.FileModifiedEvent):
-            src_path = event.src_path
-            if isinstance(src_path, bytes):
-                src_path = src_path.decode("utf-8")
-            cur_mtime = Path(src_path).stat().st_mtime
-            if cur_mtime == self._ignore_mtime and self._ignore_mtime != -1:
-                return 
-            return self._on_modified(event)
+        if isinstance(event, watchdog.events.FileModifiedEvent) and not self._disable:
+            with self._lock:
+                src_path = event.src_path
+                if isinstance(src_path, bytes):
+                    src_path = src_path.decode("utf-8")
+                cur_mtime = Path(src_path).stat().st_mtime
+                if cur_mtime == self._ignore_mtime and self._ignore_mtime != -1:
+                    return 
+                # print(f"File modified: {src_path}, mtime: {cur_mtime}, ignore_mtime: {self._ignore_mtime}")
+                self._ignore_mtime = cur_mtime
+                return self._on_modified(event)
 
 
 @dataclasses_plain.dataclass
@@ -236,6 +243,8 @@ class TritonKernelManagerState:
     lib: pfl.PFLLibrary
     module_dict: dict[str, Any]
     runner: tritonstd.TritonKernelRunner
+    # used to capture specific variables in the kernel, such as local tensors.
+    var_runner: tritonstd.TritonKernelRunner
     finder_dict: dict[str, pfl.PFLTreeNodeFinder]
     runner_task: Optional[asyncio.Task] = None
     mapper_new_to_old: Optional[SCDItem] = None
@@ -254,6 +263,8 @@ class TritonKernelManagerState:
             self.watchdog_observer.stop()
             self.watchdog_observer.join()
         self.watchdog_observer = None 
+        if self.watchdog_watcher is not None:
+            self.watchdog_watcher._disable = True
         self.watchdog_watcher = None
 
     def switch_lib_in_same_file(self, new_fn_name: str):
@@ -268,6 +279,7 @@ class TritonKernelManagerState:
         self.cur_fn_name = new_fn_name
         self.lib = lib
         self.runner = runner
+        self.var_runner = runner.copy()
         self.finder_dict = finder_dict
         self.mapper_new_to_old = None
 
@@ -379,13 +391,17 @@ class TritonKernelManager:
             lib=lib,
             finder_dict=finder_dict,
             runner=runner,
+            var_runner=runner.copy(),
         )
         return state
 
     def recompile(self, new_code: str):
         self._runner_task_ev.clear()
+        prev_state = self.state
         self.state = self._get_state_from_code(self.state.path, new_code, self.state.cur_fn_name)
-
+        self.state.watchdog_observer = prev_state.watchdog_observer
+        self.state.watchdog_watcher = prev_state.watchdog_watcher
+        
     async def run_to(self, grid_idxes: Sequence[int], lineno: int):
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
         stmt = self.state.lib.find_stmt_by_path_lineno(self.state.lib.get_module_by_func(unwrapped_fn).uid, lineno)
@@ -395,7 +411,7 @@ class TritonKernelManager:
                 await self.runner.continue_until(lineno)
             else:
                 self._runner_task_ev.clear()
-                assert self.runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
+                assert self.runner._state.type == pfl.PFLRunnerStateType.IDLE, \
                     f"Runner is not in IDLE state, current state: {self.runner._state.type}"
                 with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
                     inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
@@ -410,7 +426,7 @@ class TritonKernelManager:
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
         assert not self.runner.is_paused()
         self._runner_task_ev.clear()
-        assert self.runner._state.type == pfl.PFLAsyncRunnerStateType.IDLE, \
+        assert self.runner._state.type == pfl.PFLRunnerStateType.IDLE, \
             f"Runner is not in IDLE state, current state: {self.runner._state.type}"
         with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
             inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
@@ -776,9 +792,11 @@ class TritonSim:
             self._runner.stop_watchdog()
             with open(self._runner.state.path, "w", encoding="utf-8") as f:
                 f.write(new_content)
+        self._runner.recompile(new_content)
+        if write_to_file:
             file_cur_mtime = Path(self._runner.state.path).stat().st_mtime
             self._runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()), file_cur_mtime)
-        self._runner.recompile(new_content)
+
         await self._runner.validate()
         await self._init_sim_info()
         self._install_event_handlers_to_runner(self._runner)
@@ -794,6 +812,7 @@ class TritonSim:
         assert self._runner is not None, "Runner must be initialized before saving"
         await self._on_debug_stop()
         self._runner.state.switch_lib_in_same_file(new_fn_name)
+        self._install_event_handlers_to_runner(self._runner)
         await self._runner.validate()
         lineno = self._runner.get_cur_func_pfl_node().source_loc[0]
         await self.editor.set_line_number(lineno)
@@ -862,7 +881,7 @@ class TritonSim:
         else:
             await self._runner.run_single_block(old_value)
 
-    def _bkpt_handle_local_tensor_panel_local(self, user_func_uid_no_suffix: str, k: str, draft: TritonSimModel, bkpt: PFLBreakpoint):
+    def _bkpt_handle_local_tensor_panel_local(self, user_func_uid_no_suffix: str, k: str, draft: TritonSimModel, bkpt: PFLRunnerBreakpoint):
         for stack in bkpt.stack[::-1]:
             func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
             if k in stack.scope and func_uid_no_suffix == user_func_uid_no_suffix:
@@ -901,7 +920,7 @@ class TritonSim:
                     # TODO
                     raise NotImplementedError
 
-    async def _bkpt_handle_local_tensor_preview_panel(self, draft: TritonSimModel, bkpt: PFLBreakpoint):
+    async def _bkpt_handle_local_tensor_preview_panel(self, draft: TritonSimModel, bkpt: PFLRunnerBreakpoint):
         for local_key, v in self.dm.model.local_matrices.items():
             obj_id = local_key.split("-")[-1]
             func_uid_no_suffix = "-".join(local_key.split("-")[:-1])
@@ -932,12 +951,21 @@ class TritonSim:
                 # accumulate and unique the indices
                 assert op.name in self._block_run_backend_state.global_access_indices
                 old_inds = self._block_run_backend_state.global_access_indices[op.name]
-                new_inds = np.unique(np.concatenate([old_inds, op.io_indices.reshape(-1)]))
+                cnt = self._block_run_backend_state.global_access_cnt[op.name]
+
+                old_advs = self._block_run_backend_state.global_access_advances[op.name]
+                new_inds, uniq_idxes = np.unique(np.concatenate([old_inds, op.io_indices.reshape(-1)]), return_index=True)
+                new_advs = np.full_like(new_inds, (cnt % 4) / 4, dtype=np.float32)
+                new_advs[uniq_idxes[:len(old_inds)]] = old_advs
                 self._block_run_backend_state.global_access_indices[op.name] = new_inds
+                self._block_run_backend_state.global_access_advances[op.name] = new_advs
+                self._block_run_backend_state.global_access_cnt[op.name] += 1
+
                 updated_keys.add(op.name)
             for k in updated_keys:
                 inds = self._block_run_backend_state.global_access_indices[k]
-                fill_pos, fill_color = self.dm.model.get_global_fill(k, inds, is_persist=True)
+                advs = self._block_run_backend_state.global_access_advances[k]
+                fill_pos, fill_color = self.dm.model.get_global_fill(k, inds, is_persist=True, color_advance=advs)
                 draft.global_mem.matrices[k].persist_fill_pos = fill_pos
                 draft.global_mem.matrices[k].persist_fill_color = fill_color
 
@@ -971,7 +999,7 @@ class TritonSim:
         await self.io_ops_tree.send_and_wait(self.io_ops_tree.update_event(tree=dummy_node, ignoreRoot=True))
         await self._recorded_io_ops_to_global(io_ops)
 
-    async def _handle_enter_bkpt(self, bkpt: PFLBreakpoint):
+    async def _handle_enter_bkpt(self, bkpt: PFLRunnerBreakpoint):
         if self._runner is None:
             return 
         tsim_io_ops = get_flush_sim_io_ops()
@@ -986,7 +1014,7 @@ class TritonSim:
                 minimap=mui.MonacoModelDecorationMinimapOptions(mui.MonacoMinimapPosition.Inline)))
             ])
             for ctrl_id, ctrl in self._runner.runner.get_state().cur_ctrl_points.items():
-                assert isinstance(ctrl, PFLCtrlFor), "Only PFLCtrlFor is supported in this editor"
+                assert isinstance(ctrl, PFLRunnerCtrlFor), "Only PFLRunnerCtrlFor is supported in this editor"
                 key = get_key_from_prefix_data(InlineCompPrefix.CONTROLS, str(ctrl_id))
                 if key not in self.editor.childs_complex.icomps:
                     node = ctrl.node
@@ -1030,9 +1058,15 @@ class TritonSim:
         await self.io_ops_tree.clear()
         self._cur_recorded_io_ops.clear()
         global_access_indices: dict[str, np.ndarray] = {}
+        global_access_advances: dict[str, np.ndarray] = {}
+        global_access_cnt: dict[str, int] = {}
         for global_key, mat in self.dm.model.global_mem.matrices.items():
             global_access_indices[global_key] = np.empty([0], dtype=np.int32)
-        self._block_run_backend_state = SingleBlockRunState(global_access_indices=global_access_indices)
+            global_access_advances[global_key] = np.empty([0], dtype=np.float32)
+            global_access_cnt[global_key] = 0
+
+        self._block_run_backend_state = SingleBlockRunState(global_access_indices=global_access_indices,
+            global_access_advances=global_access_advances, global_access_cnt=global_access_cnt)
         async with self.dm.draft_update() as draft:
             draft.is_paused = False
             for global_key in self.dm.model.global_mem.matrices.keys():
@@ -1060,7 +1094,7 @@ class TritonSim:
                 draft.global_mem.matrices[global_key].temp_mask_pos = None
 
     
-    async def _handle_leave_bkpt(self, bkpt: PFLBreakpoint):
+    async def _handle_leave_bkpt(self, bkpt: PFLRunnerBreakpoint):
         await self.tree.tree.set_root_object_dict({})
         # await self.io_ops_tree.clear()
         # self._cur_recorded_io_ops.clear()
@@ -1077,7 +1111,7 @@ class TritonSim:
                 draft.global_mem.matrices[global_key].temp_aabb_line_pos = None
                 draft.global_mem.matrices[global_key].temp_aabb_line_size = None
 
-    async def _handle_slider(self, value: mui.NumberType, slider: mui.BlenderSlider, ctrl: PFLCtrlFor):
+    async def _handle_slider(self, value: mui.NumberType, slider: mui.BlenderSlider, ctrl: PFLRunnerCtrlFor):
         if self._runner is None:
             return 
         if self._runner._runner_task is None:

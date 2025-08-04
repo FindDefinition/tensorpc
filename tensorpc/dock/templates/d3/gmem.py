@@ -1,4 +1,4 @@
-from tensorpc.apps.mls.components.global_mem import Matrix, GlobalMatrixPanel, GlobalMemContainer
+from tensorpc.apps.mls.components.global_mem import Matrix, MatrixPanel, GlobalMemContainer
 from tensorpc.core.datamodel.draft import DraftBase
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -26,7 +26,7 @@ class LocalMemContainer(mui.FlexBox):
     def __init__(self, draft: LocalMemoryModel, use_view: bool = False):
         assert isinstance(draft, DraftBase)
         minimap = plus.hud.MiniMap(draft.minimap, [
-            GlobalMatrixPanel(draft.matrix, enable_hover_line=True)
+            MatrixPanel(draft.matrix, enable_hover_line=True)
         ])
         self.minimap = minimap
         self._draft = draft

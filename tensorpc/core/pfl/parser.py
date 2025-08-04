@@ -2,9 +2,7 @@ import ast
 from dataclasses import is_dataclass
 from functools import partial
 import inspect
-import sys
-import textwrap
-import traceback
+import dataclasses as dataclasses_plain
 from collections.abc import Sequence
 from typing import Any, Callable, ForwardRef, Optional, Type, Union, cast
 
@@ -424,6 +422,14 @@ def _get_module_code_by_fn(func: Callable):
     module_code = inspect.getsource(mod)
     return module_code
 
+@dataclasses_plain.dataclass
+class _CompileFuncCache:
+    tree: ast.FunctionDef
+    module_code: str
+    module_code_lines: list[str]
+    code: str 
+    first_lineno: int
+    func_lines: list[str]
 
 class PFLParser:
 
@@ -436,8 +442,8 @@ class PFLParser:
                  module_code_getter: Optional[Callable[[Any], str]] = None,
                  func_unwrapper: Optional[Callable[[Any], Callable]] = None,
                  var_preproc: Optional[Callable[[Any], Any]] = None,
-                 anno_transform: Optional[Callable[[PFLExprInfo, Any],
-                                                   PFLExprInfo]] = None):
+                anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
+                                PFLExprInfo]] = None):
         self._backend = backend
         if parse_cfg is None:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
@@ -463,6 +469,8 @@ class PFLParser:
         self._current_compiling: set[str] = set()
 
         self.func_node_to_meta: dict[ast.AST, PFLCompileFuncMeta] = {}
+
+        self._cache_fn_precompile_info: dict[Callable, _CompileFuncCache] = {}
 
     def _parse_expr_to_df_ast(self, expr: ast.expr,
                               scope: dict[str, PFLExprInfo]) -> PFLExpr:
@@ -694,6 +702,7 @@ class PFLParser:
                         func.st.delayed_compile_req,
                         args_from_call=arg_infos_from_call)
                     # only template and inline function allow inline expand
+                    # print(req.get_func_compile_uid())
                     PFL_LOGGER.warning("%s",
                                        str(func.st.delayed_compile_req))
                     compiled_func = self.parse_compile_req_to_pfl_ast(
@@ -826,7 +835,7 @@ class PFLParser:
                         assert anno_in_ast is not None, "annotation must be evaluated to a valid type"
                         if self._anno_transform is not None:
                             anno_st = self._anno_transform(
-                                value.st, anno_in_ast)
+                                value.st, anno_in_ast, undefined)
                         else:
                             anno_st = PFLExprInfo.from_annotype(
                                 parse_type_may_optional_undefined(anno_in_ast))
@@ -1172,7 +1181,12 @@ class PFLParser:
             if i == 0 and compile_req.is_method_def:
                 assert self_type is not None, "self_type must be provided for method definition"
                 anno_st = dataclasses.replace(self_type)
-
+            default = undefined
+            if i >= num_arg_no_default:
+                default_pfl = self._parse_expr_to_df_ast(stmt.args.defaults[i - num_arg_no_default], scope)
+                assert default_pfl.is_const, \
+                    f"default value of arg {arg.arg} must be constant, but got {default_pfl}"
+                default = default_pfl
             if anno_st is None:
                 if external_arg_annos is not None:
                     if arg.arg in external_arg_annos:
@@ -1182,7 +1196,7 @@ class PFLParser:
                         ext_anno._constexpr_data = constexpr_data
                         if self._anno_transform is not None and anno_in_ast is not None:
                             anno_st = self._anno_transform(
-                                ext_anno, anno_in_ast)
+                                ext_anno, anno_in_ast, default)
                         else:
                             anno_st = ext_anno
                 elif arg_dict_from_call is not None:
@@ -1196,7 +1210,7 @@ class PFLParser:
                             if self._anno_transform is not None:
                                 # user should validate in anno_transform
                                 anno_st = self._anno_transform(
-                                    anno_st_from_call, anno_in_ast)
+                                    anno_st_from_call, anno_in_ast, default)
                             else:
                                 # validate by parser
                                 anno_in_ast_st = PFLExprInfo.from_annotype(
@@ -1215,20 +1229,23 @@ class PFLParser:
                 anno_st._constexpr_data = constexpr_data
                 if self._anno_transform is not None:
                     # user should validate in anno_transform
-                    anno_st = self._anno_transform(anno_st, anno_in_ast)
+                    anno_st = self._anno_transform(anno_st, anno_in_ast, default)
 
             assert anno_st is not None, f"can't get annotation of arg {arg.arg} from both func def and external."
             st = anno_st
             arg_obj = PFLArg(PFLASTType.ARG, arg_loc, arg=arg.arg, st=st)
             if arg.annotation is not None:
                 arg_obj.annotation = ast.unparse(arg.annotation)
+            if not is_undefined(default):
+                arg_obj.default = default
             args.append(arg_obj)
             private_scope[arg_obj.arg] = arg_obj.st
-        for pfl_arg, default in zip(args[num_arg_no_default:],
-                                    stmt.args.defaults):
-            default_pfl = self._parse_expr_to_df_ast(default, scope)
-            pfl_arg.default = default_pfl
-
+        # for pfl_arg, default in zip(args[num_arg_no_default:],
+        #                             stmt.args.defaults):
+        #     default_pfl = self._parse_expr_to_df_ast(default, scope)
+        #     assert default_pfl.is_const, \
+        #         f"default value of arg {pfl_arg.arg} must be constant, but got {default_pfl}"
+        #     pfl_arg.default = default_pfl
         funbody, rinfo = self._parse_block_to_pfl_ast(stmt.body, private_scope)
         if not isinstance(funbody[-1], PFLReturn):
             ret_none_value = PFLConstant(PFLASTType.CONSTANT,
@@ -1253,11 +1270,21 @@ class PFLParser:
                 assert rstmt_st.is_equal_type(first_rstmt_st), \
                     f"all return stmts must have same type, but got {rstmt_st} and {first_rstmt_st}"
                 ret_sts.append(rstmt_st)
+        finfo_args: list[PFLExprFuncArgInfo] = []
+        for a in args:
+            arg_info = PFLExprFuncArgInfo(a.arg, a.st)
+            if a.default is not None:
+                arg_info.default = a.default.st._constexpr_data if a.default.is_const else None
+            finfo_args.append(arg_info)
         func_node_finfo = PFLExprFuncInfo(
-            [PFLExprFuncArgInfo(a.arg, a.st) for a in args],
+            finfo_args,
             ret_sts[0],
             is_method=is_method,
         )
+        # if stmt.name == "_attn_fwd_inner_tma_v2":
+        #     breakpoint()
+
+
         func_node_st = PFLExprInfo(type=PFLExprType.FUNCTION,
                                    func_info=func_node_finfo)
         func_node = PFLFunc(PFLASTType.FUNC,
@@ -1306,21 +1333,50 @@ class PFLParser:
         # TODO should we include the decorators?
         # func_code_lines, first_lineno = self._func_code_getter(func)
         # func_code_lines = [l.rstrip() for l in func_code_lines]
-        module_code = self._module_code_getter(func)
-        func_code_lines, first_lineno = getsourcelinesby_lines(
-            func, [line + '\n' for line in module_code.splitlines()])
-        func_code_lines = [l.rstrip() for l in func_code_lines]
-        # remove indents of func_code_lines
-        code = "\n".join(func_code_lines)
-        common_indent = determine_code_common_indent(code)
-        code_no_common_indent = remove_common_indent_from_code(code)
-        tree = ast.parse(code_no_common_indent)
+        if func in self._cache_fn_precompile_info:
+            cache = self._cache_fn_precompile_info[func]
+            module_code = cache.module_code
+            func_node = cache.tree
+            func_code_lines = cache.func_lines
+            code = cache.code 
+            first_lineno = cache.first_lineno
+            module_code_lines = cache.module_code_lines
+        else:
+            module_code = self._module_code_getter(func)
+            func_code_lines, first_lineno = getsourcelinesby_lines(
+                func, [line + '\n' for line in module_code.splitlines()])
+            func_code_lines = [l.rstrip() for l in func_code_lines]
+            # remove indents of func_code_lines
+            code = "\n".join(func_code_lines)
+            common_indent = determine_code_common_indent(code)
+            code_no_common_indent = remove_common_indent_from_code(code)
+            tree = ast.parse(code_no_common_indent)
+            func_node: Optional[ast.FunctionDef] = None
+            for node in tree.body:
+                if isinstance(node,
+                            ast.FunctionDef) and node.name == func.__name__:
+                    func_node = node
+            assert func_node is not None
+            module_code_lines = module_code.splitlines()
+            self._cache_fn_precompile_info[func] = _CompileFuncCache(
+                module_code=module_code,
+                tree=func_node,
+                module_code_lines=module_code_lines,
+                func_lines=func_code_lines,
+                code=code,
+                first_lineno=first_lineno)
+            for child_node in ast.walk(func_node):
+                # add first_lineno to all nodes
+                if hasattr(child_node, 'lineno'):
+                    child_node.lineno += first_lineno - 1  # type: ignore
+                if hasattr(child_node, 'end_lineno'):
+                    child_node.end_lineno += first_lineno - 1  # type: ignore
+                if hasattr(child_node, 'col_offset'):
+                    child_node.col_offset += common_indent  # type: ignore
+                if hasattr(child_node, 'end_col_offset'):
+                    child_node.end_col_offset += common_indent  # type: ignore
+
         fn_globals = func.__globals__.copy()
-        func_node: Optional[ast.FunctionDef] = None
-        for node in tree.body:
-            if isinstance(node,
-                          ast.FunctionDef) and node.name == func.__name__:
-                func_node = node
         if req.bound_self is not None:
             # add "self" to globals
             assert req.bound_self is not None, "bound_self must not be None"
@@ -1329,42 +1385,28 @@ class PFLParser:
             first_arg = func_node.args.args[0] if func_node.args.args else None
             assert first_arg is not None
             fn_globals[first_arg.arg] = req.bound_self
+        # find funcdef
         transformer = MapAstNodeToConstant(
             self._func_unwrapper,
             fn_globals,
             PFLErrorFormatContext(func_code_lines),
             backend=backend,
             var_preproc=self._var_preproc)
-        transformer.visit(tree)
-        # find funcdef
-        for node in tree.body:
-            if isinstance(node,
-                          ast.FunctionDef) and node.name == func.__name__:
-                func_node = node
-        assert func_node is not None
-        for child_node in ast.walk(func_node):
-            # add first_lineno to all nodes
-            if hasattr(child_node, 'lineno'):
-                child_node.lineno += first_lineno - 1  # type: ignore
-            if hasattr(child_node, 'end_lineno'):
-                child_node.end_lineno += first_lineno - 1  # type: ignore
-            if hasattr(child_node, 'col_offset'):
-                child_node.col_offset += common_indent  # type: ignore
-            if hasattr(child_node, 'end_col_offset'):
-                child_node.end_col_offset += common_indent  # type: ignore
+        transformer.visit(func_node)
+
         anno_eval_globals = func.__globals__.copy()
         outer_ctx = get_parse_context()
         if outer_ctx is not None:
             parse_ctx = PFLParseContext.from_outer_ctx(
                 outer_ctx,
-                module_code.split("\n"),
+                module_code_lines,
                 anno_eval_globals,
                 node_to_constants=transformer._node_to_compile_constant,
                 compile_req=req,
                 allow_inline_expand=allow_inline_expand)
         else:
             parse_ctx = PFLParseContext(
-                module_code.split("\n"),
+                module_code_lines,
                 anno_eval_globals,
                 self._func_unwrapper,
                 cfg=parse_cfg,
@@ -1404,7 +1446,10 @@ class PFLParser:
                 func_pfl_node.compile_info.first_lineno = first_lineno
                 func_pfl_node.compile_info.original = func
                 func_pfl_node.compile_info.meta = func_meta
-                self._all_compiled[func_compile_uid] = func_pfl_node
+                if func_compile_uid not in self._all_compiled:
+                    self._all_compiled[func_compile_uid] = func_pfl_node
+                else:
+                    func_pfl_node = self._all_compiled[func_compile_uid]
 
             except PFLAstParseError as e:
                 error_line = get_parse_context_checked(
@@ -1598,7 +1643,7 @@ def parse_func_to_pfl_ast(
         module_code_getter: Optional[Callable[[Any], str]] = None,
         func_unwrapper: Optional[Callable[[Any], Callable]] = None,
         var_preproc: Optional[Callable[[Any], Any]] = None,
-        anno_transform: Optional[Callable[[PFLExprInfo, Any],
+        anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
                                           PFLExprInfo]] = None,
         all_compiled: Optional[dict[str, PFLFunc]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None,
@@ -1622,7 +1667,7 @@ def parse_func_to_pfl_library(
         module_code_getter: Optional[Callable[[Any], str]] = None,
         func_unwrapper: Optional[Callable[[Any], Callable]] = None,
         var_preproc: Optional[Callable[[Any], Any]] = None,
-        anno_transform: Optional[Callable[[PFLExprInfo, Any],
+        anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
                                           PFLExprInfo]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None,
         constexpr_args: Optional[dict[str, Any]] = None) -> PFLLibrary:

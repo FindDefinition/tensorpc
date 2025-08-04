@@ -397,18 +397,24 @@ class PFLRunnerResultType(enum.IntEnum):
     RETURN = 2
 
 @dataclasses.dataclass
+class PFLRunnerExprHit:
+    expr: PFLExpr
+    for_stack: list[tuple[PFLFor, int, int, int]]
+    data: Any
+
+@dataclasses.dataclass
 class PFLRunnerResult:
     type: PFLRunnerResultType
     data: Optional[Any] = None
 
 @dataclasses.dataclass
-class PFLCtrlBase:
+class PFLRunnerCtrlBase:
     node: PFLAstNodeBase
     should_pause: bool = False
     enabled: bool = True
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
-class PFLCtrlFor(PFLCtrlBase):
+class PFLRunnerCtrlFor(PFLRunnerCtrlBase):
     # which step should stop
     step: int 
     range: range
@@ -418,7 +424,7 @@ class PFLCtrlFor(PFLCtrlBase):
         assert isinstance(self.node, PFLFor)
         assert self.node.iter.st.type == PFLExprType.RANGE, "only support base for"
 
-class PFLAsyncRunnerStateType(enum.IntEnum):
+class PFLRunnerStateType(enum.IntEnum):
     IDLE = 0
     RUNNING = 1
     DURING_RUNNING_TO = 2
@@ -432,35 +438,35 @@ class PFLBreakpointDesc:
     one_shot: bool = False
 
 @dataclasses.dataclass
-class PFLAsyncRunnerStack:
+class PFLRunnerStack:
     node: PFLFunc
     scope: dict[str, Any]
 
 @dataclasses.dataclass
-class PFLBreakpoint:
+class PFLRunnerBreakpoint:
     node: PFLAstNodeBase
     scope: dict[str, Any]
-    stack: list[PFLAsyncRunnerStack]
+    stack: list[PFLRunnerStack]
 
 @dataclasses.dataclass
-class PFLAsyncRunnerState:
-    type: PFLAsyncRunnerStateType
-    cur_bkpt: Optional[PFLBreakpoint] = None
-    cur_ctrl_points: dict[int, PFLCtrlBase] = dataclasses.field(default_factory=dict)
+class PFLRunnerState:
+    type: PFLRunnerStateType
+    cur_bkpt: Optional[PFLRunnerBreakpoint] = None
+    cur_ctrl_points: dict[int, PFLRunnerCtrlBase] = dataclasses.field(default_factory=dict)
     pause_next_line: bool = False
-    stack: list[PFLAsyncRunnerStack] = dataclasses.field(default_factory=list)
+    stack: list[PFLRunnerStack] = dataclasses.field(default_factory=list)
     cur_expr: Optional[PFLExpr] = None
     cur_call_std_func: Optional[Callable] = None
 
-_PFL_STATE_CONTEXT: contextvars.ContextVar[Optional[PFLAsyncRunnerState]] = contextvars.ContextVar(
-    "PFLAsyncRunnerState", default=None)
+_PFL_STATE_CONTEXT: contextvars.ContextVar[Optional[PFLRunnerState]] = contextvars.ContextVar(
+    "PFLRunnerState", default=None)
 
-def get_pfl_runner_state() -> Optional[PFLAsyncRunnerState]:
+def get_pfl_runner_state() -> Optional[PFLRunnerState]:
     """Get the current PFL async runner state."""
     return _PFL_STATE_CONTEXT.get(None)
 
 @contextlib.contextmanager
-def enter_pfl_runner_state(state: PFLAsyncRunnerState):
+def enter_pfl_runner_state(state: PFLRunnerState):
     """Context manager to enter a PFL async runner state."""
     token = _PFL_STATE_CONTEXT.set(state)
     try:
@@ -482,7 +488,7 @@ class PFLAsyncRunner:
 
     TODO: currently we only support all function defines in same file
     """
-    def __init__(self, library: PFLLibrary):
+    def __init__(self, library: PFLLibrary, observed_exprs: Optional[dict[str, PFLExpr]] = None):
         self._library = library
         # TODO temp data class support?
         self._parse_cache = PFLParseCache(library.backend)
@@ -492,19 +498,24 @@ class PFLAsyncRunner:
                 std_scope[v.mapped_name] = v.dcls
         self._std_scope = std_scope
 
-        self._state = PFLAsyncRunnerState(PFLAsyncRunnerStateType.IDLE)
+        self._state = PFLRunnerState(PFLRunnerStateType.IDLE)
         self._event = asyncio.Event()
 
         self._breakpoints: dict[int, PFLBreakpointDesc] = {}
-
-        self.event_enter_bkpt: SingleAsyncEventEmitter[PFLBreakpoint] = SingleAsyncEventEmitter()
-        self.event_leave_bkpt: SingleAsyncEventEmitter[PFLBreakpoint] = SingleAsyncEventEmitter()
-        self.event_new_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
-        self.event_delete_ctrl_point: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
-        self.event_ctrl_point_change: SingleAsyncEventEmitter[PFLCtrlBase] = SingleAsyncEventEmitter()
+        self._observed_exprs: dict[tuple[int, int, Optional[int], Optional[int]], tuple[str, PFLExpr]] = {}
+        if observed_exprs is not None:
+            for k, v in observed_exprs.items():
+                assert v.source_loc not in self._observed_exprs, \
+                    f"Observed expr {v.source_loc} already exists, please use different source_loc."
+                self._observed_exprs[v.source_loc] = (k, v)
+        self.event_enter_bkpt: SingleAsyncEventEmitter[PFLRunnerBreakpoint] = SingleAsyncEventEmitter()
+        self.event_leave_bkpt: SingleAsyncEventEmitter[PFLRunnerBreakpoint] = SingleAsyncEventEmitter()
+        self.event_new_ctrl_point: SingleAsyncEventEmitter[PFLRunnerCtrlBase] = SingleAsyncEventEmitter()
+        self.event_delete_ctrl_point: SingleAsyncEventEmitter[PFLRunnerCtrlBase] = SingleAsyncEventEmitter()
+        self.event_ctrl_point_change: SingleAsyncEventEmitter[PFLRunnerCtrlBase] = SingleAsyncEventEmitter()
         self.event_eval_stop: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
         self.event_eval_start: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
-
+        self.event_expr_hit: SingleAsyncEventEmitter[PFLRunnerExprHit] = SingleAsyncEventEmitter()
 
     async def _run_coro_none(self, fn: Callable[..., _CORO_NONE], *args) -> None:
         """Run a coroutine that returns None."""
@@ -513,17 +524,17 @@ class PFLAsyncRunner:
             await res
 
     def clear_runtime_state(self):
-        self._state = PFLAsyncRunnerState(PFLAsyncRunnerStateType.IDLE)
+        self._state = PFLRunnerState(PFLRunnerStateType.IDLE)
         self._event.clear()
         # TODO should we clear breakpoint here?
         self._breakpoints.clear()
 
     def release_breakpoint(self, stop: bool = False):
-        assert self._state.type == PFLAsyncRunnerStateType.PAUSE, \
+        assert self._state.type == PFLRunnerStateType.PAUSE, \
             f"release_breakpoint called in state {self._state.type}, expected PAUSE."
         self._event.set()
         if stop:
-            self._state.type = PFLAsyncRunnerStateType.NEED_STOP
+            self._state.type = PFLRunnerStateType.NEED_STOP
 
     def add_breakpoint(self, lineno: int, enabled: bool = True, one_shot: bool = False):
         self._breakpoints[lineno] = PFLBreakpointDesc(lineno, enabled, one_shot)
@@ -533,8 +544,8 @@ class PFLAsyncRunner:
             self._breakpoints.pop(lineno)
 
     async def _enter_breakpoint(self, node: PFLAstNodeBase, scope: dict[str, Any]):
-        self._state.cur_bkpt = PFLBreakpoint(node, scope, self._state.stack)
-        self._state.type = PFLAsyncRunnerStateType.PAUSE
+        self._state.cur_bkpt = PFLRunnerBreakpoint(node, scope, self._state.stack)
+        self._state.type = PFLRunnerStateType.PAUSE
         self._event.clear()
         # call user callback after event set to let user release this bkpt in callback.
         if not self.event_enter_bkpt.is_empty():
@@ -543,14 +554,14 @@ class PFLAsyncRunner:
         if not self.event_leave_bkpt.is_empty():
             await self.event_leave_bkpt.emit_async(self._state.cur_bkpt)
         self._state.cur_bkpt = None 
-        if self._state.type == PFLAsyncRunnerStateType.NEED_STOP:
-            self._state.type = PFLAsyncRunnerStateType.IDLE
+        if self._state.type == PFLRunnerStateType.NEED_STOP:
+            self._state.type = PFLRunnerStateType.IDLE
             for cp in self._state.cur_ctrl_points.values():
                 await self.event_delete_ctrl_point.emit_async(cp)
             self._state.cur_ctrl_points.clear()
             self._breakpoints.clear()
             raise PFLEvalStop("Eval Stop by user.", node)
-        self._state.type = PFLAsyncRunnerStateType.RUNNING
+        self._state.type = PFLRunnerStateType.RUNNING
 
     async def _may_pause_by_ctrl_points(self, node: PFLAstNodeBase, scope: dict[str, Any]):
         if not self._state.cur_ctrl_points:
@@ -595,36 +606,37 @@ class PFLAsyncRunner:
         try:
             if isinstance(expr, PFLName):
                 if expr.st.compiled_uid is not None:
-                    return self._library.all_compiled[expr.st.compiled_uid]
-                return scope[expr.id]
+                    res = self._library.all_compiled[expr.st.compiled_uid]
+                else:
+                    res = scope[expr.id]
+                # return scope[expr.id]
             elif isinstance(expr, PFLAttribute):
                 if expr.st.compiled_uid is not None:
                     return self._library.all_compiled[expr.st.compiled_uid]
-                return getattr(await self._run_expr(expr.value, scope), expr.attr)
+                res = getattr(await self._run_expr(expr.value, scope), expr.attr)
             elif isinstance(expr, PFLConstant):
-                return expr.value
+                res = expr.value
             elif isinstance(expr, PFLSlice):
                 lo_str = None if is_undefined(expr.lo) else await self._run_expr(expr.lo, scope)
                 hi_str = None if is_undefined(expr.hi) else await self._run_expr(expr.hi, scope)
                 step_str = None if is_undefined(expr.step) else await self._run_expr(
                     expr.step, scope)
-                return slice(lo_str, hi_str, step_str)
+                res = slice(lo_str, hi_str, step_str)
             elif isinstance(expr, PFLSubscript):
                 tgt, slice_str = await self._get_subscript_target_slice(expr, scope)
                 if expr.st.compiled_uid is not None:
                     custom_fn = self._library.all_compiled[expr.st.compiled_uid]
-                    
-                    return await self._run_func(expr.st.compiled_uid, {
+                    res = await self._run_func(expr.st.compiled_uid, {
                         custom_fn.args[0].arg: tgt,
                         custom_fn.args[1].arg: slice_str
                     })
                 else:
-                    return tgt[slice_str]
+                    res = tgt[slice_str]
             elif isinstance(expr, PFLArray):
-                return [await self._run_expr(elt, scope)
+                res = [await self._run_expr(elt, scope)
                                     for elt in expr.elts]
             elif isinstance(expr, PFLTuple):
-                return tuple([await self._run_expr(elt, scope)
+                res = tuple([await self._run_expr(elt, scope)
                                     for elt in expr.elts])
             elif isinstance(expr, PFLDict):
                 res = {}
@@ -635,14 +647,12 @@ class PFLAsyncRunner:
                     else:
                         kk = await self._run_expr(v, scope)
                         res[kk] = vv
-                return res
             elif isinstance(expr, PFLBoolOp):
                 values = [await self._run_expr(v, scope) for v in expr.values]
                 if expr.op == BoolOpType.AND:
                     res = all(values)
                 else:
                     res = any(values)
-                return res
             elif isinstance(expr, (PFLBinOp, PFLCompare)):
                 left = await self._run_expr(expr.left, scope)
                 right = await self._run_expr(expr.right, scope)
@@ -650,21 +660,21 @@ class PFLAsyncRunner:
                     custom_fn = self._library.all_compiled[expr.st.compiled_uid]
                     if expr.get_is_right_val():
                         left, right = right, left
-                    return await self._run_func(expr.st.compiled_uid, {
+                    res = await self._run_func(expr.st.compiled_uid, {
                         custom_fn.args[0].arg: left,
                         custom_fn.args[1].arg: right
                     })
                 else:
-                    return expr.run(left, right)
+                    res = expr.run(left, right)
             elif isinstance(expr, PFLUnaryOp):
                 left = await self._run_expr(expr.operand, scope)
                 if expr.st.compiled_uid is not None:
                     custom_fn = self._library.all_compiled[expr.st.compiled_uid]
-                    return await self._run_func(expr.st.compiled_uid, {
+                    res = await self._run_func(expr.st.compiled_uid, {
                         custom_fn.args[0].arg: left,
                     })
                 else:
-                    return expr.run(left)
+                    res = expr.run(left)
             elif isinstance(expr, PFLCall):
                 func_st = expr.func.st
                 if func_st.compiled_uid is not None:
@@ -678,6 +688,10 @@ class PFLAsyncRunner:
                         for arg_expr in exprs:
                             arg_value = await self._run_expr(arg_expr, scope)
                             kwargs[arg_st.arg_name] = (arg_value)
+                    for arg in finfo.args:
+                        if arg.arg_name not in kwargs and not isinstance(arg.default, Undefined):
+                            # use default value
+                            kwargs[arg.arg_name] = arg.default
                     res = await self._run_func(func_st.compiled_uid, kwargs)
                 else:
                     func_val = await self._run_expr(expr.func, scope)
@@ -699,16 +713,28 @@ class PFLAsyncRunner:
                         res = func_val(*args, **kwargs) 
                     finally:
                         self._state.cur_call_std_func = None
-                return res 
             elif isinstance(expr, PFLIfExp):
                 body = await self._run_expr(expr.body, scope)
                 test = await self._run_expr(expr.test, scope)
                 orelse = await self._run_expr(expr.orelse, scope)
-                return body if test else orelse
+                res = body if test else orelse
             else:
                 raise NotImplementedError(f"Unrecognized PFLExpr type: {type(expr)}")
+            if self._observed_exprs:
+                if expr.source_loc in self._observed_exprs:
+                    await self.event_expr_hit.emit_async(
+                        PFLRunnerExprHit(expr, self._get_for_stack(), res))
+            return res
         finally:
             self._state.cur_expr = prev
+
+    def _get_for_stack(self) -> list[tuple[PFLFor, int, int, int]]:
+        """Get the current for stack, each item is a tuple of (PFLFor, step, range_start, range_stop)."""
+        res: list[tuple[PFLFor, int, int, int]] = []
+        for cp in self._state.cur_ctrl_points.values():
+            if isinstance(cp, PFLRunnerCtrlFor):
+                res.append((cast(PFLFor, cp.node), cp.step, cp.range.start, cp.range.stop))
+        return res
 
     async def run_body(self, block_body: list[PFLAstStmt], scope: dict[str, Any]) -> Union[Any, PFLRunnerResult]:
         prev_scope = self._state.stack[-1].scope 
@@ -724,6 +750,10 @@ class PFLAsyncRunner:
                     elif isinstance(stmt, (PFLAssign, PFLAnnAssign)):
                         if stmt.value is not None:
                             value = await self._run_expr(stmt.value, scope)
+                            if self._observed_exprs:
+                                if stmt.target.source_loc in self._observed_exprs:
+                                    await self.event_expr_hit.emit_async(
+                                        PFLRunnerExprHit(stmt.target, self._get_for_stack(), value))
                             # when stmt.target is attr or subscript, we need to evaluate more deeper thing.
                             if isinstance(stmt.target, (PFLAttribute, PFLSubscript)):
                                 assert not is_undefined(stmt.target.is_store) and stmt.target.is_store == True
@@ -804,7 +834,7 @@ class PFLAsyncRunner:
                         if isinstance(iter_obj, range):
                             stmt_id = id(stmt)
                             private_scope = scope.copy()
-                            ctrl = PFLCtrlFor(stmt, enabled=True, step=iter_obj.start, range=iter_obj, stop_in_start=False)
+                            ctrl = PFLRunnerCtrlFor(stmt, enabled=True, step=iter_obj.start, range=iter_obj, stop_in_start=False)
                             self._state.cur_ctrl_points[stmt_id] = ctrl
                             if not self.event_new_ctrl_point.is_empty():
                                 await self.event_new_ctrl_point.emit_async(ctrl)
@@ -897,7 +927,7 @@ class PFLAsyncRunner:
         error_ctx = PFLErrorFormatContext(module.compile_info.code.split("\n"))
         try:
             fn_scope = {**scope, **self._std_scope}
-            self._state.stack.append(PFLAsyncRunnerStack(func_node, fn_scope))
+            self._state.stack.append(PFLRunnerStack(func_node, fn_scope))
             res = await self.run_body(func_node.body, fn_scope)
         except PFLEvalStop:
             raise
@@ -948,7 +978,7 @@ class PFLAsyncRunner:
     async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None,
             external_inline_env: Optional[PFLInlineRunEnv] = None):
         func_node = self._library.all_compiled[func_uid]
-        assert self._state.type == PFLAsyncRunnerStateType.IDLE, \
+        assert self._state.type == PFLRunnerStateType.IDLE, \
             "You must call clear_runtime_state() before run_until()"
         stmt_should_pause = self._library.find_stmt_by_path_lineno(func_node.get_module_import_path(), lineno)
         assert stmt_should_pause is not None, \
@@ -961,27 +991,27 @@ class PFLAsyncRunner:
             traceback.print_exc()
             raise
 
-    def get_state(self) -> PFLAsyncRunnerState:
+    def get_state(self) -> PFLRunnerState:
         return self._state
 
-    def get_cur_bkpt_checked(self) -> PFLBreakpoint:
+    def get_cur_bkpt_checked(self) -> PFLRunnerBreakpoint:
         """Get the current breakpoint, raise if not in breakpoint state."""
-        if self._state.type != PFLAsyncRunnerStateType.PAUSE:
+        if self._state.type != PFLRunnerStateType.PAUSE:
             raise RuntimeError(f"Cannot get current breakpoint in state {self._state.type}, expected PAUSE.")
         assert self._state.cur_bkpt is not None, "Current breakpoint should not be None in PAUSE state."
         return self._state.cur_bkpt
 
     def is_paused(self) -> bool:
-        return self._state.type == PFLAsyncRunnerStateType.PAUSE
+        return self._state.type == PFLRunnerStateType.PAUSE
 
     async def continue_until(self, lineno: int):
-        assert self._state.type == PFLAsyncRunnerStateType.PAUSE
+        assert self._state.type == PFLRunnerStateType.PAUSE
         self.release_breakpoint()
         self._breakpoints.clear()
         self.add_breakpoint(lineno, one_shot=False)
 
     async def continue_next_line(self):
-        assert self._state.type == PFLAsyncRunnerStateType.PAUSE
+        assert self._state.type == PFLRunnerStateType.PAUSE
         self.release_breakpoint()
         self._breakpoints.clear()
         self._state.pause_next_line = True

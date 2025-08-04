@@ -212,10 +212,18 @@ class SimMemoryStorage(SimTensorStorage):
         mapped_pointer_data = map_result.mapped
         block_name = map_result.block_name
         all_masked = map_result.all_masked
-        assert not all_masked
-        # if all_masked:
-        #     # if all masked, return empty tensor
-        #     return empty(pointer.shape, pointer.dtype)
+        # assert not all_masked
+        if all_masked:
+            print("WARNING: all masked load detected.", pointer)
+            out = empty(pointer.shape, pointer.dtype)
+            output_data = out.get_storage_checked().data
+            if other is not None:
+                if isinstance(other, SimTensor):
+                    output_data[:] = other.get_storage_checked().data
+                else:
+                    output_data[:] = other
+            # if all masked, return empty tensor
+            return out
         block_desc = self.memory_blocks[block_name]
         block_data = block_desc.get_data_view_checked()
         if DTypeEnum(pointer.dtype).to_numpy_dtype() != block_data.dtype:
@@ -311,7 +319,7 @@ class SimMemoryStorage(SimTensorStorage):
         assert (pointer.num_element == 1
                 ), "Pointer must be a single element pointer for now"
         if pointer.storage is None:
-            if mask is None:
+            if atomic_op is not None:
                 old = SimTensor(pointer.shape, pointer.dtype)
                 return old
             return
@@ -326,6 +334,10 @@ class SimMemoryStorage(SimTensorStorage):
         block_name = map_result.block_name
         all_masked = map_result.all_masked
         if all_masked:
+            # return undefined.
+            if atomic_op is not None:
+                old = empty(pointer.shape, pointer.dtype)
+                return old
             return
         block_desc = self.memory_blocks[block_name]
         block_data = block_desc.get_data_view_checked()

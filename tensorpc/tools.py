@@ -11,6 +11,7 @@ PROTOBUF_VERSION = (_proto_ver[0], _proto_ver[1])
 
 def compile_proto(cwd,
                   proto_dir,
+                  output_dir,
                   js_out=True,
                   cpp_out=False,
                   grpc_web: bool = False,
@@ -26,9 +27,9 @@ def compile_proto(cwd,
         "-m",
         "grpc_tools.protoc",
         "-I{}".format(proto_dir),
-        "--python_out={}".format(proto_dir),
-        "--pyi_out={}".format(proto_dir) if with_pyi else "",
-        "--grpc_python_out={}".format(proto_dir),
+        "--python_out={}".format(output_dir),
+        "--pyi_out={}".format(output_dir) if with_pyi else "",
+        "--grpc_python_out={}".format(output_dir),
         *[str(p) for p in grpc_paths],  # windows have problem with wildcard
     ]
     no_grpc_proto_cmds = [
@@ -36,15 +37,16 @@ def compile_proto(cwd,
         "-m",
         "grpc_tools.protoc",
         "-I{}".format(proto_dir),
-        "--python_out={}".format(proto_dir),
-        "--pyi_out={}".format(proto_dir) if with_pyi else "",
+        "--python_out={}".format(output_dir),
+        "--pyi_out={}".format(output_dir) if with_pyi else "",
         *[str(p) for p in no_grpc_path],  # windows have problem with wildcard
     ]
-    cpp_proto_dir = str(Path(proto_dir) / "cpp")
-    js_proto_dir = str(Path(proto_dir) / "js")
+    cpp_proto_dir = str(Path(output_dir) / "cpp")
+    js_proto_dir = str(Path(output_dir) / "js")
     cmds_js = [
         "protoc", f"-I={proto_dir}", f"{proto_dir}/*.proto",
-        "--js_out=import_style=commonjs:{} ".format(js_proto_dir)
+        "--js_out=import_style=commonjs:{} ".format(js_proto_dir),
+        "--python_out={}".format(output_dir),
     ]
     # grpc_web_cmds = []
     if grpc_web:
@@ -66,6 +68,8 @@ def compile_proto(cwd,
         output = subprocess.check_output(" ".join(cpp_cmds),
                                          shell=True,
                                          cwd=str(cwd))
+    # print(grpc_proto_cmds)
+    # return
     output = subprocess.check_output(" ".join(grpc_proto_cmds),
                                      shell=True,
                                      cwd=str(cwd))
@@ -80,11 +84,11 @@ def compile_proto(cwd,
 
     print(output)
     # TODO: add eslint-disable to js outputs?
-    proto_dir = Path(proto_dir)
+    output_dir = Path(output_dir)
     pb_file_pattern = re.compile(".*_pb2")
     grpc_pb_file_pattern = re.compile(".*_pb2_grpc")
     proto_pkg_names = []
-    for path in proto_dir.glob("*.py"):
+    for path in output_dir.glob("*.py"):
         if pb_file_pattern.fullmatch(path.stem):
             proto_pkg_names.append(path.stem[:-4])
     pb_proto_pkg_names = [s + "_pb2_grpc" for s in proto_pkg_names]
@@ -93,7 +97,7 @@ def compile_proto(cwd,
         "|".join(pb_proto_pkg_names + grpc_proto_pkg_names)))
     print(r"import (?:{}) as .*".format("|".join(pb_proto_pkg_names +
                                                  grpc_proto_pkg_names)))
-    for path in proto_dir.glob("*.py"):
+    for path in output_dir.glob("*.py"):
         if pb_file_pattern.fullmatch(
                 path.stem) or grpc_pb_file_pattern.fullmatch(path.stem):
             with path.open("r") as f:
@@ -106,21 +110,19 @@ def compile_proto(cwd,
                 f.writelines(lines)
 
 
-def main_legacy():
-    compile_proto(Path(__file__).parent / "protos_legacy",
-                  Path(__file__).parent.resolve() / "protos_legacy",
-                  js_out=False,
-                  with_pyi=False)
-
-
 def main():
-    compile_proto(Path(__file__).parent / "protos",
-                  Path(__file__).parent.resolve() / "protos",
-                  js_out=False)
+    if PROTOBUF_VERSION <= (3, 20):
+        compile_proto(Path(__file__).parent / f"protos",
+                    Path(__file__).parent / f"protos",
+                    Path(__file__).parent.resolve() / "protos/pbv3",
+                    js_out=False,
+                    with_pyi=False)
+    else:
+        compile_proto(Path(__file__).parent / f"protos",
+                    Path(__file__).parent / f"protos",
+                    Path(__file__).parent.resolve() / f"protos/pbv{PROTOBUF_VERSION[0]}",
+                    js_out=False)
 
 
 if __name__ == "__main__":
-    if PROTOBUF_VERSION <= (3, 20):
-        main_legacy()
-    else:
-        main()
+    main()
