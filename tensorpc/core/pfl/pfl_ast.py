@@ -2207,3 +2207,19 @@ class PFLTreeNodeFinder:
             else:
                 break
         return node_to_ret
+
+class PFLTreeExprFinder:
+    """find pfl ast node by lineno/end_lineno and col_offset/end_col_offset.
+
+    use a simple hash map to implement.
+    """
+    def __init__(self, node: PFLAstNodeBase):
+        all_nodes: dict[SourceLocType, PFLExpr] = {}
+        for child_node in walk(node):
+            if isinstance(child_node, PFLExpr):
+                all_nodes[child_node.source_loc] = child_node
+        self._all_nodes = all_nodes
+        
+    def find_expr_by_source_loc(self, source_loc: SourceLocType) -> Optional[PFLExpr]:
+        """find expr by source loc, return None if not found."""
+        return self._all_nodes.get(source_loc, None)

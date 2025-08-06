@@ -1,1 +1,1 @@
-from .minimap import MinimapModel, MiniMap, MinimapLayer, MinimapFitMode
+from .minimap import MinimapModel, MiniMap, MinimapLayer, MinimapFitMode, MinimapAlignMode

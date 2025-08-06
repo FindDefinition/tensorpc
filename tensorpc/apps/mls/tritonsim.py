@@ -8,6 +8,7 @@ import inspect
 import json
 import linecache
 from pathlib import Path
+import subprocess
 from tempfile import NamedTemporaryFile
 import threading
 import time
@@ -57,8 +58,7 @@ class EditorActions(enum.Enum):
 class ExprTraceData:
     for_steps: tuple[int, ...]
     grid_id: int
-    value: np.ndarray
-    ten: tritonstd.Tensor
+    value: Union[tritonstd.Tensor, int, float, bool]
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class LocalMatrix(Matrix):
@@ -80,6 +80,7 @@ class ExprTraceMemoryModel:
     matrices: list[LocalMatrix]
     labels: list[LabelWithId]
     minimap: plus.hud.MinimapModel
+    title: str = "expr trace"
     hover: Optional[str] = None
 
     @staticmethod 
@@ -87,7 +88,10 @@ class ExprTraceMemoryModel:
         return ExprTraceMemoryModel(
             matrices=[],
             labels=[],
-            minimap=plus.hud.MinimapModel(fit_mode=int(plus.hud.MinimapFitMode.HEIGHT))
+            minimap=plus.hud.MinimapModel(
+                fit_mode=int(plus.hud.MinimapFitMode.HEIGHT),
+                align_mode=int(plus.hud.MinimapAlignMode.LEFT_TOP)
+            )
         )
 
 class LocalMemContainer(mui.TooltipFlexBox):
@@ -152,7 +156,7 @@ class MatrixTableContainer(mui.TooltipFlexBox):
         ]).prop(allowKeyboardEvent=True)
         minimap.install_canvas_events(draft.minimap, canvas)
         layout = [
-            mui.Typography("debug").prop(variant="caption"),
+            mui.Typography("").prop(variant="caption").bind_fields(value=draft.title),
             canvas.prop(flex=1)
         ]
         super().__init__("", layout)
@@ -407,6 +411,7 @@ class TritonKernelManagerState:
     # used to capture specific variables in the kernel, such as local tensors.
     expr_trace_runner: tritonstd.TritonKernelRunner
     finder_dict: dict[str, pfl.PFLTreeNodeFinder]
+    expr_finder_dict: dict[str, pfl.PFLTreeExprFinder]
     runner_task: Optional[asyncio.Task] = None
     expr_trace_task: Optional[asyncio.Task] = None
     mapper_new_to_old: Optional[SCDItem] = None
@@ -435,14 +440,17 @@ class TritonKernelManagerState:
         # print(ast.ret_st)
         lib = runner._library
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
+        expr_finder_dict: dict[str, pfl.PFLTreeExprFinder] = {}
         for k, v in lib.all_compiled.items():
             finder_dict[k] = pfl.PFLTreeNodeFinder(v, (pfl.PFLName, pfl.PFLAttribute, pfl.PFLArg)) 
+            expr_finder_dict[k] = pfl.PFLTreeExprFinder(v)
         self.fn = new_fn
         self.cur_fn_name = new_fn_name
         self.lib = lib
         self.runner = runner
         self.expr_trace_runner = runner.copy()
         self.finder_dict = finder_dict
+        self.expr_finder_dict = expr_finder_dict
         self.mapper_new_to_old = None
 
 class TritonKernelManager:
@@ -540,8 +548,10 @@ class TritonKernelManager:
         # print(ast.ret_st)
         lib = runner._library
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
+        expr_finder_dict: dict[str, pfl.PFLTreeExprFinder] = {}
         for k, v in lib.all_compiled.items():
             finder_dict[k] = pfl.PFLTreeNodeFinder(v, (pfl.PFLName, pfl.PFLAttribute, pfl.PFLArg)) 
+            expr_finder_dict[k] = pfl.PFLTreeExprFinder(v)
         state = TritonKernelManagerState(
             fn=fn,
             module_dict=mod_dict,
@@ -552,6 +562,7 @@ class TritonKernelManager:
             content_lines=code.split("\n"),
             lib=lib,
             finder_dict=finder_dict,
+            expr_finder_dict=expr_finder_dict,
             runner=runner,
             expr_trace_runner=runner.copy(),
         )
@@ -610,6 +621,13 @@ class TritonKernelManager:
                 return k, res
         return None, None 
 
+    def find_expr_node_by_source_loc(self, sloc: pfl.SourceLocType):
+        for k, finder in self.state.expr_finder_dict.items():
+            res = finder.find_expr_by_source_loc(sloc)
+            if res is not None:
+                return k, res
+        return None, None 
+
     async def stop_run(self):
         if self.runner.is_paused():
             self.runner.release_breakpoint(stop=True)
@@ -633,7 +651,10 @@ class TritonCompiledViewer(mui.FlexBox):
         self._json_viewer = mui.JsonViewer()
         super().__init__([
             mui.VBox([
-                self.select,
+                mui.HBox([
+                    self.select.prop(flex=1),
+                    mui.Button("ptxas", self._on_ptxas_info).prop(size="small")
+                ]),
                 self.editor.prop(flex=1)
 
             ]).prop(flex=3),
@@ -643,6 +664,22 @@ class TritonCompiledViewer(mui.FlexBox):
         ])
         self.prop(flexFlow="row nowrap", overflow="hidden")
         self._asm_dict: dict[str, str] = {}
+
+    async def _on_ptxas_info(self):
+        with NamedTemporaryFile(suffix=".ptx") as f:
+            # get target from ptx code
+            ptx_lines = self._asm_dict["ptx"].splitlines()
+            arch = "sm_80"
+            for l in ptx_lines:
+                if l.startswith(".target"):
+                    arch = l.split()[1]
+                    break
+            f.write(self._asm_dict["ptx"].encode("utf-8"))
+            out = subprocess.check_output(
+                ["ptxas", f.name, "-v", "--warn-on-spills", f"-arch={arch}"],
+                stderr=subprocess.STDOUT,
+                universal_newlines=True) 
+            print(out)
 
     async def _on_select(self, option):
         content = self._asm_dict[option["label"]]
@@ -941,6 +978,7 @@ class TritonSim:
         async with self.dm.draft_update() as draft:
             draft.expr_trace_matrices.matrices.clear()
             draft.expr_trace_matrices.labels.clear()
+            draft.expr_trace_matrices.title = "expr trace"
             draft.global_mem.matrices.clear()
 
     async def _recompile(self, new_content: str, bkpt_lineno: Optional[int] = None, write_to_file: bool = True):
@@ -964,8 +1002,9 @@ class TritonSim:
             self._runner.setup_watchdog(partial(self._handle_external_file_change, loop=asyncio.get_running_loop()), file_cur_mtime)
 
         await self._runner.validate()
-        await self._init_sim_info()
         await self._reset_vis_matrics()
+        await self._init_sim_info()
+
         self._install_event_handlers_to_runner(self._runner)
         if prev_is_paused:
             cur_grid_idxes = [self.x_slider.int(), self.y_slider.int(), self.z_slider.int()]
@@ -978,13 +1017,13 @@ class TritonSim:
             # rerun trace
             sloc, key, old_lines = self._cur_traced_expr
             # try to match the lineno of previous traced expr
-            mapper = SourceChangeDiffCache.get_raw_item_for_mapping(self._runner.state.content_lines, old_lines)
+            mapper = SourceChangeDiffCache.get_raw_item_for_mapping(old_lines, self._runner.state.content_lines)
             mapped_lineno = mapper.bisect_mapped_lineno(sloc[0])
             if mapped_lineno == -1:
                 print("Cannot map the line number to previous traced expr")
                 self._cur_traced_expr = None
             # here we don't use end lineno because we shouldn't trace multiple lines expr
-            await self._expr_trace(key, (mapped_lineno, sloc[1], sloc[2], sloc[3]))
+            await self._expr_trace(key, (mapped_lineno, sloc[1], mapped_lineno, sloc[3]))
             
     async def _handle_kernel_select_change(self, option):
         new_fn_name = option["label"]
@@ -1032,6 +1071,27 @@ class TritonSim:
                     "label": runner.state.cur_fn_name,
                 }
             await self._init_new_runner(runner, lineno)
+        elif data.type == VscodeTensorpcMessageType.PFLRunExprTrace:
+            if self._runner is None:
+                return
+
+            assert data.selections is not None 
+            lineno = data.selections[0].start.line + 1 
+            end_lineno = data.selections[0].end.line + 1
+            col_start = data.selections[0].start.character
+            if end_lineno != lineno:
+                print("Cannot trace multi-line expression")
+                return None
+            col_end = data.selections[0].end.character
+            func_uid, expr_node = self._runner.find_expr_node_by_source_loc((lineno, col_start, end_lineno, col_end))
+            if expr_node is None or func_uid is None:
+                print(f"Cannot find expression at line {lineno}, column {col_start + 1}, {data.selections[0]}")
+                return None
+            fuid_name = self._remove_spec_suffix_of_func_uid(func_uid)
+            fuid_name_qname = "::".join(fuid_name.split("::")[1:])
+            key = f"{fuid_name_qname}-{unparse_pfl_ast(expr_node)}"
+            await self._expr_trace(key, expr_node.source_loc)
+            # await self.editor.set_line_number(lineno)
 
     async def _init_new_runner(self, runner: TritonKernelManager, lineno: int):
         self._runner = runner
@@ -1318,13 +1378,14 @@ class TritonSim:
 
     def _capture_expr_val(self, expr_hit: PFLRunnerExprHit, results: list[ExprTraceData]):
         for_steps = [(x[1]) for x in expr_hit.for_stack]
-        for_str = "-".join(map(str, for_steps))
-        if isinstance(expr_hit.data, tritonstd.Tensor):
-            ten = expr_hit.data._clone()
-            tctx = get_tensorsim_context_checked()
-            grid_id = tctx.get_flatted_grid_id()
-            val = ten._wrapped.get_storage_checked().data
-            results.append(ExprTraceData(tuple(for_steps), grid_id, val, ten))
+        tctx = get_tensorsim_context_checked()
+        grid_id = tctx.get_flatted_grid_id()
+        if isinstance(expr_hit.data, (tritonstd.Tensor, int, float, bool)):
+            if isinstance(expr_hit.data, tritonstd.Tensor):
+                value = expr_hit.data._clone()
+            else:
+                value = expr_hit.data
+            results.append(ExprTraceData(tuple(for_steps), grid_id, value))
 
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
         if self._runner is None:
@@ -1351,11 +1412,15 @@ class TritonSim:
                 if end_lineno != lineno:
                     print("Cannot trace multi-line expression")
                     return None
-                _, expr_node = self._runner.find_nearest_node_by_line_col(lineno, col_start)
-                if expr_node is None:
+                col_end = act.selection.selections[0].endColumn - 1
+                func_uid, expr_node = self._runner.find_expr_node_by_source_loc((lineno, col_start, end_lineno, col_end))
+                if expr_node is None or func_uid is None:
                     print(f"Cannot find expression at line {lineno}, column {col_start + 1}, {act.selection.selections[0]}")
                     return None
-                await self._expr_trace(unparse_pfl_ast(expr_node), expr_node.source_loc)
+                fuid_name = self._remove_spec_suffix_of_func_uid(func_uid)
+                fuid_name_qname = "::".join(fuid_name.split("::")[1:])
+                key = f"{fuid_name_qname}-{unparse_pfl_ast(expr_node)}"
+                await self._expr_trace(key, expr_node.source_loc)
 
     async def _expr_trace(self, key: str, source_loc: pfl.SourceLocType):
         assert self._runner is not None, "Runner must be initialized before expr trace"
@@ -1397,29 +1462,41 @@ class TritonSim:
                 else:
                     result_matrix: list[list[Any]] = [[None for j in range(len(grid_id_to_res))] for i in range(max_cnt + 1)]
                     result_matrix[0] = [LabelWithId(text=f"B{gid}", id=str(gid)) for gid in grid_id_to_res.keys()]
-                draft.expr_trace_matrices.labels = labels
                 mat_cnt = 0
+                item_cnt = 0
+
                 mat_fontsize_min = None
                 for grid_id, res_list in grid_id_to_res.items():
                     for j in range(len(res_list)):
                         item = res_list[j]
                         name = "-".join(map(str, item.for_steps))
-                        uid = UniqueTreeId.from_parts([name, str(mat_cnt), str(grid_id)]).uid_encoded
-                        mat = LocalMatrix.from_shape(name, list(item.value.shape), label_with_shape=False)
-                        mat.id = uid
-                        mat.fontSize /= 1.5
-                        if mat_fontsize_min is None:
-                            mat_fontsize_min = mat.fontSize
+                        uid = UniqueTreeId.from_parts([name, str(item_cnt), str(grid_id)]).uid_encoded
+
+                        if isinstance(item.value, tritonstd.Tensor):
+                            mat = LocalMatrix.from_shape(name, list(item.value.shape), label_with_shape=False)
+                            mat.id = uid
+                            mat.fontSize /= 1.5
+                            if mat_fontsize_min is None:
+                                mat_fontsize_min = mat.fontSize
+                            else:
+                                mat_fontsize_min = min(mat_fontsize_min, mat.fontSize)
+                            draft.expr_trace_matrices.matrices.append(mat)
+                            self._set_local_memory_model_draft(draft.expr_trace_matrices.matrices[mat_cnt], item.value)
+
+                            mat_cnt += 1
                         else:
-                            mat_fontsize_min = min(mat_fontsize_min, mat.fontSize)
+                            if isinstance(item.value, float):
+                                mat = LabelWithId(text=f"{item.value:.4f}", id=uid)
+                            else:
+                                mat = LabelWithId(text=str(item.value), id=uid)
+                            labels.append(mat)
                         if grid_is_row:
                             result_matrix[grid_id_cnt][j + 1] = mat
                         else:
                             result_matrix[j + 1][grid_id_cnt] = mat
-                        draft.expr_trace_matrices.matrices.append(mat)
-                        self._set_local_memory_model_draft(draft.expr_trace_matrices.matrices[mat_cnt], item.ten)
-                        mat_cnt += 1
+                        item_cnt += 1
                     grid_id_cnt += 1 
+                draft.expr_trace_matrices.labels = labels
                 for label in labels:
                     if mat_fontsize_min is None:
                         mat_fontsize_min = 5
@@ -1433,6 +1510,7 @@ class TritonSim:
                             cell.offsetY -= max_h / 2
                 draft.expr_trace_matrices.minimap.width = max_w
                 draft.expr_trace_matrices.minimap.height = max_h
+                draft.expr_trace_matrices.title = key
             # save code here to match when code changed
             self._cur_traced_expr = (source_loc, key, self._runner.state.content_lines)
 

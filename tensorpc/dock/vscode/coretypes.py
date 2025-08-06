@@ -14,6 +14,9 @@ class VscodeTensorpcMessageType(enum.IntEnum):
     ShowFunctionArguments = 2
     ShowFunctionLocals = 3
     PFLLaunchSimulation = 4
+    PFLRunTowards = 5
+    PFLRunExprTrace = 6
+    PFLShowVar = 7
 
 class VscodeTensorpcQueryType(enum.IntEnum):
     TraceTrees = 0

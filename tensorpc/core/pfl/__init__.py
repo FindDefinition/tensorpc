@@ -31,7 +31,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                       PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder,
                       PFLUnaryOp, PFLWhile, UnaryOpType, unparse_pfl_ast,
                       unparse_pfl_ast_to_lines, unparse_pfl_expr, walk,
-                      SourceLocType)
+                      SourceLocType, PFLTreeExprFinder)
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
                       register_pfl_std, register_pfl_builtin_proxy,
                       compiler_remove_optional)

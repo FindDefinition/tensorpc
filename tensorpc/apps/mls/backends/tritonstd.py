@@ -8,6 +8,8 @@ import math
 import importlib.machinery
 import concurrent
 import multiprocessing
+import subprocess
+from tempfile import NamedTemporaryFile
 import time
 import traceback
 import types
@@ -2360,7 +2362,7 @@ class TritonKernelCompileInfo:
     metadata: dict[str, Any]
     best_config: Any = None
 
-def _get_triton_compile_infos(kernel, **kwargs_tt) -> TritonKernelCompileInfo:
+def _get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) -> TritonKernelCompileInfo:
     from triton.runtime.driver import driver
 
     device = driver.active.get_current_device()
@@ -2389,6 +2391,24 @@ def _get_triton_compile_infos(kernel, **kwargs_tt) -> TritonKernelCompileInfo:
     metadata_dict = compiled_kernel.metadata._asdict().copy()
     metadata_dict.pop("target")
     metadata_dict["n_regs"] = compiled_kernel.n_regs
+    metadata_dict["n_spills"] = compiled_kernel.n_spills
+    metadata_dict["n_max_threads"] = compiled_kernel.n_max_threads
+    # metadata_dict["arch_number"] = compiled_kernel.metadata.target.arch
+
+    if log_ptxas_info:
+        with NamedTemporaryFile(suffix=".ptx") as f:
+            f.write(asm_dict["ptx"].encode("utf-8"))
+            arch = compiled_kernel.metadata.target.arch
+            if arch == 90:
+                arch_str = "sm_90a"
+            else:
+                arch_str = f"sm_{arch}"
+            out = subprocess.check_output(
+                ["ptxas", f.name, "-v", "--warn-on-spills", f"-arch={arch_str}"],
+                stderr=subprocess.STDOUT,
+                universal_newlines=True) 
+            print(out)
+
     return TritonKernelCompileInfo(asm_dict, metadata_dict, best_config)
 
 
@@ -2400,7 +2420,7 @@ def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
     assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
     fn[sim_info.grid_size_for_triton](**kwargs_tt)
     # compare result here.
-    run_info = _get_triton_compile_infos(fn, **kwargs_tt)
+    run_info = _get_triton_compile_infos(fn, kwargs_tt)
     print(run_info.best_config)
     for k, ref in sim_info.ref_results.items():
         if isinstance(ref, HostTensorDescriptor):
@@ -2476,8 +2496,9 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                 raw_dur_msg = ", ".join(
                     f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
                 print(f"{fn_name}(raw) dur: {raw_dur_msg}")
-        run_info = _get_triton_compile_infos(fn, **kwargs_tt)
-        print("nregs:", run_info.metadata["n_regs"], "shared:", run_info.metadata["shared"], "cfg", run_info.best_config)
+        run_info = _get_triton_compile_infos(fn, kwargs_tt)
+        print("nregs:", run_info.metadata["n_regs"], "nspills:", run_info.metadata["n_spills"], 
+              "shared:", run_info.metadata["shared"], "cfg", run_info.best_config)
     assert run_info is not None
     return durations, raw_durations, run_info
 

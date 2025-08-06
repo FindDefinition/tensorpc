@@ -29,6 +29,11 @@ class MinimapFitMode(enum.IntEnum):
     HEIGHT = 1
     AUTO = 2
 
+class MinimapAlignMode(enum.IntEnum):
+    CENTER = 0
+    LEFT_TOP = 1
+    RIGHT_BOTTOM = 2
+
 @dataclasses.dataclass
 class MinimapModel:
     width: float = 1.0
@@ -49,9 +54,12 @@ class MinimapModel:
     viewport_canvas_scale_h: float = 1.0
 
     child_scale: float = 1.0 
+    childOffsetX: float = 0.0
+    childOffsetY: float = 0.0
 
     wheel_speed: float = 0.001
     fit_mode: int = int(MinimapFitMode.AUTO)
+    align_mode: int = int(MinimapAlignMode.CENTER)
 
     @pfl.js.mark_js_compilable
     def _wheel_handler_pfl_v2(self, data: PointerEvent):
@@ -162,11 +170,23 @@ class MinimapModel:
             self.viewport_canvas_width = self.scale * self.layout.innerSizeX
             self.viewport_canvas_height = self.scale * self.layout.innerSizeY * self.viewport_canvas_scale_h
             self.child_scale = self.scale * w_scale_rate
+            self.childOffsetX = 0.0
+            if self.align_mode == MinimapAlignMode.LEFT_TOP:
+                self.childOffsetY = (self.viewport_canvas_height - self.height * self.child_scale) / 2
+            elif self.align_mode == MinimapAlignMode.RIGHT_BOTTOM:
+                self.childOffsetY = -(self.viewport_canvas_height - self.height * self.child_scale) / 2
+
         elif self.fit_mode == MinimapFitMode.HEIGHT or (not is_auto_w):
             self.viewport_canvas_scale_w = Math.max(1.0, self.width * h_scale_rate / self.layout.innerSizeX)
             self.viewport_canvas_width = self.scale * self.layout.innerSizeX * self.viewport_canvas_scale_w
             self.viewport_canvas_height = self.scale * self.layout.innerSizeY
             self.child_scale = self.scale * h_scale_rate
+            self.childOffsetY = 0.0
+            if self.align_mode == MinimapAlignMode.LEFT_TOP:
+                self.childOffsetX = -(self.viewport_canvas_width - self.width * self.child_scale) / 2
+            elif self.align_mode == MinimapAlignMode.RIGHT_BOTTOM:
+                self.childOffsetX = (self.viewport_canvas_width - self.width * self.child_scale) / 2
+
 
 class MinimapLayer(enum.IntEnum):
     BKGD_LAYER = -100
@@ -232,6 +252,8 @@ class MiniMap(three.Group):
         child_group.bind_fields_unchecked_dict({
             "scale-x": f"{draft.child_scale}",
             "scale-y": f"{draft.child_scale}",
+            "position-x": f"{draft.childOffsetX}",
+            "position-y": f"{draft.childOffsetY}",
         })
 
         line_minimap.bind_fields_unchecked_dict({
