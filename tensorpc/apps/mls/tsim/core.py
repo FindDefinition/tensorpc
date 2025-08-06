@@ -285,6 +285,17 @@ class TensorSimContext:
 
         self._recorded_io_ops: list[TensorSimIoOp] = []
 
+    def get_flatted_grid_id(self) -> int:
+        """
+        Returns the flatted grid id, which is the linear index of the grid.
+        """
+        assert len(self.grid_id) == len(self.grid_size), \
+            f"Grid id {self.grid_id} and size {self.grid_size} must have same length."
+        res = 0
+        for idx, size in zip(self.grid_id, self.grid_size):
+            res = res * size + idx
+        return res
+
 _TENSOR_SIM_CONTEXT: contextvars.ContextVar[
     Optional[TensorSimContext]] = contextvars.ContextVar("TensorSimContext",
                                                         default=None)

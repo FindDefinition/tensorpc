@@ -267,6 +267,12 @@ class AnnotatedType:
     # currently only used for tuple type
     is_homogeneous: bool = False
 
+    def get_optional_undefined_removed(self):
+        return dataclasses.replace(
+            self,
+            is_optional=False,
+            is_undefined=False)
+
     def is_any_type(self) -> bool:
         return self.origin_type is Any
 

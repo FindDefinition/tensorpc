@@ -21,16 +21,17 @@ from watchdog.observers.api import ObservedWatch
 import dataclasses as dataclasses_plain
 from tensorpc.core.astex.sourcecache import SCDItem, SourceChangeDiffCache
 from tensorpc.apps.mls import tsim
-from tensorpc.apps.mls.components.global_mem import MatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix
-from tensorpc.apps.mls.tsim.core import TensorSimIoOp, get_flush_sim_io_ops
+from tensorpc.apps.mls.components.global_mem import Label, MatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix, layout_table_inplace
+from tensorpc.apps.mls.tsim.core import TensorSimIoOp, get_flush_sim_io_ops, get_tensorsim_context_checked
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.annolib import is_undefined
 from tensorpc.core.astex.astcache import AstCache, AstCacheItem
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno, find_toplevel_func_node_container_by_lineno
 from tensorpc.core.moduleid import get_module_id_of_type
-from tensorpc.core.pfl.evaluator import PFLRunnerStateType, PFLRunnerBreakpoint, PFLRunnerCtrlFor, PFLRunnerCtrlBase
+from tensorpc.core.pfl.evaluator import PFLRunnerExprHit, PFLRunnerStateType, PFLRunnerBreakpoint, PFLRunnerCtrlFor, PFLRunnerCtrlBase
 from tensorpc.core.pfl.backends.js import ColorUtil, Math, MathUtil
+from tensorpc.core.pfl.pfl_ast import unparse_pfl_ast
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.dock import mui, three, plus, mark_create_layout, mark_did_mount, appctx
 from typing import Annotated, Any, Optional, Union
@@ -48,8 +49,20 @@ import importlib.machinery
 
 from tensorpc.utils.wait_tools import debounce
 
+class EditorActions(enum.Enum):
+    RUN_TO = "Run To"
+    EXPR_TRACE = "Expr Trace"
+
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
+class ExprTraceData:
+    for_steps: tuple[int, ...]
+    grid_id: int
+    value: np.ndarray
+    ten: tritonstd.Tensor
+
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class LocalMatrix(Matrix):
+    id: str = ""
     global_indices: dict[str, np.ndarray] = dataclasses.field(default_factory=dict)
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
@@ -58,29 +71,42 @@ class LocalMemoryModel:
     minimap: plus.hud.MinimapModel
     hover: Optional[str] = None
 
+@dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
+class LabelWithId(Label):
+    id: str
+
+@dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
+class ExprTraceMemoryModel:
+    matrices: list[LocalMatrix]
+    labels: list[LabelWithId]
+    minimap: plus.hud.MinimapModel
+    hover: Optional[str] = None
+
+    @staticmethod 
+    def empty():
+        return ExprTraceMemoryModel(
+            matrices=[],
+            labels=[],
+            minimap=plus.hud.MinimapModel(fit_mode=int(plus.hud.MinimapFitMode.HEIGHT))
+        )
 
 class LocalMemContainer(mui.TooltipFlexBox):
-    def __init__(self, key: str, draft: LocalMemoryModel, use_view: bool = False):
+    def __init__(self, key: str, draft: LocalMemoryModel):
         assert isinstance(draft, DraftBase)
-        panel = MatrixPanel(draft.matrix, enable_hover_line=True)
+        panel = MatrixPanel(draft.matrix, enable_hover_line=False)
         minimap = plus.hud.MiniMap(draft.minimap, [
             panel
-        ])
+        ], minimap_event_key="local_mem_minimap")
         self.panel = panel
         self.minimap = minimap
         self._draft = draft
         cam = three.OrthographicCamera(near=0.1, far=1000, children=[
             minimap,
         ]).prop(position=(0, 0, 10))
-        if use_view:
-            canvas = three.View([
-                cam.prop(makeDefault=True),
-                # three.InfiniteGridHelper(1, 10, "green")
-            ]).prop(allowKeyboardEvent=True)
-        else:
-            canvas = three.Canvas([
-                cam.prop(makeDefault=True),
-            ]).prop(allowKeyboardEvent=True)
+        canvas = three.View([
+            cam.prop(makeDefault=True),
+            # three.InfiniteGridHelper(1, 10, "green")
+        ]).prop(allowKeyboardEvent=True)
         minimap.install_canvas_events(draft.minimap, canvas)
         layout = [
             mui.Typography(key).prop(variant="caption"),
@@ -96,6 +122,50 @@ class LocalMemContainer(mui.TooltipFlexBox):
                 overflow="hidden",
                 followCursor=True)
 
+
+class MatrixTableContainer(mui.TooltipFlexBox):
+    def __init__(self, draft: ExprTraceMemoryModel):
+        assert isinstance(draft, DraftBase)
+        dm = mui.DataModel.get_datamodel_from_draft(draft)
+        draft_nested = dm.create_external_draft_with_self(Matrix)
+        label_draft_nested = dm.create_external_draft_with_self(LabelWithId)
+        panel = MatrixPanel(draft_nested, enable_hover_line=False, label_with_shape=False)
+        label = three.Text("").bind_fields(value=label_draft_nested.text, fontSize=label_draft_nested.fontSize)
+        label.prop(color="blue", fillOpacity=0.5)
+        label.bind_fields_unchecked_dict({
+            "position-x": label_draft_nested.offsetX,
+            "position-y": f"-{label_draft_nested.offsetY}",
+        })
+        minimap = plus.hud.MiniMap(draft.minimap, [
+            three.DataListGroup(panel).bind_fields(dataList=draft.matrices),
+            three.DataListGroup(label).bind_fields(dataList=draft.labels),
+        ], minimap_event_key="matrix_table")
+        self.panel = panel
+        self.minimap = minimap
+        self._draft = draft
+        cam = three.OrthographicCamera(near=0.1, far=1000, children=[
+            minimap,
+        ]).prop(position=(0, 0, 10))
+        canvas = three.View([
+            cam.prop(makeDefault=True),
+            # three.InfiniteGridHelper(1, 10, "green")
+        ]).prop(allowKeyboardEvent=True)
+        minimap.install_canvas_events(draft.minimap, canvas)
+        layout = [
+            mui.Typography("debug").prop(variant="caption"),
+            canvas.prop(flex=1)
+        ]
+        super().__init__("", layout)
+        self.bind_fields(title=draft.hover)
+        self.prop(minHeight=0,
+                minWidth=0,
+                flexFlow="column nowrap",
+                width="100%",
+                height="100%",
+                overflow="hidden",
+                followCursor=True)
+
+
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class TritonSimModel:
     grid_idx_x: int = 0
@@ -109,11 +179,10 @@ class TritonSimModel:
     is_paused: bool = False 
     # stack tensors during triton simulation
     local_matrices: dict[str, LocalMemoryModel] = dataclasses.field(default_factory=dict)
+    expr_trace_matrices: ExprTraceMemoryModel
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _on_hover_pfl(self, data: three.PointerEvent, key: str):
-        # print("WTF", self.global_mem)
-
         if key in self.local_matrices:
             local_mat = self.local_matrices[key]
             point_unified_x = data.pointLocal[0] + 0.5
@@ -121,8 +190,6 @@ class TritonSimModel:
             idx_x = Math.floor(point_unified_x * local_mat.matrix.width)
             idx_y = Math.floor(point_unified_y * local_mat.matrix.height)
             flat_idx = idx_y * local_mat.matrix.width + idx_x
-            # self.linePosX = (idx_x + 0.5) - local_mat.width / 2
-            # self.linePosY = (-(idx_y + 0.5)) + local_mat.height / 2
             if local_mat.matrix.data is not None:
                 data_arr = MathUtil.getTypedArray(local_mat.matrix.data)
                 value = data_arr[flat_idx]
@@ -154,7 +221,101 @@ class TritonSimModel:
                     global_mat.temp_aabb_line_pos = line_pos
                     global_mat.temp_aabb_line_size = line_size
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
+    def _on_matrix_table_elem_enter_pfl(self, data: three.PointerEvent):
+        if data.dataIndexes:
+            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
+            for mat in self.expr_trace_matrices.matrices:
+                mat.hovered = False
+            local_mat.hovered = True
+
+    @pfl.js.mark_js_compilable
+    def _on_matrix_table_elem_click_pfl(self, data: three.PointerEvent):
+        if data.dataIndexes:
+            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
+            for mat in self.expr_trace_matrices.matrices:
+                mat.selected = False
+            local_mat.selected = True
+            for global_key, indices in local_mat.global_indices.items():
+                if global_key in self.global_mem.matrices:
+                    global_mat = self.global_mem.matrices[global_key]
+                    inds_flat_buffer = MathUtil.getTypedArray(indices)
+                    line_pos = np.empty([inds_flat_buffer.length, 2], np.float32)
+                    line_pos_buffer = MathUtil.getTypedArray(line_pos)
+                    for j in range(inds_flat_buffer.length):
+                        x = inds_flat_buffer[j] % global_mat.width + 0.5 - global_mat.width / 2
+                        y = (Math.floor(inds_flat_buffer[j] / global_mat.width) + 0.5 - global_mat.height / 2)
+                        if global_mat.transposed:
+                            tmp = x
+                            x = y
+                            y = tmp
+                        line_pos_buffer[j * 2] = x
+                        line_pos_buffer[j * 2 + 1] = -y
+                    global_mat.temp_mask_pos = line_pos
+
+    @pfl.js.mark_js_compilable
+    def _on_matrix_table_bkgd_click(self, data: three.PointerEvent):
+        for mat in self.expr_trace_matrices.matrices:
+            mat.selected = False
+
+    @pfl.js.mark_js_compilable
+    def _on_matrix_table_elem_hover_pfl(self, data: three.PointerEvent):
+        if data.dataIndexes:
+            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
+            # hover vis
+            point_unified_x = data.pointLocal[0] + 0.5
+            point_unified_y = -data.pointLocal[1] + 0.5
+            idx_x = Math.floor(point_unified_x * local_mat.width)
+            idx_y = Math.floor(point_unified_y * local_mat.height)
+            local_mat.linePosX = (idx_x + 0.5) - local_mat.width / 2
+            local_mat.linePosY = ((-(idx_y + 0.5)) + local_mat.height / 2) * local_mat.height_scale
+            flat_idx = idx_y * local_mat.width + idx_x
+            # self.linePosX = (idx_x + 0.5) - local_mat.width / 2
+            # self.linePosY = (-(idx_y + 0.5)) + local_mat.height / 2
+            if local_mat.data is not None:
+                data_arr = MathUtil.getTypedArray(local_mat.data)
+                value = data_arr[flat_idx]
+                self.expr_trace_matrices.hover = str(value)
+            for global_key, indices in local_mat.global_indices.items():
+                # print(global_key in self.global_mem.matrices)
+                if global_key in self.global_mem.matrices:
+                    global_mat = self.global_mem.matrices[global_key]
+                    inds_flat_buffer = MathUtil.getTypedArray(indices[flat_idx])
+                    line_pos = np.empty([inds_flat_buffer.length, 2], np.float32)
+                    line_size = np.empty([inds_flat_buffer.length, 2], np.float32)
+
+                    line_pos_buffer = MathUtil.getTypedArray(line_pos)
+                    line_size_buffer = MathUtil.getTypedArray(line_size)
+                    for j in range(inds_flat_buffer.length):
+                        x = inds_flat_buffer[j] % global_mat.width + 0.5 - global_mat.width / 2
+                        y = (Math.floor(inds_flat_buffer[j] / global_mat.width) + 0.5 - global_mat.height / 2)
+                        if global_mat.transposed:
+                            tmp = x
+                            x = y
+                            y = tmp
+                        line_pos_buffer[j * 2] = x
+                        line_pos_buffer[j * 2 + 1] = -y
+                        line_size_buffer[j * 2] = 1
+                        line_size_buffer[j * 2 + 1] = 1
+                    global_mat.temp_aabb_line_pos = line_pos
+                    global_mat.temp_aabb_line_size = line_size
+
+    @pfl.js.mark_js_compilable
+    def _on_matrix_table_elem_hover_leave_pfl(self, data: three.PointerEvent):
+        self.expr_trace_matrices.hover = None
+        for mat in self.expr_trace_matrices.matrices:
+            mat.linePosX = None
+            mat.linePosY = None
+            mat.hovered = False
+
+        for global_key, mat in self.global_mem.matrices.items():
+            mat.temp_aabb_line_pos = None
+            mat.temp_aabb_line_size = None
+
+    @pfl.js.mark_js_compilable
     def _on_hover_leave_pfl(self, data: three.PointerEvent, key: str):
         # print("WTF", self.global_mem)
         if key in self.local_matrices:
@@ -244,9 +405,10 @@ class TritonKernelManagerState:
     module_dict: dict[str, Any]
     runner: tritonstd.TritonKernelRunner
     # used to capture specific variables in the kernel, such as local tensors.
-    var_runner: tritonstd.TritonKernelRunner
+    expr_trace_runner: tritonstd.TritonKernelRunner
     finder_dict: dict[str, pfl.PFLTreeNodeFinder]
     runner_task: Optional[asyncio.Task] = None
+    expr_trace_task: Optional[asyncio.Task] = None
     mapper_new_to_old: Optional[SCDItem] = None
     watchdog_watcher: Optional[_WatchDogForKernelFile] = None
     watchdog_observer: Optional[Any] = None
@@ -279,7 +441,7 @@ class TritonKernelManagerState:
         self.cur_fn_name = new_fn_name
         self.lib = lib
         self.runner = runner
-        self.var_runner = runner.copy()
+        self.expr_trace_runner = runner.copy()
         self.finder_dict = finder_dict
         self.mapper_new_to_old = None
 
@@ -391,7 +553,7 @@ class TritonKernelManager:
             lib=lib,
             finder_dict=finder_dict,
             runner=runner,
-            var_runner=runner.copy(),
+            expr_trace_runner=runner.copy(),
         )
         return state
 
@@ -421,6 +583,10 @@ class TritonKernelManager:
                         exit_event=self._runner_task_ev, external_inline_env=inline_env))
                     return inline_env
         return None 
+
+    async def run_expr_trace_kernel_test(self):
+        return await self.state.expr_trace_runner.run_kernel_test(self.state.fn)
+
 
     async def run_single_block(self, grid_idxes: Sequence[int]):
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
@@ -507,7 +673,9 @@ class TritonSimAppModel:
 class TritonSim:
     @mark_create_layout
     def my_layout(self):
-        self.dm = mui.DataModel(TritonSimModel(global_mem=GlobalMemoryModel.empty(), local_matrices={}), [])
+        gmem_model = GlobalMemoryModel.empty()
+        gmem_model.minimap.fit_mode = plus.hud.MinimapFitMode.AUTO
+        self.dm = mui.DataModel(TritonSimModel(global_mem=gmem_model, local_matrices={}, expr_trace_matrices=ExprTraceMemoryModel.empty()), [])
         draft = self.dm.get_draft()
         self.app_dm = mui.DataModel(TritonSimAppModel(), [self.dm])
         self.app_dm.connect_draft_store("_tensorpc_mls_triton_sim", AppDraftFileStoreBackend())
@@ -523,10 +691,13 @@ class TritonSim:
         })
         self.app_dm.event_storage_fetched.on(self._handle_app_dm_storage_fetched)
         editor_acts: list[mui.MonacoEditorAction] = [
-            mui.MonacoEditorAction(id="Run To", 
+            mui.MonacoEditorAction(id=EditorActions.RUN_TO.value, 
                 label="Run Towards Here", contextMenuOrder=1.5,
                 contextMenuGroupId="tensorpc-pfl-editor-action", 
                 keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+            mui.MonacoEditorAction(id=EditorActions.EXPR_TRACE.value, 
+                label="Trace Selected Expr", contextMenuOrder=1.5,
+                contextMenuGroupId="tensorpc-pfl-editor-action"),
         ]
         self._triton_viewer = TritonCompiledViewer()
         self._ptx_viewer_dialog = mui.Dialog([
@@ -567,30 +738,6 @@ class TritonSim:
         self.editor.event_editor_save.on(self._handle_editor_save)
         self.editor.event_change.on(self._handle_editor_debounced_change)
 
-        # tabdefs = [
-        #     mui.TabDef("kernel",
-        #                "kernel",
-        #                self.editor.prop(width="100%", height="100%", overflow="hidden"),
-        #                tooltip="kernel"),
-        #     mui.TabDef("ptx",
-        #                "ptx",
-        #                self._triton_viewer.prop(width="100%", height="100%", overflow="hidden"),
-        #                tooltip="ptx"),
-        #     # mui.TabDef("debug",
-        #     #            "debug",
-        #     #            mui.HBox([
-        #     #                mui.JsonViewer().bind_fields(data="$")
-        #     #            ]).prop(width="100%", height="100%", overflow="auto", minHeight=0, minWidth=0),
-        #     #            tooltip="debug"),
-        # ]
-        # tab_theme = get_tight_icon_tab_theme_horizontal(padding="5px")
-
-        # tabs = mui.Tabs(tabdefs, init_value="kernel").prop(
-        #             panelProps=mui.FlexBoxProps(flex=3, padding=0, overflow="hidden"),
-        #             borderBottom=1,
-        #             borderColor='divider',
-        #             tooltipPlacement="bottom")
-
         self._runner: Optional[TritonKernelManager] = None
         self._global_mem = GlobalMemContainer(external_dm=self.dm, external_draft=draft.global_mem, use_view=True)
         self._ast_cache = AstCache()
@@ -615,6 +762,8 @@ class TritonSim:
 
         self._block_run_backend_state: Optional[SingleBlockRunState] = None
         self._cur_observed_local_tensor_key: Optional[tuple[str, str]] = None
+        self._cur_traced_expr: Optional[tuple[pfl.SourceLocType, str, list[str]]] = None
+
         self._next_bkpt_set_lineno: bool = False
 
         self._watchdog_lock = threading.Lock()
@@ -630,6 +779,14 @@ class TritonSim:
         self._kernel_select.bind_fields(options=self.app_dm.get_draft().fn_options)
         self._kernel_select.bind_draft_change(self.app_dm.get_draft().cur_fn_option)
         self._kernel_select.event_change.on(self._handle_kernel_select_change)
+        matrix_table = MatrixTableContainer(draft.expr_trace_matrices)
+        matrix_table.panel.event_plane.event_move.add_frontend_handler(self.dm, TritonSimModel._on_matrix_table_elem_hover_pfl)
+        matrix_table.panel.event_plane.event_leave.add_frontend_handler(self.dm, TritonSimModel._on_matrix_table_elem_hover_leave_pfl)
+        matrix_table.panel.event_plane.event_enter.add_frontend_handler(self.dm, TritonSimModel._on_matrix_table_elem_enter_pfl)
+        matrix_table.panel.event_plane.event_click.add_frontend_handler(self.dm, TritonSimModel._on_matrix_table_elem_click_pfl)
+        matrix_table.panel.event_plane.event_click.configure(stop_propagation=True)
+        matrix_table.minimap.event_plane.event_click.add_frontend_handler(self.dm, TritonSimModel._on_matrix_table_bkgd_click)
+
         self.dm.init_add_layout([
             mui.VBox([
                 mui.DataPortal([self.app_dm], [
@@ -658,7 +815,10 @@ class TritonSim:
                 mui.AppTerminal().prop(flex=1),
             ]).prop(flex=2, minWidth=0, minHeight=0, overflow="hidden"),
             mui.VDivider(),
-            self._global_mem.prop(flex=2),
+            mui.VBox([
+                mui.HBox([self._global_mem]).prop(flex=1),
+                mui.HBox([matrix_table]).prop(flex=1),
+            ]).prop(flex=2)
         ])
         return mui.VBox([
             three.ViewCanvas([
@@ -777,6 +937,12 @@ class TritonSim:
                 except BaseException as e:
                     traceback.print_exc()
 
+    async def _reset_vis_matrics(self):
+        async with self.dm.draft_update() as draft:
+            draft.expr_trace_matrices.matrices.clear()
+            draft.expr_trace_matrices.labels.clear()
+            draft.global_mem.matrices.clear()
+
     async def _recompile(self, new_content: str, bkpt_lineno: Optional[int] = None, write_to_file: bool = True):
         assert self._runner is not None, "Runner must be initialized before saving"
         prev_is_paused = self._runner.runner.is_paused()
@@ -799,6 +965,7 @@ class TritonSim:
 
         await self._runner.validate()
         await self._init_sim_info()
+        await self._reset_vis_matrics()
         self._install_event_handlers_to_runner(self._runner)
         if prev_is_paused:
             cur_grid_idxes = [self.x_slider.int(), self.y_slider.int(), self.z_slider.int()]
@@ -806,6 +973,18 @@ class TritonSim:
                 cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
                 cur_grid_idxes[j] = min(cur_grid_idxes[j], self._runner.grid_size[j] - 1)
             await self._runner.run_to(cur_grid_idxes, bkpt_lineno)
+
+        if self._cur_traced_expr is not None:
+            # rerun trace
+            sloc, key, old_lines = self._cur_traced_expr
+            # try to match the lineno of previous traced expr
+            mapper = SourceChangeDiffCache.get_raw_item_for_mapping(self._runner.state.content_lines, old_lines)
+            mapped_lineno = mapper.bisect_mapped_lineno(sloc[0])
+            if mapped_lineno == -1:
+                print("Cannot map the line number to previous traced expr")
+                self._cur_traced_expr = None
+            # here we don't use end lineno because we shouldn't trace multiple lines expr
+            await self._expr_trace(key, (mapped_lineno, sloc[1], sloc[2], sloc[3]))
             
     async def _handle_kernel_select_change(self, option):
         new_fn_name = option["label"]
@@ -881,6 +1060,23 @@ class TritonSim:
         else:
             await self._runner.run_single_block(old_value)
 
+    def _set_local_memory_model_draft(self, draft: LocalMatrix, ten: tritonstd.Tensor):
+        storage = ten._wrapped.get_storage_checked()
+        data = storage.data
+        if data.dtype == np.bool_:
+            # dont support bool in frontend
+            data = data.astype(np.uint8)
+        elif data.dtype == np.int64 or data.dtype == np.uint64:
+            # dont support bigint (64bit int) in frontend
+            data = data.astype(np.int32 if data.dtype == np.int64 else np.uint32)
+        draft.data = data
+        draft.global_indices = storage.indices
+        local_pos, local_color, mask_pos = Matrix.get_value_pos_and_color_gray(storage.data)
+        draft.persist_fill_pos = local_pos
+        draft.persist_fill_color = local_color
+        draft.temp_mask_pos = mask_pos
+        return storage
+
     def _bkpt_handle_local_tensor_panel_local(self, user_func_uid_no_suffix: str, k: str, draft: TritonSimModel, bkpt: PFLRunnerBreakpoint):
         for stack in bkpt.stack[::-1]:
             func_uid_no_suffix = self._remove_spec_suffix_of_func_uid(stack.node.uid)
@@ -892,22 +1088,7 @@ class TritonSim:
                     for global_key in self.dm.model.global_mem.matrices.keys():
                         draft.global_mem.matrices[global_key].temp_fill_pos = None 
                         draft.global_mem.matrices[global_key].temp_fill_color = None
-
-                    storage = ten._wrapped.get_storage_checked()
-                    data = storage.data
-                    if data.dtype == np.bool_:
-                        # dont support bool in frontend
-                        data = data.astype(np.uint8)
-                    elif data.dtype == np.int64 or data.dtype == np.uint64:
-                        # dont support bigint (64bit int) in frontend
-                        data = data.astype(np.int32 if data.dtype == np.int64 else np.uint32)
-                    draft.local_matrices[local_key].matrix.data = data
-                    draft.local_matrices[local_key].matrix.global_indices = storage.indices
-                    local_pos, local_color, mask_pos = Matrix.get_value_pos_and_color_gray(storage.data)
-                    draft.local_matrices[local_key].matrix.persist_fill_pos = local_pos
-                    draft.local_matrices[local_key].matrix.persist_fill_color = local_color
-                    draft.local_matrices[local_key].matrix.temp_mask_pos = mask_pos
-
+                    storage = self._set_local_memory_model_draft(draft.local_matrices[local_key].matrix, ten)
                     indices_dict = storage.indices
                     for global_key, inds in indices_dict.items():
                         inds_no_invalid = inds[inds != -1]
@@ -1135,10 +1316,20 @@ class TritonSim:
         if editor_value != cur_content:
             raise ValueError("Editor content has unsaved changes, please save before running.")
 
+    def _capture_expr_val(self, expr_hit: PFLRunnerExprHit, results: list[ExprTraceData]):
+        for_steps = [(x[1]) for x in expr_hit.for_stack]
+        for_str = "-".join(map(str, for_steps))
+        if isinstance(expr_hit.data, tritonstd.Tensor):
+            ten = expr_hit.data._clone()
+            tctx = get_tensorsim_context_checked()
+            grid_id = tctx.get_flatted_grid_id()
+            val = ten._wrapped.get_storage_checked().data
+            results.append(ExprTraceData(tuple(for_steps), grid_id, val, ten))
+
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
         if self._runner is None:
             return 
-        if act.action == "Run To":
+        if act.action == EditorActions.RUN_TO.value:
             if act.selection is not None:
                 self._validate_editor_has_unsave()
                 lineno = act.selection.selections[0].startLineNumber
@@ -1151,6 +1342,99 @@ class TritonSim:
                     for k, block in gmem.memory_blocks.items():
                         mat_dict[k] = block.get_data_view_checked()
                     await self._global_mem.set_matrix_dict(mat_dict, sim_info.vis_layout)
+        if act.action == EditorActions.EXPR_TRACE.value:
+            if act.selection is not None:
+
+                lineno = act.selection.selections[0].startLineNumber
+                end_lineno = act.selection.selections[0].endLineNumber
+                col_start = act.selection.selections[0].startColumn - 1 # 1-based to 0-based
+                if end_lineno != lineno:
+                    print("Cannot trace multi-line expression")
+                    return None
+                _, expr_node = self._runner.find_nearest_node_by_line_col(lineno, col_start)
+                if expr_node is None:
+                    print(f"Cannot find expression at line {lineno}, column {col_start + 1}, {act.selection.selections[0]}")
+                    return None
+                await self._expr_trace(unparse_pfl_ast(expr_node), expr_node.source_loc)
+
+    async def _expr_trace(self, key: str, source_loc: pfl.SourceLocType):
+        assert self._runner is not None, "Runner must be initialized before expr trace"
+        results: list[ExprTraceData] = []
+        ev_handler = partial(self._capture_expr_val, results=results)
+        self._runner.state.expr_trace_runner.set_observed_source_locs({
+            key: source_loc
+        })
+        self._runner.state.expr_trace_runner.event_expr_hit.on(ev_handler)
+        try:
+            sim_info = await self._runner.run_expr_trace_kernel_test()
+        finally:
+            self._runner.state.expr_trace_runner.event_expr_hit.off(ev_handler)
+        if results:
+            async with self.dm.draft_update() as draft:
+
+                results.sort(key=lambda x: x.grid_id)
+                grid_id_to_res: dict[int, list[ExprTraceData]] = {}
+                for res in results:
+                    if res.grid_id not in grid_id_to_res:
+                        grid_id_to_res[res.grid_id] = []
+                    grid_id_to_res[res.grid_id].append(res)
+                # for v in grid_id_to_res.values():
+                #     v.sort(key=lambda x: x.for_steps)
+                max_cnt = max(len(v) for v in grid_id_to_res.values())
+                grid_is_row = True 
+                draft.expr_trace_matrices.matrices.clear()
+                draft.expr_trace_matrices.labels.clear()
+                grid_id_cnt = 0
+                labels: list[LabelWithId] = []
+                if grid_is_row:
+                    result_matrix: list[list[Any]] = [[None for j in range(max_cnt + 1)] for i in range(len(grid_id_to_res))]
+                    grid_keys = list(grid_id_to_res.keys())
+                    for j in range(len(grid_id_to_res)):
+                        gid = grid_keys[j]
+                        label = LabelWithId(text=f"B{gid}", id=str(gid)) 
+                        result_matrix[j][0] = label
+                        labels.append(label)
+                else:
+                    result_matrix: list[list[Any]] = [[None for j in range(len(grid_id_to_res))] for i in range(max_cnt + 1)]
+                    result_matrix[0] = [LabelWithId(text=f"B{gid}", id=str(gid)) for gid in grid_id_to_res.keys()]
+                draft.expr_trace_matrices.labels = labels
+                mat_cnt = 0
+                mat_fontsize_min = None
+                for grid_id, res_list in grid_id_to_res.items():
+                    for j in range(len(res_list)):
+                        item = res_list[j]
+                        name = "-".join(map(str, item.for_steps))
+                        uid = UniqueTreeId.from_parts([name, str(mat_cnt), str(grid_id)]).uid_encoded
+                        mat = LocalMatrix.from_shape(name, list(item.value.shape), label_with_shape=False)
+                        mat.id = uid
+                        mat.fontSize /= 1.5
+                        if mat_fontsize_min is None:
+                            mat_fontsize_min = mat.fontSize
+                        else:
+                            mat_fontsize_min = min(mat_fontsize_min, mat.fontSize)
+                        if grid_is_row:
+                            result_matrix[grid_id_cnt][j + 1] = mat
+                        else:
+                            result_matrix[j + 1][grid_id_cnt] = mat
+                        draft.expr_trace_matrices.matrices.append(mat)
+                        self._set_local_memory_model_draft(draft.expr_trace_matrices.matrices[mat_cnt], item.ten)
+                        mat_cnt += 1
+                    grid_id_cnt += 1 
+                for label in labels:
+                    if mat_fontsize_min is None:
+                        mat_fontsize_min = 5
+                    label.fontSize = mat_fontsize_min / 2
+                    
+                max_w, max_h = layout_table_inplace(result_matrix)
+                for i, row in enumerate(result_matrix):
+                    for j, cell in enumerate(row):
+                        if isinstance(cell, (LocalMatrix, LabelWithId)):
+                            cell.offsetX -= max_w / 2
+                            cell.offsetY -= max_h / 2
+                draft.expr_trace_matrices.minimap.width = max_w
+                draft.expr_trace_matrices.minimap.height = max_h
+            # save code here to match when code changed
+            self._cur_traced_expr = (source_loc, key, self._runner.state.content_lines)
 
     async def _handle_editor_cursor_selection(self, ev: mui.MonacoSelectionEvent):
         if self._runner is None:
@@ -1191,10 +1475,10 @@ class TritonSim:
             draft.local_matrices[obj_key] = LocalMemoryModel(matrix=mat,
                 minimap=plus.hud.MinimapModel(mat_layout_shape[0], mat_layout_shape[1]))
             key = f"{func_local_qname}-{obj_name}"
-            container = LocalMemContainer(key, draft.local_matrices[obj_key], use_view=True)
+            container = LocalMemContainer(key, draft.local_matrices[obj_key])
             container.prop(border="1px solid blue")
-            container.panel._event_plane.event_move.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_pfl, key=obj_key))
-            container.panel._event_plane.event_leave.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_leave_pfl, key=obj_key))
+            container.panel.event_plane.event_move.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_pfl, key=obj_key))
+            container.panel.event_plane.event_leave.add_frontend_handler(self.dm, partial(TritonSimModel._on_hover_leave_pfl, key=obj_key))
             local_container = mui.MatchCase.binary_selection(True, container)
             local_container.bind_fields(condition=f"{draft.local_matrices[obj_key]} != null")
             if self._runner.runner.is_paused():

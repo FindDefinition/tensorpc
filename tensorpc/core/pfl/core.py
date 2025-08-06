@@ -6,7 +6,7 @@ import enum
 from functools import partial
 import inspect
 import sys
-from typing import (TYPE_CHECKING, Any, Callable, ForwardRef, Optional, Type, TypeVar, Union,
+from typing import (TYPE_CHECKING, Any, Callable, ForwardRef, Optional, Type, TypeAlias, TypeVar, Union,
                     cast, overload)
 
 from typing_extensions import Literal, Self, get_overloads
@@ -707,6 +707,13 @@ class PFLExprInfo:
     def get_func_info_checked(self) -> PFLExprFuncInfo:
         assert self.func_info is not None, "func_info is None"
         return self.func_info
+
+    def get_optional_undefined_removed(self) -> Self:
+        annotype = self.annotype
+        if annotype is not None:
+            annotype = annotype.get_optional_undefined_removed()
+        res = dataclasses.replace(self, annotype=annotype, has_optional=False, has_undefined=False)
+        return res
 
     @classmethod
     def from_annotype(cls,

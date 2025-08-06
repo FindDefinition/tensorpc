@@ -136,7 +136,7 @@ async def handle_standard_event(comp: Component,
                                 sync_status_first: bool = False,
                                 sync_state_after_change: bool = True,
                                 is_sync: bool = False,
-                                change_status: bool = True,
+                                change_status: bool = False,
                                 capture_draft: bool = True):
     """ common event handler
     """

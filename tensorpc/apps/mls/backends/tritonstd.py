@@ -141,6 +141,9 @@ class Tensor:
     def __repr__(self) -> str:
         return self._wrapped.__repr__()
 
+    def _clone(self) -> Self:
+        return self._replace_wrapped(self._wrapped.clone())
+
     @property
     def shape(self) -> list[int]:
         return self._wrapped.shape
@@ -2152,7 +2155,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                   userdata=sim_info)
 
     async def run_kernel(self, fn: Any, grid_size: tuple[int, int, int],
-                         global_mem: tsim.SimMemoryStorage, **kwargs) -> None:
+                         global_mem: tsim.SimMemoryStorage, kwargs: dict[str, Any], reverse_grid: bool = True) -> None:
         fn_no_jit = _may_triton_func(fn)
 
         lib = self._library
@@ -2162,7 +2165,8 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
             indexing="ij")
         jkl_arr = np.stack(jkl_arr_tuple, axis=-1).reshape(
             -1, 3)
-        jkl_arr = jkl_arr[::-1]
+        if reverse_grid:
+            jkl_arr = jkl_arr[::-1]
         for jkl in jkl_arr:
             j = int(jkl[0])
             k = int(jkl[1])
@@ -2185,7 +2189,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                 kwargs) -> None:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(
-            self.run_kernel(fn, grid_size, global_mem, **kwargs))
+            self.run_kernel(fn, grid_size, global_mem, kwargs))
         loop.close()
         return
 
@@ -2198,6 +2202,16 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                      grid_size, global_mem, kwargs)
             future.result()
 
+    async def run_kernel_test(self, fn: Any, reverse_grid: bool = True) -> TritonSimInfo:
+        fn_no_jit = _may_triton_func(fn)
+        inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
+        sim_info = inline_env.get_userdata_typed(TritonSimInfo)
+        assert sim_info.global_mem is not None
+        await self.run_kernel(fn_no_jit, sim_info.grid_size,
+                              sim_info.global_mem, inline_env.kwargs,
+                              reverse_grid)
+        return sim_info
+
     async def validate_kernel_by_test_data(self,
                                            fn: Any,
                                            res_comparer: Optional[Callable[
@@ -2209,7 +2223,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
         assert sim_info.global_mem is not None
         await self.run_kernel(fn_no_jit, sim_info.grid_size,
-                              sim_info.global_mem, **inline_env.kwargs)
+                              sim_info.global_mem, inline_env.kwargs)
         if sim_info.global_mem is not None:
             for k, ref in sim_info.ref_results.items():
                 desc = sim_info.global_mem.memory_blocks[k]

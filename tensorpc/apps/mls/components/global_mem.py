@@ -5,13 +5,21 @@ from tensorpc.core.datamodel.draft import DraftBase
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout
 from tensorpc.core import dataclass_dispatch as dataclasses, pfl
 import numpy as np
-from typing import Any, Optional 
+from typing import Any, Optional, Union 
 from tensorpc.dock.components.plus.hud.minimap import MinimapModel
 from tensorpc.dock.components.three.event import KeyboardHoldEvent, PointerEvent
 from tensorpc.core.pfl.backends.js import ColorUtil, Math, MathUtil
 import tensorpc.core.datamodel as D
 
 MAX_MATRIX_SIZE = 512 * 256
+
+@dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
+class Label:
+    text: str
+    fontSize: float = 3
+    offsetX: float = 0
+    offsetY: float = 0
+
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class MatrixBase:
@@ -86,13 +94,15 @@ class Matrix(MatrixBase):
     linePosX: Optional[float] = None
     linePosY: Optional[float] = None
     fontSize: float = 3
+    selected: bool = False
+    hovered: bool = False
 
     @classmethod 
-    def from_array(cls, name: str, arr: np.ndarray, padding: int = 2, transposed: bool = False):
-        return cls.from_shape(name, list(arr.shape), padding, transposed)
+    def from_array(cls, name: str, arr: np.ndarray, padding: int = 2, transposed: bool = False, label_with_shape: bool = True):
+        return cls.from_shape(name, list(arr.shape), padding, transposed, label_with_shape)
 
     @classmethod 
-    def from_shape(cls, name: str, shape: list[int], padding: int = 2, transposed: bool = False):
+    def from_shape(cls, name: str, shape: list[int], padding: int = 2, transposed: bool = False, label_with_shape: bool = True):
         shape = _get_matrix_shape_from_tensor_shape(shape)
         raw_shape = shape
         width = shape[1] 
@@ -112,19 +122,21 @@ class Matrix(MatrixBase):
             transposed=transposed,
         )
 
-        desc_length = res.get_desc_length()
+        desc_length = res.get_desc_length(label_with_shape)
         layout_w, layout_h = res.get_vis_wh(padding=2)
         res.widthLayout = layout_w
         res.heightLayout = layout_h
         res.fontSize = min(max(1 + padding, layout_w / desc_length), layout_h)
         return res 
 
-    def get_desc_length(self):
+    def get_desc_length(self, label_with_shape: bool):
+        if not label_with_shape:
+            return len(self.name)
         shape_str = ",".join(str(x) for x in self.shape)
         desc = f"{self.name}|[{shape_str}]"
         return len(desc)
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _on_hover_pfl(self, data: PointerEvent):
         point_unified_x = data.pointLocal[0] + 0.5
         point_unified_y = -data.pointLocal[1] + 0.5
@@ -208,7 +220,7 @@ class GlobalMemoryModel:
             minimap=plus.hud.MinimapModel(1, 1, fit_mode=int(plus.hud.MinimapFitMode.WIDTH))
         )
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _do_autolayout(self, width: float):
         if self.autolayout_width > 0:
             whs: list[tuple[float, float]] = []
@@ -225,11 +237,11 @@ class GlobalMemoryModel:
             self.minimap.height = layout_res.height
             self.minimap._do_layout()
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _handle_layout_event(self, ev: three.HudLayoutChangeEvent):
         self._do_autolayout(ev.innerSizeX)
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _do_layout_event_on_model_change(self):
         self._do_autolayout(self.minimap.layout.innerSizeX)
 
@@ -245,39 +257,42 @@ class GlobalMemLayers(enum.IntEnum):
     INDICATOR = -1
 
 class MatrixPanel(three.Group):
-    def __init__(self, draft: Matrix, enable_hover_line: bool = False):
+    def __init__(self, draft: Matrix, enable_hover_line: bool = False, label_with_shape: bool = True,
+            selected_color: str = "red", hovered_color: str = "blue"):
         assert isinstance(draft, DraftBase)
         trs_empty = np.zeros((0, 2), dtype=np.float32)
         lines_empty = np.zeros((0, 2), dtype=np.float32)
 
-        self._event_plane = three.Mesh([
+        self.event_plane = three.Mesh([
             three.PlaneGeometry(1, 1),
             three.MeshBasicMaterial().prop(transparent=True, opacity=0.0),
         ]).prop(position=(0, 0, int(GlobalMemLayers.BKGD)))
 
-        self._event_plane.bind_fields_unchecked_dict({
+        self.event_plane.bind_fields_unchecked_dict({
             "scale-x": draft.widthVis,
             "scale-y": draft.heightVis,
         })
         self._hover_line = three.LineShape(three.Shape.from_aabb(0, 0, 1, 1))
         self._hover_line.prop(color="blue", lineWidth=1, position=(0, 0, int(GlobalMemLayers.INDICATOR)))
         self._hover_line_cond = mui.MatchCase.binary_selection(True, self._hover_line)
+        self._hover_line.bind_fields_unchecked_dict({
+            "position-x": draft.linePosX,
+            "position-y": draft.linePosY,
+        })
+        dm = mui.DataModel.get_datamodel_from_draft(draft)
+        self._hover_line_cond.bind_fields(condition=f"{draft.linePosX} != `null`")
+
         if enable_hover_line:
-            self._hover_line.bind_fields_unchecked_dict({
-                "position-x": draft.linePosX,
-                "position-y": draft.linePosY,
-            })
-            dm = mui.DataModel.get_datamodel_from_draft(draft)
-            self._hover_line_cond.bind_fields(condition=f"{draft.linePosX} != `null`")
-            self._event_plane.event_leave.add_frontend_draft_set_none(draft, "linePosX")
-            self._event_plane.event_move.add_frontend_handler(dm, Matrix._on_hover_pfl, targetPath=str(draft))
+            self.event_plane.event_leave.add_frontend_draft_set_none(draft, "linePosX")
+            self.event_plane.event_move.add_frontend_handler(dm, Matrix._on_hover_pfl, targetPath=str(draft))
 
         self._border = three.LineShape(three.Shape.from_aabb(0, 0, 1, 1))
-        self._border.prop(color="black", lineWidth=1)
+        self._border.prop(lineWidth=1)
         self._border.bind_fields_unchecked_dict({
             "scale-x": draft.widthVis,
             "scale-y": draft.heightVis,
         }).prop(position=(0, 0, int(GlobalMemLayers.BKGD)))
+        self._border.bind_fields(color=f"where({draft.selected}, '{selected_color}', where({draft.hovered}, '{hovered_color}', 'black'))")
         fill_material = three.MeshShaderMaterial([
             three.ShaderUniform("color2", three.ShaderUniformType.Color, "white"),
             three.ShaderUniform("mask_color1", three.ShaderUniformType.Color, "silver"),
@@ -355,8 +370,8 @@ class MatrixPanel(three.Group):
 
                 three.ShaderUniform("color1", three.ShaderUniformType.Color, "silver"),
                 three.ShaderUniform("color2", three.ShaderUniformType.Color, "white"),
-                three.ShaderUniform("opacity1", three.ShaderUniformType.Number, 0.8),
-                three.ShaderUniform("opacity2", three.ShaderUniformType.Number, 0.1),
+                three.ShaderUniform("opacity1", three.ShaderUniformType.Number, 0.9),
+                three.ShaderUniform("opacity2", three.ShaderUniformType.Number, 0.6),
             ], f"""
             varying vec3 worldPosition;
 
@@ -397,7 +412,10 @@ class MatrixPanel(three.Group):
         self._temp_fill.bind_fields(transforms=draft.temp_fill_pos, colors=draft.temp_fill_color)
         self._persist_lines.bind_fields(points=draft.persist_aabb_line_pos, aabbSizes=draft.persist_aabb_line_size)
         self._temp_lines.bind_fields(points=draft.temp_aabb_line_pos, aabbSizes=draft.temp_aabb_line_size)
-        self._label.bind_fields(value=f"cformat('%s|%s', {draft.name}, to_string({draft.shape}))")
+        if label_with_shape:
+            self._label.bind_fields(value=f"cformat('%s|%s', {draft.name}, to_string({draft.shape}))")
+        else:
+            self._label.bind_fields(value=draft.name)
         self._temp_mask.bind_fields(transforms=draft.temp_mask_pos)
 
         super().__init__([
@@ -406,7 +424,7 @@ class MatrixPanel(three.Group):
             self._persist_lines,
             self._temp_lines,
             self._border,
-            self._event_plane,
+            self.event_plane,
             self._label,
             self._hover_line_cond,
             self._temp_mask,
@@ -528,8 +546,10 @@ class GlobalMemContainer(mui.FlexBox):
                     if transposed:
                         gmat.name += ".T"
                     layout_w, layout_h = gmat.get_vis_wh(padding)
-                    gmat.offsetX = layout_w / 2 + widths_cumsum[j]
-                    gmat.offsetY = layout_h / 2 + heights_cumsum[i]
+                    # gmat.offsetX = layout_w / 2 + widths_cumsum[j]
+                    # gmat.offsetY = layout_h / 2 + heights_cumsum[i]
+                    gmat.offsetX = widths[j] / 2 + widths_cumsum[j]
+                    gmat.offsetY = heights[i] / 2 + heights_cumsum[i]
                     matrices.pop(key)
                     matrixe_objs[key] = gmat
             cur_offset_y = int(heights_cumsum[-1] + heights[-1])
@@ -575,3 +595,35 @@ class GlobalMemContainer(mui.FlexBox):
         return GlobalMemoryModel(
             {}, 
             plus.hud.MinimapModel(1, 1))
+
+
+def layout_table_inplace(table: list[list[Optional[Union[Label, Matrix]]]], elem_padding: int = 2):
+    layout_wh = np.zeros((len(table), len(table[0]), 2), dtype=np.int32)
+    for i, row in enumerate(table):
+        for j, cell in enumerate(row):
+            if cell is None:
+                continue 
+            if isinstance(cell, Label):
+                # string cell, use font height to determine size.
+                layout_wh[i, j] = (len(cell.text) * cell.fontSize + elem_padding * 2, cell.fontSize + elem_padding * 2)
+            elif isinstance(cell, Matrix):
+                # matrix cell, use matrix size.
+                vis_wh = cell.get_vis_wh(padding=elem_padding)
+                layout_wh[i, j] = (vis_wh[0], vis_wh[1])
+            else:
+                raise TypeError(f"Unsupported cell type: {type(cell)}")
+    # determine width of all columns and height of all rows.
+    widths = np.max(layout_wh[..., 0], axis=0)
+    heights = np.max(layout_wh[..., 1], axis=1)
+    widths_cumsum = np.cumsum(np.concatenate([[0], widths]))[:-1]
+    heights_cumsum = np.cumsum(np.concatenate([[0], heights]))[:-1]
+    for i, row in enumerate(table):
+        for j, cell in enumerate(row):
+            if cell is None:
+                continue 
+            cell.offsetX = widths[j] / 2 + widths_cumsum[j]
+            cell.offsetY = heights[i] / 2 + heights_cumsum[i]
+
+    cur_offset_y = int(heights_cumsum[-1] + heights[-1])
+    max_width = int(widths_cumsum[-1] + widths[-1])
+    return max_width, cur_offset_y

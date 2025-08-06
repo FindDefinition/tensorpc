@@ -53,20 +53,20 @@ class MinimapModel:
     wheel_speed: float = 0.001
     fit_mode: int = int(MinimapFitMode.AUTO)
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _wheel_handler_pfl_v2(self, data: PointerEvent):
         if data.wheel:
             dx = -data.wheel.deltaY * self.wheel_speed * self.scale
             self._update_new_scroll_value(dx, data.pointLocal[0], data.pointLocal[1])
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _minimap_cllick_pfl(self, data: PointerEvent):
         w = Math.max(1 - self.layout.scrollFactorX, 1e-6)
         h = Math.max(1 - self.layout.scrollFactorY, 1e-6)
         self.scrollValueX = MathUtil.clamp((data.pointLocal[0] + 0.5 - self.layout.scrollFactorX / 2) / w, 0, 1)
         self.scrollValueY = MathUtil.clamp((-data.pointLocal[1] + 0.5 - self.layout.scrollFactorY / 2) / h, 0, 1)
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _minimap_downmove_pfl(self, data: PointerEvent):
         if self.isMinimapDown and data.numIntersections > 0:
             w = 1 - self.layout.scrollFactorX
@@ -78,7 +78,7 @@ class MinimapModel:
 
             # print("_minimap_downmove_pfl", data, px, py, self.scrollValueX, self.scrollValueY)
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _keyhold_handler_pfl(self, data: KeyboardHoldEvent):
         if data.code == "Space":
             # reset scales and scroll values
@@ -112,7 +112,7 @@ class MinimapModel:
             dx = delta * self.scale
             self._update_new_scroll_value(dx, 0, 0)
     
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _update_new_scroll_value(self, dx: float, x: float, y: float) -> None:
         prev = self.scale
 
@@ -142,7 +142,7 @@ class MinimapModel:
         self.scrollValueY = MathUtil.clamp((Py - prev_scroll_value_y) * real_dy / Math.max(new_scale_y - 1.0, 1e-6) + prev_scroll_value_y, 0.0, 1.0)
         self._do_layout()
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _handle_layout_event(self, ev: HudLayoutChangeEvent):
         self.layout.scrollFactorX = ev.scrollFactorX
         self.layout.scrollFactorY = ev.scrollFactorY
@@ -150,13 +150,13 @@ class MinimapModel:
         self.layout.innerSizeY = ev.innerSizeY
         self._do_layout()
 
-    @pfl.mark_pfl_compilable
+    @pfl.js.mark_js_compilable
     def _do_layout(self):
         w_scale_rate = self.layout.innerSizeX / self.width
         h_scale_rate = self.layout.innerSizeY / self.height
         self.viewport_canvas_scale_w = 1.0
         self.viewport_canvas_scale_h = 1.0
-        is_auto_w = (self.layout.innerSizeY / self.layout.innerSizeX) > (self.height / self.width)
+        is_auto_w = self.fit_mode == MinimapFitMode.AUTO and ((self.layout.innerSizeY / self.layout.innerSizeX) > (self.height / self.width))
         if self.fit_mode == MinimapFitMode.WIDTH or is_auto_w:
             self.viewport_canvas_scale_h = Math.max(1.0, self.height * w_scale_rate / self.layout.innerSizeY)
             self.viewport_canvas_width = self.scale * self.layout.innerSizeX
@@ -175,16 +175,16 @@ class MinimapLayer(enum.IntEnum):
     MINIMAP_LAYER = -2
 
 class MiniMap(three.Group):
-    def __init__(self, draft: MinimapModel, childs: three.ThreeLayoutType, mini_childs: Optional[three.ThreeLayoutType] = None, fit_mode: MinimapFitMode = MinimapFitMode.WIDTH):
+    def __init__(self, draft: MinimapModel, childs: three.ThreeLayoutType, 
+            mini_childs: Optional[three.ThreeLayoutType] = None, minimap_event_key: str = ""):
         self._wheel_speed = 0.001
-        self._fit_mode = fit_mode
         # ten can be torch or numpy.
         assert isinstance(draft, DraftBase), "draft must be a DraftBase instance"
         base_event_plane = three.Mesh([
             three.PlaneGeometry(1.0, 1.0),
             three.MeshBasicMaterial().prop(transparent=True),
         ]).prop(position=(0, 0, int(MinimapLayer.BKGD_LAYER)))
-
+        self.event_plane = base_event_plane
         child_group = three.Group(childs).prop(position=(0, 0, int(MinimapLayer.CHILD_LAYER)))
         self._child_group = child_group
         viewport_group = three.HudGroup([
@@ -215,7 +215,7 @@ class MiniMap(three.Group):
         if mini_childs is not None:
             minimap_group.init_add_layout(mini_childs)
         dm = mui.DataModel.get_datamodel_from_draft(draft)
-        dm.install_model_update_callback("_minimap_do_layout", MinimapModel._do_layout,   
+        dm.install_model_update_callback(f"_minimap_do_layout_{minimap_event_key}", MinimapModel._do_layout,   
             submodel_draft=draft)
         # viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
         viewport_group.event_hud_layout_change.add_frontend_handler(

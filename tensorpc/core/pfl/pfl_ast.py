@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import enum
 import inspect
 import traceback
-from typing import Any, Callable, ClassVar, Generic, Optional, Type, TypeVar, Union, cast
+from typing import Any, Callable, ClassVar, Generic, Optional, Type, TypeAlias, TypeVar, Union, cast
 from typing_extensions import TypeVarTuple, Unpack
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core import inspecttools
@@ -285,11 +285,13 @@ _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME = {
 
 }
 
+SourceLocType: TypeAlias = tuple[int, int, Optional[int], Optional[int]]
+
 @dataclasses.dataclass
 class PFLAstNodeBase:
     type: PFLASTType
     # record lineno/col_offset from ast node for debug
-    source_loc: tuple[int, int, Optional[int], Optional[int]]
+    source_loc: SourceLocType
 
     def get_source_loc_checked(self):
         end_l = self.source_loc[2]

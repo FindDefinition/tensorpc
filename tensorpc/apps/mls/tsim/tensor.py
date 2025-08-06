@@ -854,6 +854,16 @@ class SimTensor(SimTensorBase):
     def __imatmul__(self, other: Union[Self, int, float]) -> Self:
         return self._binary_base(other, BinOpType.MATMUL, False, True)
 
+    def clone(self) -> Self:
+        """
+        Create a clone of the tensor.
+        """
+        if self.storage is None:
+            return dataclasses.replace(self, storage=None)
+        new_data = self.storage.data.copy()
+        new_storage = dataclasses.replace(self.storage, data=new_data)
+        return dataclasses.replace(self, shape=list(map(int, new_data.shape)), dtype=self.dtype, storage=new_storage)
+
 def zeros(shape: Sequence[int], dtype: int) -> SimTensor:
     """
     Create a tensor filled with zeros.

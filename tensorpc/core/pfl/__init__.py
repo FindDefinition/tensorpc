@@ -30,6 +30,8 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                       PFLFunc, PFLIf, PFLIfExp, PFLModule, PFLName, PFLReturn,
                       PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder,
                       PFLUnaryOp, PFLWhile, UnaryOpType, unparse_pfl_ast,
-                      unparse_pfl_ast_to_lines, unparse_pfl_expr, walk)
+                      unparse_pfl_ast_to_lines, unparse_pfl_expr, walk,
+                      SourceLocType)
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
-                      register_pfl_std, register_pfl_builtin_proxy)
+                      register_pfl_std, register_pfl_builtin_proxy,
+                      compiler_remove_optional)

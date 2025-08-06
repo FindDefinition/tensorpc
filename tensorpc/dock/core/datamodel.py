@@ -6,7 +6,7 @@ import inspect
 import io
 import json
 import time
-from typing import (Any, Callable, Coroutine, Generic, Optional, TypeVar,
+from typing import (Any, Callable, Coroutine, Generic, Optional, Type, TypeVar,
                     Union, cast)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
@@ -302,7 +302,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         new_cbs: dict[str, DataModelUpdateSelf] = {}
         if not isinstance(self.props.modelUpdateCallbacks, Undefined):
             new_cbs = self.props.modelUpdateCallbacks
-        assert key not in new_cbs, f"model update callback for {key} already exists."
+        assert key not in new_cbs, f"model update callback for {key} already exists, use another key."
         new_cbs[key] = update_cb
         await self.send_and_wait(self.update_event(modelUpdateCallbacks=new_cbs))
         async def unmount():
@@ -378,6 +378,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         return cast(_T, create_draft(self.model,
                                      userdata=DraftOpUserData(self),
                                      obj_type=self._model_type))
+
+    def create_external_draft_with_self(self, model_cls: Type[T]) -> T:
+        """Create draft object from external type with self as userdata.
+        usually used when you want to use draft in nested container (e.g. DataFlexbox)
+        """
+        return cast(T, create_draft_type_only(userdata=DraftOpUserData(self),
+                                               obj_type=model_cls))
 
     @staticmethod 
     def get_datamodel_from_draft(draft: Any):

@@ -45,7 +45,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk)
 from .pfl_reg import (ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem,
                       compiler_isinstance, compiler_print_metadata,
-                      compiler_print_type)
+                      compiler_print_type, compiler_remove_optional)
 
 _ALL_SUPPORTED_AST_TYPES = {
     ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare, ast.Call, ast.Name,
@@ -761,6 +761,12 @@ class PFLParser:
                                           source_loc,
                                           value=any(compare_res))
                         res.check_and_infer_type()
+                    elif raw_func is compiler_remove_optional:
+                        assert len(args) == 1
+                        res_st = dataclasses.replace(args[0].st).get_optional_undefined_removed()
+                        res = dataclasses.replace(
+                            args[0],
+                            st=res_st)
                     else:
                         raise NotImplementedError(
                             f"compile-time function {raw_func} not implemented"
@@ -790,9 +796,9 @@ class PFLParser:
                 raise PFLAstParseError(f"not support {type(expr)}", expr)
             if isinstance(res, (PFLName, PFLAttribute, PFLSubscript)):
                 assert isinstance(
-                    expr, (ast.Name, ast.Attribute, ast.Subscript)
+                    expr, (ast.Name, ast.Attribute, ast.Subscript, ast.Call)
                 ), f"expr must be Name, Attribute or Subscript, got {type(expr)}"
-                if isinstance(expr.ctx, ast.Store):
+                if isinstance(expr, (ast.Name, ast.Attribute, ast.Subscript)) and isinstance(expr.ctx, ast.Store):
                     res.is_store = True
         except PFLAstParseError:
             raise

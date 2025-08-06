@@ -51,6 +51,8 @@ class PointerEvent:
     wheel: Union[Undefined, _PointerWheel] = undefined
     # for pointer capture
     numIntersections: int = 0
+    dataIndexes: Union[Undefined, list[int]] = undefined
+
 
 @dataclasses.dataclass
 class CameraEvent:

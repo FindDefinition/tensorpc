@@ -16,6 +16,7 @@ from collections.abc import Mapping
 import enum
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Sequence, Tuple, Type, TypeVar, Union)
+from tensorpc.core.annolib import DataclassType
 from tensorpc.dock.components.three.event import HudLayoutChangeEvent, KeyboardHoldEvent, PointerEvent, PointerMissedEvent, PoseChangeEvent, ViewportChangeEvent
 from tensorpc.dock.core.appcore import Event, EventDataType
 from typing_extensions import Literal
@@ -378,7 +379,7 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
             self,
             base_type: UIType,
             prop_cls: Type[T_o3d_container_prop],
-            children: Mapping[str, T_child],
+            children: Union[Mapping[str, T_child], DataclassType],
             allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         super().__init__(base_type,
                          prop_cls,
@@ -440,7 +441,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             self,
             base_type: UIType,
             prop_cls: Type[T_o3d_container_prop],
-            children: Mapping[str, T_child],
+            children: Union[Mapping[str, T_child], DataclassType],
             allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         if allowed_events is None:
             allowed_events = []
@@ -837,3 +838,41 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class DataListGroupProps(Object3dContainerBaseProps):
+    userData: Union[Any, Undefined] = undefined
+    idKey: Union[str, Undefined] = undefined
+    dataList: List[Any] = dataclasses.field(default_factory=list)
+
+
+class DataListGroup(O3dContainerWithEventBase[DataListGroupProps, ThreeComponentType]):
+    """ flex box that use data list and data model component to render
+    list of data with same UI components.
+    """
+
+    @dataclasses.dataclass
+    class ChildDef:
+        component: Component
+
+    def __init__(self,
+                 children: Component,
+                 init_data_list: Optional[List[Any]] = None) -> None:
+        super().__init__(
+            UIType.ThreeDataListGroup,
+            DataListGroupProps,
+            DataListGroup.ChildDef(children))
+        # backend events
+        if init_data_list is not None:
+            self.props.dataList = init_data_list
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

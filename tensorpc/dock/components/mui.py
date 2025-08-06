@@ -517,7 +517,8 @@ class Button(MUIComponentBase[ButtonProps]):
         return await handle_standard_event(self,
                                            ev,
                                            sync_status_first=True,
-                                           is_sync=is_sync)
+                                           is_sync=is_sync,
+                                           change_status=True)
 
     @property
     def prop(self):
@@ -656,7 +657,8 @@ class IconButton(MUIComponentBase[IconButtonProps]):
         return await handle_standard_event(self,
                                            ev,
                                            sync_status_first=True,
-                                           is_sync=is_sync)
+                                           is_sync=is_sync,
+                                           change_status=True)
 
     @property
     def prop(self):
@@ -1988,7 +1990,11 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         return res
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        return await handle_standard_event(self, ev, is_sync=is_sync)
+        if ev.type == FrontendEventType.EditorChange.value:
+            sync_state_after_change = True 
+        else:
+            sync_state_after_change = False
+        return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=sync_state_after_change, change_status=False)
 
     @property
     def prop(self):

@@ -505,7 +505,7 @@ UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
     UIType.Allotment, UIType.GridLayout, UIType.MenuList,
     UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown,
-    UIType.MonacoEditor
+    UIType.MonacoEditor, UIType.ThreeDataListGroup
 }
 
 

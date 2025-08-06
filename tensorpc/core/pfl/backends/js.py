@@ -3,8 +3,8 @@ import math
 import random
 import struct
 import time
-from typing import Any, Optional, TypeVar, Union, overload
-from ..core import mark_meta_infer, register_backend, PFLParseConfig
+from typing import Any, Callable, Optional, TypeVar, Union, overload
+from ..core import PFLCompileFuncMeta, mark_meta_infer, mark_pfl_compilable, register_backend, PFLParseConfig
 from ..pfl_reg import register_pfl_std
 import numpy as np 
 # implement all math func in javascript Math 
@@ -358,3 +358,18 @@ _JS_DTYPE_TO_NP = {
     11: np.uint64,
     5: np.bool_,
 }
+
+T = TypeVar("T")
+
+@overload
+def mark_js_compilable(fn: T) -> T: ...
+
+@overload
+def mark_js_compilable(fn: None = None, *, is_template: bool = False, 
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
+
+@register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
+def mark_js_compilable(fn: Optional[Any] = None, *, is_template: bool = False, 
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Union[Any, Callable[[Any], Any]]:
+    return mark_pfl_compilable(fn, backends=["js"], is_template=is_template,
+        always_inline=always_inline, meta=meta)

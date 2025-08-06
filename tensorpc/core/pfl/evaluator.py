@@ -502,12 +502,9 @@ class PFLAsyncRunner:
         self._event = asyncio.Event()
 
         self._breakpoints: dict[int, PFLBreakpointDesc] = {}
-        self._observed_exprs: dict[tuple[int, int, Optional[int], Optional[int]], tuple[str, PFLExpr]] = {}
+        self._observed_exprs: dict[tuple[int, int, Optional[int], Optional[int]], str] = {}
         if observed_exprs is not None:
-            for k, v in observed_exprs.items():
-                assert v.source_loc not in self._observed_exprs, \
-                    f"Observed expr {v.source_loc} already exists, please use different source_loc."
-                self._observed_exprs[v.source_loc] = (k, v)
+            self.set_observed_exprs(observed_exprs)
         self.event_enter_bkpt: SingleAsyncEventEmitter[PFLRunnerBreakpoint] = SingleAsyncEventEmitter()
         self.event_leave_bkpt: SingleAsyncEventEmitter[PFLRunnerBreakpoint] = SingleAsyncEventEmitter()
         self.event_new_ctrl_point: SingleAsyncEventEmitter[PFLRunnerCtrlBase] = SingleAsyncEventEmitter()
@@ -516,6 +513,22 @@ class PFLAsyncRunner:
         self.event_eval_stop: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
         self.event_eval_start: SingleAsyncEventEmitter[()] = SingleAsyncEventEmitter()
         self.event_expr_hit: SingleAsyncEventEmitter[PFLRunnerExprHit] = SingleAsyncEventEmitter()
+
+    def set_observed_exprs(self, observed_exprs: dict[str, PFLExpr]):
+        """Set the observed expressions for the runner."""
+        self._observed_exprs.clear()
+        for k, v in observed_exprs.items():
+            assert v.source_loc not in self._observed_exprs, \
+                f"Observed expr {v.source_loc} already exists, please use different source_loc."
+            self._observed_exprs[v.source_loc] = k
+
+    def set_observed_source_locs(self, observed_slocs: dict[str, tuple[int, int, Optional[int], Optional[int]]]):
+        """Set the observed expressions for the runner."""
+        self._observed_exprs.clear()
+        for k, v in observed_slocs.items():
+            assert v not in self._observed_exprs, \
+                f"Observed expr {v} already exists, please use different source_loc."
+            self._observed_exprs[v] = k
 
     async def _run_coro_none(self, fn: Callable[..., _CORO_NONE], *args) -> None:
         """Run a coroutine that returns None."""

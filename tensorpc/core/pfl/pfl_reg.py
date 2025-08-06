@@ -257,8 +257,14 @@ def compiler_print_metadata(x: Any) -> Any:
 def compiler_isinstance(x: Any, cls: Any) -> bool:
     raise NotImplementedError("can't be called directly.")
 
+@register_pfl_std(mapped_name="compiler_remove_optional", backend=None)
+def compiler_remove_optional(x: Any) -> Any:
+    raise NotImplementedError("can't be called directly.")
+
+
 ALL_COMPILE_TIME_FUNCS = {
     compiler_print_type,
     compiler_print_metadata,
     compiler_isinstance,
+    compiler_remove_optional,
 }
