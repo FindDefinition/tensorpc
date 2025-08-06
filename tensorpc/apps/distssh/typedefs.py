@@ -76,6 +76,7 @@ class FTSSHServerArgs:
 
     cmd_retry_when_reconnect: bool = True
     env_fwd_re: str = ""
+    local_ssh_port: int = 22
 
 @dataclasses.dataclass
 class FTState:

@@ -85,11 +85,11 @@ class CmdTaskState:
 
 class FaultToleranceSSHServer:
     def __init__(self,
-                 config_dict: dict,
-                 default_url: str = "localhost:22") -> None:
+                 config_dict: dict) -> None:
         cfg = FTSSHServerArgs(**config_dict)
         self._cfg = cfg
-        self._conn_desc = SSHConnDesc(default_url, cfg.username, cfg.password)
+        local_ssh_port = cfg.local_ssh_port
+        self._conn_desc = SSHConnDesc(f"localhost:{local_ssh_port}", cfg.username, cfg.password)
         self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=True)
         self._master_rank = 0
         ip = get_primary_ip()

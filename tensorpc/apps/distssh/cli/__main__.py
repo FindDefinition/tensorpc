@@ -15,6 +15,7 @@ def main(
     logdir: str = "",
     env_fwd_re: str = "",
     nproc_per_node: int = 8,
+    local_ssh_port: int = 22,
 ):
     service_config = {
         BuiltinServiceKeys.FaultToleranceSSHServer.value: {
@@ -28,6 +29,7 @@ def main(
                 "logdir": logdir,
                 "env_fwd_re": env_fwd_re,
                 "nproc_per_node": nproc_per_node,
+                "local_ssh_port": local_ssh_port,
             }
         }
     }
