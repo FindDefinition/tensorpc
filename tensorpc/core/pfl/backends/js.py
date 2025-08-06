@@ -368,7 +368,7 @@ def mark_js_compilable(fn: T) -> T: ...
 def mark_js_compilable(fn: None = None, *, is_template: bool = False, 
         always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
 
-@register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
+@register_pfl_std(mapped_name="compiler_mark_js_compilable", backend=None, _internal_disable_type_check=True)
 def mark_js_compilable(fn: Optional[Any] = None, *, is_template: bool = False, 
         always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Union[Any, Callable[[Any], Any]]:
     return mark_pfl_compilable(fn, backends=["js"], is_template=is_template,
