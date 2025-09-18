@@ -42,7 +42,7 @@ import aiohttp
 
 from tensorpc.utils.wait_tools import get_free_ports
 
-LOGGER = get_logger("tensorpc.aioserver")
+LOGGER = get_logger("tensorpc.aioserver", log_time_format="[%x %X]")
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 

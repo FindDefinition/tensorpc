@@ -10,6 +10,10 @@ from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel import typemetas
 from typing_extensions import Annotated, Literal
 from tensorpc.core import BuiltinServiceProcType, dataclass_dispatch as pydantic_dataclasses
+from tensorpc.utils.rich_logging import get_logger
+
+
+LOGGER = get_logger("tensorpc.dbg")
 
 class DebugServerStatus(enum.IntEnum):
     Idle = 0
@@ -170,6 +174,7 @@ class BreakpointType(enum.IntEnum):
 
 class RemoteDebugEventType(enum.Enum):
     DIST_TARGET_VARIABLE_TRACE = "dist_target_variable_trace"
+    DIST_RUN_SCRIPT = "dist_run_script"
 
 @dataclasses.dataclass
 class RemoteDebugEvent:

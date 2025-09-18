@@ -424,6 +424,22 @@ def _fwd_hook_for_mvq(mod, args, kwargs, output, query_key: Literal["args", "kwa
     del query_res
     del query_data
 
+def _bwd_hook_for_mvq(mod, args, output, query_key: Literal["args", "ret"], query: SingleQuery, callback: Callable[[list[Any]], None], fqn: str):
+    assert query_key != "kwargs", "backward hook does not support kwargs"
+    if query_key == "args":
+        fqn = f"{fqn}@grad_inputs"
+        query_data = args 
+    elif query_key == "ret":
+        fqn = f"{fqn}@grad_outputs"
+        query_data = output
+    else:
+        raise ValueError(f"Unknown query key: {query_key}")
+    query_res = _do_var_query(query_data, query)
+    query_res = [dataclasses.replace(r, fqn=f"{fqn}::{r.fqn}" if r.fqn else fqn) for r in query_res]
+    callback(query_res)
+    del query_res
+    del query_data
+
 _PYTORCH_ROOT: Optional[Path] = None
 _PYTORCH_MODULE_ROOT: Optional[Path] = None
 
@@ -478,7 +494,7 @@ def install_module_hook_query(module: Any, queries: list[tuple[Union[ModuleVaria
     handles: list[Any] = []
     for item in queries:
         query = item[0]
-        assert isinstance(query, (ModuleVariableQuery, ModuleStackQuery)), "currently only ModuleVariableQuery is supported"
+        assert isinstance(query, (ModuleVariableQuery, ModuleStackQuery)), "currently only ModuleVariableQuery and ModuleStackQuery is supported in fwd"
         mods = simple_module_query(module, query.mod_query)
         for mod_res in mods:
             mod_fqn = mod_res.fqn
@@ -499,6 +515,26 @@ def install_module_hook_query(module: Any, queries: list[tuple[Union[ModuleVaria
             handles.append(handle)
     return QueryHook(handles)
 
+def install_module_bwd_hook_query(module: Any, queries: list[tuple[ModuleVariableQuery, Callable[[list[Any]], None]]]):
+    import torch
+    handles: list[Any] = []
+    for item in queries:
+        query = item[0]
+        assert isinstance(query, (ModuleVariableQuery)), "currently only ModuleVariableQuery is supported in bwd"
+        mods = simple_module_query(module, query.mod_query)
+        for mod_res in mods:
+            mod_fqn = mod_res.fqn
+            assert query.type != "kwargs", "backward hook does not support kwargs"
+            hook = partial(_bwd_hook_for_mvq, 
+                        query_key=query.type,
+                        query=query.var_query,
+                        callback=item[1],
+                        fqn=mod_fqn)
+            assert isinstance(mod_res.data, torch.nn.Module)
+            handle = mod_res.data.register_full_backward_hook(hook)
+            handles.append(handle)
+    return QueryHook(handles)
+
 class RuntimeQueryContext:
     def __init__(self):
         self.result: dict[str, list[PthQueryResult]] = {}
@@ -515,14 +551,34 @@ class RuntimeQueryContext:
         self.result[key].extend(res)
 
 @contextlib.contextmanager
-def module_query_context(module: Any, /, to_cpu: bool = True, **queries: str):
+def module_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, **queries: str):
     ctx = RuntimeQueryContext()
+    if disabled:
+        yield ctx 
+        return
     queries_item_list: list[tuple[Union[ModuleVariableQuery, ModuleStackQuery], Callable[[list[Any]], None]]] = []
     for query_key, query_str in queries.items():
         query = parse_pmql(query_str) 
         assert isinstance(query, (ModuleVariableQuery, ModuleStackQuery)), "only support mvq and msq"
         queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu)))
     handle = install_module_hook_query(module, queries_item_list)
+    try:
+        yield ctx 
+    finally:
+        handle.remove()
+
+@contextlib.contextmanager
+def module_bwd_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, **queries: str):
+    ctx = RuntimeQueryContext()
+    if disabled:
+        yield ctx 
+        return
+    queries_item_list: list[tuple[ModuleVariableQuery, Callable[[list[Any]], None]]] = []
+    for query_key, query_str in queries.items():
+        query = parse_pmql(query_str) 
+        assert isinstance(query,  ModuleVariableQuery), "only support mvq"
+        queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu)))
+    handle = install_module_bwd_hook_query(module, queries_item_list)
     try:
         yield ctx 
     finally:

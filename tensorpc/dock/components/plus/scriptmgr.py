@@ -539,7 +539,8 @@ class ScriptManagerV2(mui.FlexBox):
                  init_store_backend: Optional[tuple[DraftStoreBackendBase, str]] = None,
                  frame: Optional[FrameType] = None,
                  enable_app_backend: bool = True,
-                 editor_path_uid: str = "scriptmgr_v2"):
+                 editor_path_uid: str = "scriptmgr_v2",
+                 ext_buttons: Optional[list[mui.IconButton]] = None):
         """Script manager that use draft storage
 
         """
@@ -549,6 +550,8 @@ class ScriptManagerV2(mui.FlexBox):
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
         self._editor_path_uid = editor_path_uid
+        if ext_buttons is None:
+            ext_buttons = []
         if frame is not None:
             init_model = ScriptManagerModel([
                 ScriptModel("dev", "python", _create_init_script_states(_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT)),
@@ -616,6 +619,8 @@ class ScriptManagerV2(mui.FlexBox):
                 confirmMessage="Are you sure to delete this script?")
         self._save_and_run_btn.bind_fields(disabled="cur_script_idx == `-1`")
         self._delete_button.bind_fields(disabled="cur_script_idx == `-1`")
+        for btn in ext_buttons:
+            btn.bind_fields(disabled="cur_script_idx == `-1`")
         self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
         self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
@@ -628,6 +633,7 @@ class ScriptManagerV2(mui.FlexBox):
                 self._save_and_run_btn,
                 # self._enable_save_watch,
                 self._delete_button,
+                *ext_buttons,
                 mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
                     self._show_editor_btn,
                 ]).bind_fields(enable="cur_script_idx != `-1`"),

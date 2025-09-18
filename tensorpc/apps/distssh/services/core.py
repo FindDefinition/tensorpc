@@ -90,7 +90,7 @@ class FaultToleranceSSHServer:
         self._cfg = cfg
         local_ssh_port = cfg.local_ssh_port
         self._conn_desc = SSHConnDesc(f"localhost:{local_ssh_port}", cfg.username, cfg.password)
-        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=True)
+        self._terminal = terminal.AsyncSSHTerminal(log_to_stdout=self._cfg.log_to_stdout).prop(disableStdin=True)
         self._master_rank = 0
         ip = get_primary_ip()
         state = FTState(

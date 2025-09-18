@@ -15,7 +15,7 @@ import uuid
 import grpc
 import gzip
 from tensorpc import prim
-from tensorpc.apps.dbg.core.bkpt_events import BkptLaunchTraceEvent, BkptLeaveEvent, BreakpointEvent
+from tensorpc.apps.dbg.core.bkpt_events import BreakpointEvent, BkptLeaveEvent, BkptLaunchTraceEvent, BkptRunScriptEvent
 from tensorpc.apps.dbg.core.bkptmgr import BreakpointManager, FrameLocMeta
 from tensorpc.apps.dbg.model import Breakpoint, TracerState, TracerRuntimeState
 from tensorpc.core import BuiltinServiceProcType, inspecttools, marker
@@ -132,6 +132,13 @@ class BackgroundDebugTools:
         assert isinstance(obj, BreakpointDebugPanel)
         with enter_app_context(app):
             await obj._skip_further_bkpt(skip)
+
+    async def run_frame_script(self, code: str):
+        dm, _ = self._get_bkgd_panel_dm_and_app()
+        prev_bkpt = dm.model.bkpt
+        if prev_bkpt is not None:
+            assert prev_bkpt.queue is not None 
+            prev_bkpt.queue.put(BkptRunScriptEvent(code))
 
     def init_bkpt_debug_panel(self, panel: BreakpointDebugPanel):
         # panel may change the cfg
@@ -276,7 +283,7 @@ class BackgroundDebugTools:
                 })
             return is_record_stop
 
-    async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None, userdata: Any = None):
+    async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None, userdata: Any = None, should_raise: bool = False):
         """should only be called from remote.
         
         Args:
@@ -308,7 +315,7 @@ class BackgroundDebugTools:
                 assert prev_bkpt.queue is not None 
                 if trace_cfg is not None and trace_cfg.enable:
                     prev_bkpt.queue.put(BkptLaunchTraceEvent(trace_cfg))
-                prev_bkpt.queue.put(BkptLeaveEvent(userdata))
+                prev_bkpt.queue.put(BkptLeaveEvent(userdata, should_raise))
 
     async def set_traceview_variable_inspect(self, var_name: str, var_obj: Any):
         tv_obj, tv_app = prim.get_service(

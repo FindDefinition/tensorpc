@@ -4,6 +4,7 @@ from collections.abc import MutableMapping
 import enum
 from functools import partial
 import inspect
+import sys
 import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional, Union
@@ -333,7 +334,8 @@ class AsyncSSHTerminal(Terminal):
                  line_raw_ev_max_length: int = 10000,
                  init_size: Optional[tuple[int, int]] = (80, 24),
                  terminalId: Optional[str] = None,
-                 min_size: Optional[tuple[int, int]] = (25, 15)) -> None:
+                 min_size: Optional[tuple[int, int]] = (25, 15),
+                 log_to_stdout: bool = False) -> None:
         super().__init__(init_data, terminalId=terminalId)
         if desc is None:
             assert manual_connect, "Cannot auto connect/disconnect when mount without url_with_port(ip:port), username, and password."
@@ -370,6 +372,7 @@ class AsyncSSHTerminal(Terminal):
         self._raw_data_ts: int = 0
         self._line_raw_ev_max_length = line_raw_ev_max_length
         self._line_raw_event_buffer: deque[bytes] = deque(maxlen=line_raw_ev_max_length)
+        self._log_to_stdout = log_to_stdout
 
     async def connect(self,
                       event_callback: Optional[Callable[[SSHEvent],
@@ -612,6 +615,8 @@ class AsyncSSHTerminal(Terminal):
                     except:
                         traceback.print_exc()
             if isinstance(event, RawEvent):
+                if self._log_to_stdout:
+                    print(event.raw.decode("utf-8", errors="replace"), end="")
                 if self.is_mounted():
                     await self.send_raw(event.raw, event.timestamp - self._ssh_state.base_ts)
                 else:

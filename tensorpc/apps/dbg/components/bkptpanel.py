@@ -2,6 +2,7 @@ import ast
 import asyncio
 import dataclasses
 import enum
+from functools import partial
 import os
 from pathlib import Path
 from time import sleep
@@ -29,6 +30,8 @@ from .framescript import FrameScript
 from tensorpc.apps.dbg.model import PyDbgModel, TracerState
 import tensorpc.core.datamodel as D
 from tensorpc.dock import marker
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
+from tensorpc.apps.dbg.constants import RemoteDebugEventType
 
 class DebugActions(enum.Enum):
     RECORD_TO_NEXT_SAME_BKPT = "Record To Same Breakpoint"
@@ -237,6 +240,16 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._is_remote_mounted = False
         await self.frame_script_container.set_new_layout([])
 
+    async def _on_run_cur_script_distributed(self, script_mgr: ScriptManagerV2):
+        if script_mgr.dm.model.cur_script_idx != -1:
+            cur_script = script_mgr.dm.model.scripts[script_mgr.dm.model.cur_script_idx]
+            cur_lang = cur_script.language
+            code = cur_script.states[cur_lang].code
+            await self.put_app_event(
+                self.create_remote_comp_event(
+                    RemoteDebugEventType.DIST_RUN_SCRIPT.value,
+                    code))
+
     def _get_frame_script_from_frame(self, frame: FrameType, offset: int):
         cur_frame: Optional[FrameType] = frame
         count = offset
@@ -247,20 +260,31 @@ class BreakpointDebugPanel(mui.FlexBox):
         assert cur_frame is not None
         frame_uid, frame_meta = get_frame_uid(cur_frame)
         distssh_workdir = os.getenv(TENSORPC_ENV_DISTSSH_WORKDIR)
+        btn = mui.IconButton(mui.IconType.PlayArrow).prop(
+            progressColor="primary", muiColor="secondary",
+            tooltip="Run Distributed")
+
         if distssh_workdir is not None:
             distssh_workdir_framescript = Path(distssh_workdir) / "framescript"
             fs_backend = DraftSimpleFileStoreBackend(distssh_workdir_framescript)
             script_mgr = ScriptManagerV2(
                 init_store_backend=(fs_backend, frame_uid),
                 frame=frame,
-                editor_path_uid=f"{distssh_workdir}/framescript/{frame_uid}"
+                editor_path_uid=f"{distssh_workdir}/framescript/{frame_uid}",
+                ext_buttons=[
+                    btn,
+                ],
             )
         else:
             script_mgr = ScriptManagerV2(
                 enable_app_backend=False,
                 frame=frame,
                 editor_path_uid=frame_uid,
+                ext_buttons=[
+                    btn,
+                ],
             )
+        btn.event_click.on(partial(self._on_run_cur_script_distributed, script_mgr))
         return script_mgr
 
     async def _frame_script_remote_comp_mount(self, ev):
@@ -302,7 +326,6 @@ class BreakpointDebugPanel(mui.FlexBox):
             await self._frame_obj_preview.clear_preview_layouts()
             await self.tree_viewer.tree.set_root_object_dict({})
             await self.frame_script_container.set_new_layout([])
-
 
     async def _copy_frame_path_lineno(self):
         if self.dm.model.bkpt is not None:

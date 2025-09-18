@@ -8,7 +8,7 @@ import copy
 import dataclasses
 from functools import partial
 from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, Generator, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard, TypeIs, Self
+from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard, TypeIs, Self, ParamSpec, ParamSpecArgs
 from dataclasses import dataclass
 from dataclasses import Field, make_dataclass, field
 import inspect
@@ -279,6 +279,12 @@ class AnnotatedType:
     def is_type_var(self) -> bool:
         return isinstance(self.origin_type, TypeVar)
 
+    def is_param_spec(self) -> bool:
+        return isinstance(self.origin_type, ParamSpec)
+
+    def is_param_spec_args(self) -> bool:
+        return isinstance(self.origin_type, ParamSpecArgs)
+
     def is_tuple_type(self) -> bool:
         return self.origin_type is tuple or self.origin_type is Tuple
 
@@ -310,6 +316,11 @@ class AnnotatedType:
         if self._is_non_class_base_type():
             return False
         return issubclass(self.origin_type, dict)
+
+    def is_callable(self) -> bool:
+        if self._is_non_class_base_type():
+            return False
+        return self.origin_type is Callable
 
     def is_list_type(self) -> bool:
         if self._is_non_class_base_type():
@@ -433,7 +444,7 @@ def parse_type_may_optional_undefined(
     """
     raw_type = ann_type
     ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
-    if isinstance(ann_type, TypeVar):
+    if isinstance(ann_type, (TypeVar, ParamSpec, ParamSpecArgs)):
         return AnnotatedType(ann_type, [], ann_meta, False,
                                  False, ann_type)
     # check ann_type is Union
@@ -479,6 +490,13 @@ def parse_type_may_optional_undefined(
                     return AnnotatedType(ty_origin, ty_args, ann_meta,
                                          raw_type=raw_type,
                                          is_homogeneous=True)
+            elif ty_origin is Callable:
+                # flat args
+                assert len(ty_args) == 2
+                if isinstance(ty_args[0], Sequence):
+                    ty_args = list(ty_args[0]) + [ty_args[1]]
+                for arg in ty_args:
+                    assert not isinstance(arg, (ParamSpec, ParamSpecArgs))
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, list(ty_args), ann_meta, raw_type=raw_type)
@@ -510,19 +528,28 @@ def child_type_generator_with_dataclass(t: type):
             for arg in args:
                 yield from child_type_generator_with_dataclass(arg)
 
-def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], None, None]:
-    if dataclasses.is_dataclass(t) and inspect.isclass(t) :
+def _child_dataclass_type_generator_recursive(t: type, visited: set[Any]) -> Generator[type[DataclassType], None, None]:
+    if dataclasses.is_dataclass(t) and inspect.isclass(t):
+        if t in visited:
+            return
+        visited.add(t)
         yield t
         type_hints = get_type_hints_with_cache(t, include_extras=True)
         for field in dataclasses.fields(t):
-            yield from child_dataclass_type_generator(type_hints[field.name])
+            yield from _child_dataclass_type_generator_recursive(type_hints[field.name], visited)
     else:
         args = get_args(t)
         if is_annotated(t):
-            yield from child_dataclass_type_generator(args[0])
+            yield from _child_dataclass_type_generator_recursive(args[0], visited)
         else:
             for arg in args:
-                yield from child_dataclass_type_generator(arg)
+                yield from _child_dataclass_type_generator_recursive(arg, visited)
+
+
+
+def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], None, None]:
+    visited = set()
+    yield from _child_dataclass_type_generator_recursive(t, visited)
 
 def parse_annotated_function(
     func: Callable,

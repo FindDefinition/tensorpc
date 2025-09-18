@@ -865,6 +865,14 @@ class MasterDebugPanel(mui.FlexBox):
                                      rpc_timeout=1)
         if self._rpc_call_external is not None:
             await self._rpc_call_external(dbg_serv_names.DBG_SET_SKIP_BREAKPOINT, False, rpc_timeout=1)
+    
+    async def run_all_frame_script(self, code: str):
+        await self._run_rpc_on_processes(self._current_proc_infos,
+                                     dbg_serv_names.DBG_RUN_FRAME_SCRIPT,
+                                     code,
+                                     rpc_timeout=1)
+        if self._rpc_call_external is not None:
+            await self._rpc_call_external(dbg_serv_names.DBG_RUN_FRAME_SCRIPT, code, rpc_timeout=1)
 
     async def _run_rpc_on_process(self,
                                meta: DebugServerProcessInfo,
@@ -974,6 +982,9 @@ class MasterDebugPanel(mui.FlexBox):
         cfg.target_trace_cfg = target_trace_cfg
         await self.start_record(cfg, trace_ev.dist_info.run_id)
 
+    async def _handle_distributed_run_frame_script(self, ev: mui.RemoteCompEvent):
+        await self.run_all_frame_script(ev.data)
+
     def _register_handlers(self):
         if self._vscode_handler_registered:
             return
@@ -985,6 +996,9 @@ class MasterDebugPanel(mui.FlexBox):
             self._handle_vscode_bkpt_change)
         appctx.register_remote_comp_event_handler(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, 
             self._handle_target_trace_from_distributed_group_worker)
+        appctx.register_remote_comp_event_handler(RemoteDebugEventType.DIST_RUN_SCRIPT.value, 
+            self._handle_distributed_run_frame_script)
+
         self._vscode_handler_registered = True
 
     def _unregister_handlers(self):
@@ -999,7 +1013,9 @@ class MasterDebugPanel(mui.FlexBox):
             self._handle_vscode_bkpt_change)
         appctx.unregister_remote_comp_event_handler(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, 
             self._handle_target_trace_from_distributed_group_worker)
-
+        appctx.unregister_remote_comp_event_handler(RemoteDebugEventType.DIST_RUN_SCRIPT.value,
+            self._handle_distributed_run_frame_script)
+            
     async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, tuple[list[VscodeBreakpoint], int]]):
         async with self._serv_list_lock:
             await self._run_rpc_on_processes(self._current_proc_infos,

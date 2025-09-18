@@ -25,7 +25,7 @@ from .aiohttp_file import FileProxy, FileProxyResponse
 
 from tensorpc.utils.rich_logging import get_logger
 
-LOGGER = get_logger("tensorpc.http")
+LOGGER = get_logger("tensorpc.http", log_time_format="[%x %X]")
 
 class GrpcFileProxy(FileProxy):
     def __init__(self, sc: ServiceCore,node_uid: str, resource_key: str, comp_id: Optional[str],  metadata: defs.FileResource) -> None:

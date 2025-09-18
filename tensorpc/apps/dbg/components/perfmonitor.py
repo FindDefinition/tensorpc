@@ -504,7 +504,9 @@ class PerfMonitor(mui.FlexBox):
             t = time.time()
             vis_model = await asyncio.get_running_loop().run_in_executor(None, partial(self.perf_data_to_vis_model, user_scale=scale, max_depth=max_depth), data_list_all_rank)
             # vis_model = self.perf_data_to_vis_model(data_list_all_rank, user_scale=scale)
-            print("perf_data_to_vis_model time", time.time() - t, vis_model.trs.shape)
+            duration = time.time() - t
+            if duration > 0.5:
+                print("perf_data_to_vis_model time", time.time() - t, vis_model.trs.shape)
             # insert step sorted
             # calc insert loc by bisect 
             vis_model.meta_datas = meta_datas
