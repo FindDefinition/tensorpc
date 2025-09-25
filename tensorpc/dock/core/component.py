@@ -81,7 +81,7 @@ from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_U
 from tensorpc.utils.rich_logging import get_logger
 if TYPE_CHECKING:
     from .datamodel import DataModel
-LOGGER = get_logger("tensorpc.ui")
+LOGGER = get_logger("tensorpc.ui", log_time_format="%X|")
 
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -119,14 +119,14 @@ class UIType(enum.IntEnum):
     Select = 0x3
     Slider = 0x4
     RadioGroup = 0x5
-    # CodeEditor = 0x6
+    FlexBox = 0x6
     Button = 0x7
     ListItemButton = 0x8
     ListItemText = 0x9
     Image = 0xa
     Dialog = 0xb
-    Plotly = 0xc
-    ChartJSLine = 0xd
+    TooltipFlexBox = 0xc
+    # ChartJSLine = 0xd
     MultipleSelect = 0xe
     Paper = 0xf
     Typography = 0x10
@@ -137,10 +137,10 @@ class UIType(enum.IntEnum):
     Alert = 0x15
     AccordionSummary = 0x16
     AccordionDetail = 0x17
-    # TabContext = 0x18
-    # Tab = 0x19
-    # TabPanel = 0x1a
-    # TabList = 0x1b
+    MUIList = 0x18
+    Divider = 0x19
+    AppTerminal = 0x1a
+    ThemeProvider = 0x1b
     Checkbox = 0x1c
     AppBar = 0x1d
     Toolbar = 0x1e
@@ -178,17 +178,16 @@ class UIType(enum.IntEnum):
     Pagination = 0x3e
     VideoPlayer = 0x3f
     GridLayout = 0x40
+    TaskLoop = 0x42
 
-    # special
-    TaskLoop = 0x100
-    FlexBox = 0x101
-    MUIList = 0x102
-    Divider = 0x103
-    AppTerminal = 0x104
-    ThemeProvider = 0x105
-    Handle = 0x106
-    TooltipFlexBox = 0x107
+    RANGE_CHART_START = 0x50
+    Plotly = 0x51
 
+    MUIBarChart = 0x52
+    MUILineChart = 0x53
+    MUIScatterChart = 0x54
+
+    RANGE_CHART_END = 0x90
     # special containers
     # react fragment
     Fragment = 0x200
@@ -351,6 +350,8 @@ class UIType(enum.IntEnum):
     FlowNodeResizer = 0x8004
     FlowNodeToolBar = 0x8005
     FlowBackground = 0x8006
+    # special
+    FlowHandle = 0x8007
 
 
 class AppEventType(enum.IntEnum):
@@ -462,10 +463,7 @@ class FrontendEventType(enum.IntEnum):
     EditorInlayHintsQuery = 57
     EditorHoverQuery = 58
     EditorCodelensQuery = 59
-
-    # leaflet events
-    MapZoom = 60
-    MapMove = 61
+    EditorBreakpointChange = 60
 
     # data grid events
     DataGridRowSelection = 70
@@ -500,6 +498,18 @@ class FrontendEventType(enum.IntEnum):
     # data box events
     DataBoxSecondaryActionClick = 120
 
+    # leaflet events
+    MapZoom = 150
+    MapMove = 151
+
+    # chart events 
+    # used by bar and scatter
+    ChartItemClick = 160
+    # used by line/area line
+    ChartAreaClick = 161
+    ChartLineClick = 162
+    ChartMarkClick = 163
+    ChartAxisClick = 164
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
@@ -1077,7 +1087,8 @@ class AppEvent:
                  sent_event: Optional[asyncio.Event] = None,
                  event_id: str = "",
                  is_loopback: bool = False,
-                 remote_prefixes: Optional[list[str]] = None) -> None:
+                 remote_prefixes: Optional[list[str]] = None,
+                 after_send_callback: Optional[Callable[[], Awaitable[None]]] = None) -> None:
         # node uid, not component uid
         self.uid = uid
         self.type_to_event = type_to_event
@@ -1091,7 +1102,7 @@ class AppEvent:
         # RemoteCompEvent: only available in remote component.
         self._additional_events: list[RemoteCompEvent] = []
         # currently only used for app init
-        self._after_send_callback: Optional[Callable[[], Awaitable[None]]] = None
+        self._after_send_callback = after_send_callback
 
     def is_empty(self):
         return not self.type_to_event and not self._additional_events
@@ -2440,14 +2451,16 @@ class Component(Generic[T_base_props, T_child]):
         async with comp.draft_update():
             insert_assign_draft_op(draft, value)
 
-    async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str):
-        # print("WTFWTF", type(self), prop_name, ev.new_value)
+    async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str, value_prep: Optional[Callable[[Any], Any]] = None):
+        new_value = ev.new_value
+        if value_prep is not None:
+            new_value = value_prep(new_value)
         await self.put_app_event(self._update_props_base(self.propcls)(**{
-            prop_name: ev.new_value
+            prop_name: new_value
         }))
 
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, uncontrolled: bool = False):
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, uncontrolled: bool = False, uncontrolled_prep: Optional[Callable[[Any], Any]] = None):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2473,7 +2486,8 @@ class Component(Generic[T_base_props, T_child]):
             self.register_event_handler(FrontendEventType.Change, 
                 partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
         if uncontrolled:
-            comp.install_draft_change_handler(draft, partial(self.__uncontrolled_draft_change_handler, prop_name=field_name), installed_comp=self)
+            comp.install_draft_change_handler(draft, partial(self.__uncontrolled_draft_change_handler, 
+                prop_name=field_name, value_prep=uncontrolled_prep), installed_comp=self)
         return self 
 
     async def sync_status(self,
@@ -3266,6 +3280,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             assert k in self._child_comps
         return await self.update_childs(layout)
 
+    def create_comp_event_raw(self, raw_ev_data: dict):
+        assert self._flow_uid is not None
+        ev = ComponentEvent(
+                {self._flow_uid.uid_encoded: raw_ev_data})
+        return AppEvent("", {AppEventType.ComponentEvent: ev})
+
     def create_comp_event(self, data: dict[str, Any]):
         """create component control event for
         backend -> frontend direct communication
@@ -3290,7 +3310,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
     def __init__(self, url: str, port: int, key: str, base_type: UIType,
                  prop_cls: Type[T_container_props],
                  fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None,
-                 enable_fallback_layout: bool = True):
+                 enable_fallback_layout: bool = True,
+                 fastrpc_timeout: int = 5) -> None:
         super().__init__(base_type, prop_cls)
         self._url = url
         self._port = port
@@ -3309,7 +3330,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
         self._cur_ts = 0
 
-        self._fastrpc_timeout = 5
+        self._fastrpc_timeout = fastrpc_timeout
 
     @property
     def is_remote_mounted(self):
@@ -3393,7 +3414,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             # so we can't update stuff here, we must ensure
             # layout update done after set_new_layout.
             # so we use post_ev_creator here.
-            # print("LAYOUT", layout)
             await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
             self._is_remote_mounted = True
             next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
@@ -3455,7 +3475,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             self._cur_ts = 0
 
     async def _reconnect_to_remote_comp(self):
-        _use_remote_generator: bool = True
         try:
             await self.shutdown_remote_object()
             await self._close_remote_loop()
@@ -3465,37 +3484,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             #                     master_meta.node_id)
             await self.setup_remote_object()
             prefixes = self._flow_uid.parts
-            if not _use_remote_generator:
-                master_meta = MasterMeta()
-                if self._url.strip() == "localhost" or self._url.strip(
-                ) == "127.0.0.1":
-                    app_url = "localhost"
-                else:
-                    app_url = get_primary_ip()
-
-                app_serv_meta = AppLocalMeta()
-                assert app_serv_meta.grpc_port is not None 
-
-                await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, self._key,
-                                    app_url, app_serv_meta.grpc_port, prefixes)
-                layout, root_comp_uid = await self.get_layout_dict()
-                # first event: update layout from remote
-                update_comp_ev = self.create_update_comp_event(layout, [])
-                # second event: update childs prop in remote container
-                prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
-                # WARNING: connect button remove container that contains itself,
-                # so the actual set_new_layout is delayed after current callback finish.
-                # so we can't update stuff here, we must ensure
-                # layout update done after set_new_layout.
-                # so we use post_ev_creator here.
-                await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
-                self._is_remote_mounted = True
-            else:
-                self._shutdown_ev.clear()
-                await self.health_check(1)
-                self._remote_task = asyncio.create_task(
-                    self._remote_msg_handle_loop(prefixes, "", -1), name="remote_msg_handle_loop")
-                self._cur_ts = 0
+            self._shutdown_ev.clear()
+            await self.health_check(1)
+            self._remote_task = asyncio.create_task(
+                self._remote_msg_handle_loop(prefixes, "", -1), name="remote_msg_handle_loop")
+            self._cur_ts = 0
         except BaseException as e:
             await self.send_exception(e)
             await self.disconnect()
