@@ -1,4 +1,10 @@
 # Changelog
+# [0.24.0] - 2025-10-xx
+- [infra] pfl improvement: add class support. add multi-thread support for ast runner.
+- [infra] add distributed support (single-node only).
+- [ui] BREAKING CHANGE: add mui charts (line/bar/scatter/sparkline).
+- [ui] add distributed remote app.
+- [mls] triton sim improvement, add wrapper that run your real kernel in simulate mode.
 
 # [0.23.0] - 2025-07-16
 ### Changed 
