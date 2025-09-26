@@ -55,6 +55,7 @@ REQUIRED = [
     "fsspec",
     "orjson",
     "lark",
+    "cmap",
 ]
 
 # What packages are optional?

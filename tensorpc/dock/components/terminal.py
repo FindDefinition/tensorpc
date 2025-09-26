@@ -559,6 +559,13 @@ class AsyncSSHTerminal(Terminal):
                             # await self.flow_event_emitter.emit_async(
                             #     self._backend_ssh_conn_inited_event_key,
                             #     Event(self._backend_ssh_conn_inited_event_key, None))
+                    if self._log_to_stdout:
+                        data = event.line.decode("utf-8", errors="replace")
+                        if not isinstance(self.props.terminalId, Undefined):
+                            print(f"[{self.props.terminalId}]{data}", end="")
+                        else:
+                            print(data, end="")
+
                 elif isinstance(event, (CommandEvent)):
                     if event.type == CommandEventType.CURRENT_COMMAND:
                         if event.arg is not None:
@@ -615,8 +622,6 @@ class AsyncSSHTerminal(Terminal):
                     except:
                         traceback.print_exc()
             if isinstance(event, RawEvent):
-                if self._log_to_stdout:
-                    print(event.raw.decode("utf-8", errors="replace"), end="")
                 if self.is_mounted():
                     await self.send_raw(event.raw, event.timestamp - self._ssh_state.base_ts)
                 else:

@@ -186,7 +186,8 @@ class UIType(enum.IntEnum):
     MUIBarChart = 0x52
     MUILineChart = 0x53
     MUIScatterChart = 0x54
-
+    MUISparkLineChart = 0x55
+    
     RANGE_CHART_END = 0x90
     # special containers
     # react fragment
@@ -2234,10 +2235,10 @@ class Component(Generic[T_base_props, T_child]):
                 UserMessage.from_exception(uid, e, tb)))
 
     async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
-        traceback.print_exc()
+        traceback.print_exception(exc_param.exc)
         e = exc_param.exc
         ss = io.StringIO()
-        traceback.print_exc(file=ss)
+        traceback.print_exception(exc_param.exc, file=ss)
         assert self._flow_uid is not None
         user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
                                             repr(e), ss.getvalue())
@@ -2401,6 +2402,7 @@ class Component(Generic[T_base_props, T_child]):
                             self._flow_uid.uid_encoded, repr(e), ss.getvalue())
                         await self.put_app_event(
                             self.create_user_msg_event(user_exc))
+                        res_list.append(None)
                         # app = get_app()
                         # if app._flowapp_enable_exception_inspect:
                         #     await app._inspect_exception()

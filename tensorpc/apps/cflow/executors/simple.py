@@ -74,7 +74,7 @@ class FixedNodeExecutor(NodeExecutorBase):
 
 @dataclasses_plain.dataclass
 class _SSHManagedRemoteObjectState:
-    task: asyncio.Task
+    wait_task: asyncio.Task
     robj: AsyncRemoteManager
     relay_robj: AsyncRemoteManager
     desc: ExecutorRemoteDesc
@@ -92,7 +92,9 @@ class _SSHManagedRemoteObject:
 
         self._state: Optional[_SSHManagedRemoteObjectState] = None
 
-    async def close(self, is_rpc_waiter: bool = False):
+        self._wait_timeout = 20
+
+    async def close_rpc_tasks(self):
         if self._state is not None:
             try:
                 await self._state.robj.shutdown()
@@ -107,8 +109,15 @@ class _SSHManagedRemoteObject:
 
             self._terminal._shutdown_ev.set()
             self._relay_terminal._shutdown_ev.set()
-            if not is_rpc_waiter:
-                await self._state.task
+            await self._terminal.disconnect()
+            await self._relay_terminal.disconnect()
+            self._state = None
+
+    async def close(self):
+        if self._state is not None:
+            if self._state.wait_task is not None:
+                self._state.shutdown_ev.set()
+                await self._state.wait_task
         self._state = None
         await self._terminal.disconnect()
         await self._relay_terminal.disconnect()
@@ -141,18 +150,7 @@ class _SSHManagedRemoteObject:
             break 
         if relay_end_callback is not None:
             await relay_end_callback()
-        await self.close(is_rpc_waiter=True)
-        # try:
-        #     await asyncio.gather(
-        #         term.ssh_command_rpc(cmd),
-        #         relay_term.ssh_command_rpc(relay_cmd),
-        #     )
-        # except:
-        #     traceback.print_exc()
-        # finally:
-        #     if relay_end_callback is not None:
-        #         await relay_end_callback()
-        #     await self.close(is_rpc_waiter=True)
+        await self.close_rpc_tasks()
 
     def _get_cfg_encoded(self, desc: ExecutorRemoteDesc):
         serv_name = NODE_EXEC_SERVICE
@@ -220,6 +218,7 @@ class _SSHManagedRemoteObject:
     @contextlib.asynccontextmanager
     async def _run_relay_with_ssh_directly(self, ssh_desc: SSHConnDesc,
             init_cmds: Optional[list[str]] = None):
+        assert self._state is None
         assert not self._relay_terminal.is_connected()
         assert not self._terminal.is_connected()
         exit_ev = asyncio.Event()
@@ -246,7 +245,7 @@ class _SSHManagedRemoteObject:
         relay_cmd = self._get_relay_cmd(relay_port, remote_exec_pid)
         relay_task = asyncio.create_task(self._relay_terminal.ssh_command_rpc(relay_cmd))
         async with AsyncRemoteManager(relay_url_with_port) as relay_robj:
-            await relay_robj.wait_for_channel_ready()
+            await relay_robj.wait_for_channel_ready(timeout=self._wait_timeout)
             try:
                 yield relay_robj, relay_task, exit_ev
             finally:
@@ -292,9 +291,9 @@ class _SSHManagedRemoteObject:
             shutdown_ev = asyncio.Event()
             task = asyncio.create_task(
                 self._exec_rpc_waiter(shutdown_ev, self._terminal, self._relay_terminal, cmd, relay_cmd, relay_end_callback))
-            await robj.wait_for_channel_ready()
+            await robj.wait_for_channel_ready(timeout=self._wait_timeout)
             await robj.remote_call(RemoteExecutorServiceKeys.IMPORT_REGISTRY_MODULES.value, get_registry_func_modules_for_remote())
-            await relay_robj.wait_for_channel_ready()
+            await relay_robj.wait_for_channel_ready(timeout=self._wait_timeout)
             if relay_start_callback is not None:
                 await relay_start_callback(relay_robj)
             self._state = _SSHManagedRemoteObjectState(task, robj, relay_robj, desc, shutdown_ev)
@@ -328,11 +327,13 @@ class SSHCreationNodeExecutor(NodeExecutorBase):
         self._terminal: AsyncSSHTerminal = AsyncSSHTerminal(
             manual_connect=True,
             manual_disconnect=True,
-            terminalId=id).prop(disableStdin=not enable_ssh_stdin)
+            terminalId=id,
+            log_to_stdout=True).prop(disableStdin=not enable_ssh_stdin)
         self._relay_terminal: AsyncSSHTerminal = AsyncSSHTerminal(
             manual_connect=True,
             manual_disconnect=True,
-            terminalId=id + "relay").prop(disableStdin=True)
+            terminalId=id + "relay",
+            log_to_stdout=True).prop(disableStdin=True)
 
         self._serv_rpc_state = _SSHManagedRemoteObject(self._terminal, self._relay_terminal, id,
                                                        resource)
@@ -414,6 +415,22 @@ class SSHCreationNodeExecutor(NodeExecutorBase):
             self._relay_service_end)
         return await run_node_with_robj(robj, node, inputs)
 
+    @override
+    async def setup_node(self, node: ComputeNodeModel) -> None:
+        robj, _, desc = await self._serv_rpc_state.get_or_create_remote_object_and_desp(
+            self._ssh_desc, self._init_cmds, self._relay_service_start,
+            self._relay_service_end)
+        assert node.runtime is not None
+        node_impl_code = node.runtime.impl_code
+        node_no_runtime = node.get_node_without_runtime()
+
+        await robj.remote_call(
+            RemoteExecutorServiceKeys.SETUP_NODE.value, node_no_runtime,
+                node_impl_code)
+
+
+    def is_local(self) -> bool: 
+        return False
 
 class SSHTempExecutorBase(SSHCreationNodeExecutor):
     def __init__(self,

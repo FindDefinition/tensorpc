@@ -59,6 +59,7 @@ _ONEARG_EDITOR_EVENTS = set([
     FrontendEventType.EditorHoverQuery.value,
     FrontendEventType.EditorCodelensQuery.value,
     FrontendEventType.EditorDecorationsChange.value,
+    FrontendEventType.EditorBreakpointChange.value,
 ])
 
 _ONEARG_SPECIAL_EVENTS = set([
@@ -94,10 +95,20 @@ _ONEARG_TERMINAL_EVENTS = set([
     FrontendEventType.TerminalFrontendMount.value,
 ])
 
-_ONEARG_EVENTS = set(
+_ONEARG_CHART_EVENTS = set([
+    FrontendEventType.ChartAreaClick.value,
+    FrontendEventType.ChartAxisClick.value,
+    FrontendEventType.ChartItemClick.value,
+    FrontendEventType.ChartLineClick.value,
+    FrontendEventType.ChartMarkClick.value,
+])
+
+
+_ONEARG_EVENTS = (set(
     ALL_POINTER_EVENTS
-) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
+) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS | _ONEARG_CHART_EVENTS)
 _ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS | _ONEARG_KEYBOARD_EVENTS
+
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
@@ -184,7 +195,7 @@ async def handle_standard_event(comp: Component,
                     res = await comp.run_callbacks(
                         handlers.get_bind_event_handlers(event),
                         sync_state,
-                        sync_status_first=False,
+                        sync_status_first=sync_status_first,
                         change_status=change_status,
                         capture_draft=capture_draft,
                         finish_callback=finish_callback)
@@ -212,8 +223,9 @@ async def handle_standard_event(comp: Component,
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
                     res = await comp.run_callbacks(run_funcs,
-                                                    sync_status_first=False,
-                                                    capture_draft=capture_draft)
+                                                    sync_status_first=sync_status_first,
+                                                    capture_draft=capture_draft,
+                                                    change_status=change_status)
                     # when event is sync (frontend rpc), we only return first one.
                     return res[0]
                 else:
@@ -230,7 +242,7 @@ async def handle_standard_event(comp: Component,
                 if is_sync:
                     res = await comp.run_callbacks(
                         run_funcs,
-                        sync_status_first=False,
+                        sync_status_first=sync_status_first,
                         change_status=change_status,
                         capture_draft=capture_draft)
                     # when event is sync (frontend rpc), we only return first one.

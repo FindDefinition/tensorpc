@@ -459,6 +459,7 @@ class FaultToleranceSSHServer:
                         LOGGER.warning(f"worker {rank}({poped_robj.url}) disconnected")
                         has_disconnect = True
                     else:
+                        draft.client_states[rank].status = FTStatus.OK
                         res_dict[rank] = r
                 if has_disconnect or not is_all_worker_conn:
                     draft.client_states[self._master_rank].status = FTStatus.WORKER_DISCONNECTED

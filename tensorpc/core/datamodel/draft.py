@@ -39,6 +39,7 @@ Our draft change detection only check main path nodes, other node will be treate
 
 import contextlib
 import contextvars
+import copy
 from dataclasses import is_dataclass
 import enum
 import json
@@ -203,6 +204,12 @@ class DraftUpdateOp:
         else:
             res = dataclasses.replace(self)
         return res 
+
+    def to_data_deepcopied(self) -> Self:
+        # we may need to deepcopy opData if we do backend update
+        # before send to frontend, to avoid backend update modify opData.
+        return dataclasses.replace(self,
+                                   opData=copy.deepcopy(self.opData))
 
 class DraftUpdateProcessContext:
     def __init__(self, proc: Callable[[DraftUpdateOp], DraftUpdateOp]):

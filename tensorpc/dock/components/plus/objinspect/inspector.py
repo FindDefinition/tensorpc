@@ -89,7 +89,8 @@ class ObjectInspector(mui.FlexBox):
                  custom_tabs: Optional[List[mui.TabDef]] = None,
                  custom_preview: Optional[ObjectPreviewBase] = None,
                  horizontal: bool = False,
-                 default_tab_preview: bool = True) -> None:
+                 default_tab_preview: bool = True,
+                 init_fast_layout: Optional[mui.LayoutType] = None) -> None:
 
         # self.preview_container = mui.HBox([]).prop(overflow="auto",
         #                                            flex=1,
@@ -112,7 +113,7 @@ class ObjectInspector(mui.FlexBox):
         else:
             self._obj_preview = ObjectPreview()
 
-        self.fast_layout_container = mui.HBox([]).prop(overflow="auto",
+        self.fast_layout_container = mui.HBox(init_fast_layout or []).prop(overflow="auto",
                                                        padding="3px",
                                                        flex=1,
                                                        width="100%",

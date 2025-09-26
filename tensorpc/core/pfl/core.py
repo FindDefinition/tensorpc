@@ -1,19 +1,21 @@
 import ast
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 import contextlib
 import contextvars
 import enum
 from functools import partial
 import inspect
 import sys
-from typing import (TYPE_CHECKING, Any, Callable, ForwardRef, Optional, Type, TypeAlias, TypeVar, Union,
+from typing import (TYPE_CHECKING, Any, Callable, ForwardRef, Generic, Optional, Type, TypeAlias, TypeVar, Union,
                     cast, overload)
 
-from typing_extensions import Literal, Self, get_overloads
+import pydantic
+from pydantic_core import PydanticUndefined
+from typing_extensions import Literal, Self, get_overloads, ParamSpec, ParamSpecArgs
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
-                                   Undefined, is_undefined,
+                                   Undefined, get_type_hints_with_cache, is_undefined,
                                    parse_type_may_optional_undefined,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
@@ -60,11 +62,16 @@ class PFLExprType(enum.IntEnum):
     UNION = 13
     TUPLE = 14
     SLICE = 15
-
     ELLIPSIS = 16
     # typevar
     GENERIC_TYPE = 17
-
+    # paramspec. only used to infer template function type
+    # from a call. e.g. call_fn(template_fn, args)
+    # args must be tuple, we can use types in args to infer
+    # params of template_fn.
+    # support of paramspec kwargs isn't planned.
+    GENERIC_PARAM_SPEC = 18
+    GENERIC_PARAM_ARGS = 19
 
 _BASE_TYPE_TO_STRING = {
     PFLExprType.UNKNOWN: "unknown",
@@ -119,6 +126,49 @@ BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE = {
 }
 
 @dataclasses.dataclass
+class _DummyPydantic:
+    pass 
+
+def is_dcls_init_defined_by_user(dcls: Type[DataclassType]):
+    assert dataclasses.is_dataclass(dcls)
+    if dataclasses.is_pydantic_dataclass(dcls):
+        return dcls.__init__ is not _DummyPydantic.__init__
+    else:
+        file_path = inspect.getsourcefile(dcls.__init__)
+        return file_path is not None and file_path != "<string>"
+
+def is_dcls_post_init_defined_by_user(dcls: Type[DataclassType]):
+    assert dataclasses.is_dataclass(dcls)
+    return hasattr(dcls, "__post_init__")
+
+@dataclasses.dataclass
+class PFLTemplateFnSpecMeta:
+    """used for template function specification based on 
+    function call.
+
+    WARNING: fn annotated with `PFLTemplateFnSpecMeta` must
+    be scalar/list/dict of template functions,
+    args annotated with `PFLTemplateFnSpecArgsMeta`
+    must be tuple.
+    e.g. 
+    ```Python
+    def fn(fn1: Annotated[Any, PFLTemplateFnSpecMeta("1")], 
+           args: Annotated[Any, PFLTemplateFnSpecArgsMeta("1")]):
+        pass
+
+    def template_fn(a, b):
+        return a + b
+    # template_fn is specificated via types in args
+    fn(template_fn, (val1, val2))
+    ```
+    """
+    key: str
+
+@dataclasses.dataclass
+class PFLTemplateFnSpecArgsMeta:
+    key: str
+
+@dataclasses.dataclass
 class PFLParseConfig:
     # TODO: currently we don't support variable with union type except
     # number type (int | float)
@@ -145,6 +195,7 @@ class PFLParseConfig:
     # tuple assign, assigned variable must all-exist in scope or
     # not created yet.
     tuple_assign_must_be_homogeneous: bool = False
+    allow_custom_class: bool = False
 
 @dataclasses.dataclass
 class StaticEvalConfig:
@@ -207,8 +258,11 @@ class PFLErrorFormatContext:
         return ""
 
 class PFLParseCache:
-    def __init__(self, backend: str, temp_std_items: Optional[dict[Type, StdRegistryItem]] = None):
+    def __init__(self, backend: str, var_preproc: Callable[[Any], "PFLProcessedVarMeta"], 
+            temp_std_items: Optional[dict[Type, StdRegistryItem]] = None):
         self._func_parse_result_cache: dict[Callable, PFLExprInfo] = {}
+        self._user_dcls_parse_result_cache: dict[Type[DataclassType], PFLExprInfo] = {}
+
         self._annotype_cache: dict[Any, AnnotatedType] = {}
         self._std_item_cache: dict[Type, Optional[StdRegistryItem]] = {}
         if temp_std_items is not None:
@@ -218,6 +272,7 @@ class PFLParseCache:
         self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
         self._temp_dcls_dict: dict[tuple[str, Optional[str]], StdRegistryItem] = {}
         self._backend = backend
+        self._var_preproc = var_preproc
 
     def cached_parse_to_annotype(self,
                           type: Any) -> AnnotatedType:
@@ -227,20 +282,44 @@ class PFLParseCache:
         self._annotype_cache[type] = res
         return res
 
+    def cached_parse_dcls(self,
+                          dcls: Type[DataclassType]) -> "PFLExprInfo":
+        if dcls in self._user_dcls_parse_result_cache:
+            return self._user_dcls_parse_result_cache[dcls]
+        res = PFLExprInfo.from_dcls_type(dcls)
+        has_user_init = is_dcls_init_defined_by_user(dcls)
+        if has_user_init:
+            init_fn = self.cached_parse_func(dcls.__init__,
+                self_type=parse_type_may_optional_undefined(dcls))
+            res.func_info = init_fn.get_func_info_checked()
+            res.func_info.func_uid = get_module_id_of_type(dcls.__init__)
+        else:
+            assert res.dcls_info is not None
+            res.func_info = dataclasses.replace(res.dcls_info)
+        self._user_dcls_parse_result_cache[dcls] = res
+        return res
+
     def cached_parse_func(self,
                           func: Callable,
-                          ignore_self: bool = False,
+                          is_bound_method: bool = False,
                           self_type: Optional[AnnotatedType] = None,
-                          disable_type_check: bool = False) -> "PFLExprInfo":
+                          disable_type_check: bool = False,
+                          ext_preproc_res: Optional["PFLProcessedVarMeta"] = None) -> "PFLExprInfo":
+        preproc_res = self._var_preproc(func)
+        func = preproc_res.value
+        if ext_preproc_res is not None:
+            compilable_meta = ext_preproc_res.compilable_meta
+        else:
+            compilable_meta = preproc_res.compilable_meta
         if func in self._func_parse_result_cache:
             return self._func_parse_result_cache[func]
+        name = func.__name__
         if disable_type_check:
             # use (...Any) -> Any sig
             sig = inspect.Signature([varparam_fn("x", Any)], return_annotation=Any)
-            return PFLExprInfo.from_signature(sig, raw_func=func)
+            return PFLExprInfo.from_signature(name, sig, raw_func=func)
         else:
             meta: Optional[PFLStdlibFuncMeta] = getattr(func, PFL_STDLIB_FUNC_META_ATTR, None)
-            compilable_meta: Optional[PFLCompileFuncMeta] = get_compilable_meta(func)
             
             if meta is not None and meta.take_overloads_fn is not None:
                 overload_fn = meta.take_overloads_fn
@@ -253,7 +332,7 @@ class PFLParseCache:
             else:
                 sig = inspect.signature(func, eval_str=True)
                 overload_sigs = None
-            res = PFLExprInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, 
+            res = PFLExprInfo.from_signature(name, sig, is_bound_method=is_bound_method, self_type=self_type, 
                 overload_sigs=overload_sigs, raw_func=func, compilable_meta=compilable_meta)
             assert res.func_info is not None
             # generate function uid
@@ -327,7 +406,7 @@ class PFLParseContext(PFLErrorFormatContext):
     def __init__(self,
                  lines: list[str],
                  func_globals: Any,
-                 func_unwrapper: Callable[[Any], Callable],
+                 var_preproc: Callable[[Any], "PFLProcessedVarMeta"],
                  backend: str = "js",
                  temp_std_items: Optional[dict[Type, StdRegistryItem]] = None,
                  cfg: Optional[PFLParseConfig] = None,
@@ -346,7 +425,7 @@ class PFLParseContext(PFLErrorFormatContext):
         self.depend_compilables: list[str] = []
         # global states
         self._backend = backend
-        self.cache = PFLParseCache(backend, temp_std_items)
+        self.cache = PFLParseCache(backend, var_preproc, temp_std_items)
         if cfg is None:
             cfg = PFLParseConfig()
         self.cfg = cfg
@@ -354,7 +433,6 @@ class PFLParseContext(PFLErrorFormatContext):
             eval_cfg = StaticEvalConfig()
         self.eval_cfg = eval_cfg
         self._disable_type_check: bool = False
-        self._func_unwrapper = func_unwrapper
         if func_need_to_compile is None:
             func_need_to_compile = []
         self._func_need_to_compile: list[PFLCompileReq] = func_need_to_compile
@@ -370,7 +448,7 @@ class PFLParseContext(PFLErrorFormatContext):
                  node_to_constants: Optional[dict[ast.AST, "PFLCompileConstant"]] = None,
                  compile_req: Optional["PFLCompileReq"] = None, allow_inline_expand: bool = False):
         assert not ctx._disable_type_check, "not supported inside decorator list"
-        new_ctx = cls(lines, func_globals, ctx._func_unwrapper, ctx._backend, cfg=ctx.cfg, 
+        new_ctx = cls(lines, func_globals, ctx.cache._var_preproc, ctx._backend, cfg=ctx.cfg, 
             eval_cfg=ctx.eval_cfg,
             node_to_constants=node_to_constants,
             compile_req=compile_req,
@@ -381,14 +459,20 @@ class PFLParseContext(PFLErrorFormatContext):
         return new_ctx
 
     @classmethod 
-    def create_root_ctx(cls, backend: str, func_unwrapper: Callable[[Any], Callable], cfg: Optional[PFLParseConfig] = None, func_need_to_compile: Optional[list["PFLCompileReq"]] = None):
-        return cls([], {}, func_unwrapper, backend, cfg=cfg, func_need_to_compile=func_need_to_compile) 
+    def create_root_ctx(cls, backend: str, 
+            var_preproc: Callable[[Any], "PFLProcessedVarMeta"],
+            cfg: Optional[PFLParseConfig] = None, 
+            func_need_to_compile: Optional[list["PFLCompileReq"]] = None):
+        return cls([], {}, var_preproc, backend, cfg=cfg, func_need_to_compile=func_need_to_compile) 
 
     def get_compile_req(self, func: Callable, info: Optional["PFLExprFuncInfo"], meta: Optional["PFLCompileFuncMeta"], args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None,
                             self_type: Optional["PFLExprInfo"] = None,
                             is_prop: bool = False, is_method_def: bool = False,
-                            bound_self: Optional[Any] = None):
+                            bound_self: Optional[Any] = None,
+                            is_dcls: bool = False):
         # args_from_call: used for template compile
+        preproc_res = self.cache._var_preproc(func)
+        func = preproc_res.value
         if meta is None:
             if info is None or info.compilable_meta is None:
                 meta = PFLCompileFuncMeta([self._backend])
@@ -398,10 +482,10 @@ class PFLParseContext(PFLErrorFormatContext):
             func_uid = get_module_id_of_type(func)
         else:
             func_uid = info.func_uid
-        func = self._func_unwrapper(func)
         # always enqueue compile request, compiler will check if it is needed.
         req = PFLCompileReq(func, func_uid, meta, info, args_from_call,
-            self_type, is_prop, is_method_def, bound_self=bound_self)
+            self_type, is_prop, is_method_def, bound_self=bound_self,
+            is_dcls=is_dcls)
         return req 
 
     def enqueue_func_compile(self, func: Callable, info: "PFLExprFuncInfo", args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None,
@@ -414,6 +498,12 @@ class PFLParseContext(PFLErrorFormatContext):
             bound_self=bound_self)
         self._func_need_to_compile.append(req)
         self.depend_compilables.append(info.func_uid)
+        return req
+
+    def enqueue_dcls_compile(self, func: Callable, info: "PFLExprFuncInfo", args_from_call: Optional[tuple[list["PFLExprInfo"], dict[str, "PFLExprInfo"]]] = None,
+            self_type: Optional["PFLExprInfo"] = None):
+        req = self.get_compile_req(func, info, None, args_from_call, is_dcls=True, self_type=self_type)
+        self._func_need_to_compile.append(req)
         return req
 
 _PFLPARSE_CONTEXT: contextvars.ContextVar[
@@ -447,6 +537,11 @@ def get_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx
 
+def get_parse_cache():
+    ctx = _PFLPARSE_CONTEXT.get()
+    if ctx is None:
+        return None 
+    return ctx.cache
 
 def get_eval_cfg_in_parse_ctx():
     ctx = _PFLPARSE_CONTEXT.get()
@@ -465,8 +560,14 @@ class PFLExprFuncArgInfo:
     arg_name: str
     type: 'PFLExprInfo'
     default: Union[Undefined, Any] = undefined
-    is_vaargs: bool = False
+    default_type: Union[Undefined, "PFLExprInfo"] = undefined
 
+    is_vaargs: bool = False
+    # for lazy-parsed dcls field.
+    is_type_parsed: bool = True
+    is_kw_vaargs: bool = False
+    is_template_fn_arg_spec: bool = False 
+    template_fn_arg_spec_idx: Optional[int] = None
     def typevar_substitution(self, typevar_map: Mapping[TypeVar, "PFLExprInfo"]) -> Self:
         # we assume new type don't contains typevar.
         return dataclasses.replace(self, type=self.type.typevar_substitution(typevar_map))
@@ -480,13 +581,31 @@ class PFLExprFuncArgInfo:
         return {
             "arg_name": self.arg_name,
             "type": self.type.to_dict(),
-            "is_vaargs": self.is_vaargs
+            "is_vaargs": self.is_vaargs,
+            "is_kw_vaargs": self.is_kw_vaargs,
         }
+
+_T = TypeVar("_T")
+
+@dataclasses.dataclass
+class FuncMatchResult(Generic[_T]):
+    args: list[tuple[PFLExprFuncArgInfo, Union[_T, Undefined]]]
+    vararg: Optional[tuple[PFLExprFuncArgInfo, list[_T]]] = None
+    var_kwarg: Optional[tuple[PFLExprFuncArgInfo, dict[str, _T]]] = None
+
+    def __post_init__(self):
+        for a, _ in self.args:
+            assert not a.is_vaargs and not a.is_kw_vaargs, "args should not contain vaargs or kw vaargs"
+        if self.vararg is not None:
+            assert self.vararg[0].is_vaargs, "vararg should be vaargs"
+        if self.var_kwarg is not None:
+            assert self.var_kwarg[0].is_kw_vaargs, "var_kwarg should be kw vaargs"
 
 @dataclasses.dataclass(eq=False)
 class PFLExprFuncInfo:
+    name: str
+    return_type: "PFLExprInfo"
     args: list[PFLExprFuncArgInfo] = dataclasses.field(default_factory=list)
-    return_type: Optional["PFLExprInfo"] = None
     is_method: bool = False
     is_property: bool = False
     raw_func: Optional[Callable] = None
@@ -498,7 +617,20 @@ class PFLExprFuncInfo:
 
     compilable_meta: Optional["PFLCompileFuncMeta"] = None
     func_uid: str = ""
+    is_dcls: bool = False
+    is_user_dcls: bool = False
+    # when some function is called as a bound method, this field is set to the type of the 'Self'.
+    bound_self_type: Optional["PFLExprInfo"] = None
+    has_template_fn_spec: bool = False
+    _arg_name_to_idx: dict[str, int] = dataclasses.field(default_factory=dict)
+    _vararg_pos: int = -1
 
+    def __post_init__(self):
+        for i, a in enumerate(self.args):
+            self._arg_name_to_idx[a.arg_name] = i
+            if a.is_vaargs:
+                self._vararg_pos = i
+    
     def __repr__(self) -> str:
         args_str = []
         for arg in self.args:
@@ -509,25 +641,40 @@ class PFLExprFuncInfo:
                     prefix = f"{arg.type}[{arg.default}]"
                 else:
                     prefix = str(arg.type)
-
+                if self.is_dcls:
+                    prefix = f"{arg.arg_name}:{prefix}"
                 if not isinstance(arg.type._constexpr_data, Undefined):
                     args_str.append(f"{prefix}={arg.type._constexpr_data}")
                 else:
                     args_str.append(prefix)
         args = ", ".join(args_str)
-        res = f"({args}) => {self.return_type}"
+        if self.is_dcls:
+            res = f"{self.return_type}[{args}]"
+        else:
+            res = f"({args}) => {self.return_type}"
         return res
 
     def to_dict(self):
         args = [arg.to_dict() for arg in self.args]
         res: dict[str, Any] = {
             "args": args,
-            "return_type": self.return_type.to_dict() if self.return_type is not None else None,
             "is_method": self.is_method,
             "is_property": self.is_property,
+            "is_user_dcls": self.is_user_dcls,
         }
+        if not self.is_dcls:
+            # FIXME
+            res.update({
+                "return_type": self.return_type.to_dict() if self.return_type is not None else None,
+            })
         return res
-        
+    
+    def shallow_copy(self) -> "PFLExprFuncInfo":
+        # if is dcls, args contains some mutable data, so we must copy
+        # it. other fields are safe (immutable).
+        new_args = [dataclasses.replace(arg) for arg in self.args]
+        return dataclasses.replace(self, args=new_args)
+
     def is_template(self):
         if self.compilable_meta is None:
             return False 
@@ -548,42 +695,149 @@ class PFLExprFuncInfo:
             ret = ret.typevar_substitution(typevar_map)
         return dataclasses.replace(self, args=[c.typevar_substitution(typevar_map) for c in self.args], return_type=ret)
 
+    def delayed_init_set_field_type(self, field_name: str, field_type: "PFLExprInfo"):
+        """set field type by arguments.
+        used for template user dataclass.
+        """
+        assert field_name in self._arg_name_to_idx, f"field {field_name} not found in args"
+        field = self.args[self._arg_name_to_idx[field_name]]
+        # print("delayed_init_set_field_type", field_name, field.is_type_parsed)
+        if field.is_type_parsed:
+            assert field.type.is_equal_type(field_type), f"field {field_name} type {field.type} is not equal to {field_type}"
+        else:
+            field.type = dataclasses.replace(field_type)
+            field.is_type_parsed = True
+
+    def get_field(self, field_name: str):
+        return self.args[self._arg_name_to_idx[field_name]]
+
+    def get_parsed_field(self, field_name: str):
+        # print("get_parsed_field", field_name, self.is_template(), self.raw_func)
+        field = self.args[self._arg_name_to_idx[field_name]]
+        if field.is_type_parsed:
+            return field
+        else:
+            if self.is_template():
+                raise ValueError(f"field({field_name}) must be set by delayed_init_set_field_type before get attr.")
+            assert self.raw_func is not None 
+            type_hints = get_type_hints_with_cache(self.raw_func, include_extras=True)
+            anno = type_hints[field.arg_name]
+            annotype = parse_type_may_optional_undefined(anno)
+            arg_type = PFLExprInfo.from_annotype(annotype,
+                                            is_type=False,
+                                            allow_union=False,
+                                            allow_type_var=False)
+            field.is_type_parsed = True 
+            field.type = arg_type
+            return field
+
+    @classmethod
+    def from_dcls_type(cls,
+                       dcls: Type[DataclassType],
+                       external_annos: Optional[dict[str, Any]] = None,
+                       delay_parse_field: bool = False) -> Self:
+        type_hints = get_type_hints_with_cache(dcls, include_extras=True)
+        args: list[PFLExprFuncArgInfo] = []
+        for f in dataclasses.fields(dcls):
+            if delay_parse_field:
+                arg_type = PFLExprInfo(PFLExprType.UNKNOWN)
+            else:
+                if external_annos is None or f.name not in external_annos:
+                    anno = type_hints[f.name]
+                else:
+                    anno = external_annos[f.name]
+                annotype = parse_type_may_optional_undefined(anno)
+                arg_type = PFLExprInfo.from_annotype(annotype,
+                                                is_type=False,
+                                                allow_union=False,
+                                                allow_type_var=False)
+            arg = PFLExprFuncArgInfo(f.name, arg_type)
+            # TODO: currently we skip all default_factory.
+            if f.default is not dataclasses.MISSING:
+                # f**k pydantic
+                if isinstance(f.default, pydantic.fields.FieldInfo):
+                    finfo = f.default
+                    if finfo.default_factory is None and finfo.default is not PydanticUndefined:
+                        arg.default = f.default
+                        arg.default_type = PFLExprInfo.from_value(f.default)
+                else:
+                    arg.default = f.default
+                    arg.default_type = PFLExprInfo.from_value(f.default)
+            arg.is_type_parsed = not delay_parse_field
+            args.append(arg)
+        return_type = PFLExprInfo(
+            PFLExprType.DATACLASS_OBJECT, 
+            annotype=parse_type_may_optional_undefined(dcls),
+        )
+        # TODO do we need this?
+        parse_cache = get_parse_cache()
+        if parse_cache is None:
+            meta = get_compilable_meta(dcls)
+        else:
+            preproc_res = parse_cache._var_preproc(dcls)
+            meta = preproc_res.compilable_meta
+        res = cls(name=dcls.__name__, is_user_dcls=True, is_dcls=True, args=args, raw_func=dcls, return_type=return_type, compilable_meta=meta)
+        res.func_uid = get_module_id_of_type(dcls)
+        return_type.dcls_info = res
+        return res 
+
     @classmethod
     def from_signature(cls,
+                       name: str,
                        sig: inspect.Signature,
-                       ignore_self: bool = False,
+                       is_bound_method: bool = False,
                        self_type: Optional[AnnotatedType] = None,
                        overload_sigs: Optional[list[inspect.Signature]] = None,
                        raw_func: Optional[Callable] = None) -> Self:
-        # res = cls(PFLExprType.FUNCTION)
-        res = cls()
-        res.raw_func = raw_func
-        if overload_sigs is not None:
-            res.overloads = [cls.from_signature(
-                s, ignore_self=ignore_self, self_type=self_type) for s in overload_sigs]
         cnt = 0
+        args: list[PFLExprFuncArgInfo] = []
+        is_method = self_type is not None
+        template_spec_arg_meta_idx: dict[str, int] = {}
+        template_spec_meta_idx: dict[str, int] = {}
         for param in sig.parameters.values():
-            if ignore_self and cnt == 0 and param.name == "self":
-                res.is_method = True
+            is_template_fn_arg_spec: bool = False 
+            if is_bound_method and cnt == 0:
                 continue
-            assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
-            if param.annotation is Self:
-                assert self_type is not None 
+            if is_method and cnt == 0:
+                # first param is self, use self type
                 annotype = self_type
             else:
-                anno = param.annotation
-                annotype = parse_type_may_optional_undefined(anno, self_type=self_type)
-            
+                assert param.annotation is not inspect.Parameter.empty, f"param {param.name} must have annotation"
+                if param.annotation is Self:
+                    assert self_type is not None 
+                    annotype = self_type
+                else:
+                    anno = param.annotation
+                    annotype = parse_type_may_optional_undefined(anno, self_type=self_type)
+            metadatas = annotype.annometa
+            if metadatas is not None:
+                for m in metadatas:
+                    if isinstance(m, (PFLTemplateFnSpecMeta)):
+                        template_spec_meta_idx[m.key] = cnt
+                    if isinstance(m, PFLTemplateFnSpecArgsMeta):
+                        is_template_fn_arg_spec = True
+                        assert m.key not in template_spec_arg_meta_idx, 'only one arg spec allowed for each key.'
+                        template_spec_arg_meta_idx[m.key] = cnt
             arg_type = PFLExprInfo.from_annotype(annotype,
                                             is_type=False,
                                             allow_union=True,
-                                            allow_type_var=True)
+                                            allow_type_var=True,
+                                            allow_param_spec=True)
             arg = PFLExprFuncArgInfo(param.name, arg_type)
-            res.args.append(arg)
+            arg.is_template_fn_arg_spec = is_template_fn_arg_spec
+            args.append(arg)
             if param.default is not inspect.Parameter.empty:
+                assert not is_template_fn_arg_spec, "arg with default value can't be marked with `PFLTemplateFnSpecArgsMeta`"
                 arg.default = param.default
+                arg.default_type = PFLExprInfo.from_value(param.default)
             arg.is_vaargs = param.kind == inspect.Parameter.VAR_POSITIONAL
             cnt += 1
+        for k in template_spec_arg_meta_idx.keys():
+            assert k in template_spec_meta_idx, f"PFLTemplateFnSpecMeta {k} not found"
+        for k, idx in template_spec_meta_idx.items():
+            assert k in template_spec_arg_meta_idx, f"PFLTemplateFnSpecArgsMeta {k} not found"
+            arg = args[idx]
+            arg.template_fn_arg_spec_idx = template_spec_arg_meta_idx[k]
         if sig.return_annotation is not inspect.Parameter.empty:
             if sig.return_annotation is not None:
                 if sig.return_annotation is Self:
@@ -593,15 +847,72 @@ class PFLExprFuncInfo:
                     ret_anno = sig.return_annotation
                     annotype = parse_type_may_optional_undefined(
                         ret_anno, self_type=self_type)
-                res.return_type = PFLExprInfo.from_annotype(annotype,
+                return_type = PFLExprInfo.from_annotype(annotype,
                                                             is_type=False,
                                                             allow_type_var=True)
             else:
-                res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+                return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
         else:
-            res.return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+            return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
+        res = cls(name=name, args=args, raw_func=raw_func, return_type=return_type, is_method=is_method,
+            has_template_fn_spec=len(template_spec_meta_idx) > 0)
+        if overload_sigs is not None:
+            res.overloads = [cls.from_signature(
+                name, s, is_bound_method=is_bound_method, self_type=self_type) for s in overload_sigs]
         return res
 
+    def match_args_to_sig(self, args_from_call: tuple[list[_T], dict[str, _T]]) -> FuncMatchResult[_T]:
+        args, kwargs = args_from_call
+        vararg_pos = self._vararg_pos
+        bound_arg_inc = int(self.bound_self_type is not None)
+        num_query_args_fake = len(args) + bound_arg_inc
+        if vararg_pos < 0:
+            max_num_args = len(self.args)
+            if self.args:
+                max_num_args -= int(self.args[-1].is_kw_vaargs)
+            assert num_query_args_fake <= max_num_args, f"func {self} expect at most {max_num_args} pos args, but got {len(args)}"
+        match_args: list[tuple[PFLExprFuncArgInfo, Union[_T, Undefined]]] = []
+        match_vararg: Optional[tuple[PFLExprFuncArgInfo, list[_T]]] = None
+        match_var_kwarg: Optional[tuple[PFLExprFuncArgInfo, dict[str, _T]]] = None
+        if self._vararg_pos >= 0:
+            match_vararg = (self.args[self._vararg_pos], [])
+        if self.args and self.args[-1].is_kw_vaargs:
+            match_var_kwarg = (self.args[-1], {})
+        for i, a in enumerate(self.args):
+            # remove vaargs and va_kwargs later.
+            match_args.append((a, undefined))
+        for i, a in enumerate(args):
+            arg_idx = i + bound_arg_inc
+            if vararg_pos < 0:
+                match_args[arg_idx] = (self.args[arg_idx], a)
+            else:
+                if arg_idx < vararg_pos:
+                    match_args[arg_idx] = (self.args[arg_idx], a)
+                else:
+                    assert match_vararg is not None
+                    match_vararg[1].append(a)
+        for name, a in kwargs.items():
+            arg_idx = self._arg_name_to_idx[name]
+            arg_info = self.args[arg_idx]
+            if arg_info.is_kw_vaargs:
+                assert match_var_kwarg is not None
+                match_var_kwarg[1][name] = a
+            else:
+                match_args[arg_idx] = (arg_info, a)
+        # remove bound
+        if self.bound_self_type is not None:
+            assert len(match_args) > 0
+            match_args = match_args[1:]
+        # finally remove var args/kwargs from match_args
+        match_args = [a for a in match_args if not a[0].is_vaargs and not a[0].is_kw_vaargs]
+        res: FuncMatchResult[_T] = FuncMatchResult(match_args, match_vararg, match_var_kwarg)
+        return res
+
+    def get_bounded_type(self, bound_self: "PFLExprInfo"):
+        new_ovs = None 
+        if self.overloads is not None:
+            new_ovs = [o.get_bounded_type(bound_self) for o in self.overloads]
+        return dataclasses.replace(self, bound_self_type=bound_self, overloads=new_ovs)
 
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
@@ -616,8 +927,10 @@ class PFLExprInfo:
     # for container and dataclass
     annotype: Optional[AnnotatedType] = None
     anno_metadatas_ext: list[Any] = dataclasses.field(default_factory=list)
-    # when this expr is type or function, this may be set. (dataclass ctor is lazy-parsed).
+    # when this expr is function, this may be set. (dataclass ctor is lazy-parsed).
     func_info: Optional[PFLExprFuncInfo] = None
+    dcls_info: Optional[PFLExprFuncInfo] = None
+
     # indicate this function/operator result use a compiled function, not stdlib function.
     # we need to get inside when evaluation
     compiled_uid: Optional[str] = None
@@ -654,6 +967,9 @@ class PFLExprInfo:
             res["metadata"] = self.metadata
         if self.func_info is not None:
             res["func_info"] = self.func_info.to_dict()
+        if self.dcls_info is not None:
+            res["dcls_info"] = self.dcls_info.to_dict()
+
         if self.is_stdlib:
             res["is_stdlib"] = self.is_stdlib
         return res
@@ -687,8 +1003,12 @@ class PFLExprInfo:
         elif self.type == PFLExprType.GENERIC_TYPE:
             res = f"~T"
         elif self.type == PFLExprType.FUNCTION:
-            assert self.func_info is not None 
-            res = str(self.func_info)
+            if self.func_info is None and self.delayed_compile_req is not None:
+                # TODO better repr for template function
+                res = f"template_func_no_spec(...)"
+            else:
+                assert self.func_info is not None 
+                res = str(self.func_info)
         else:
             res = _BASE_TYPE_TO_STRING[self.type]
         # if self.mapped:
@@ -708,12 +1028,26 @@ class PFLExprInfo:
         assert self.func_info is not None, "func_info is None"
         return self.func_info
 
+    def get_dcls_info_checked(self) -> PFLExprFuncInfo:
+        assert self.dcls_info is not None, "dcls_info is None"
+        return self.dcls_info
+
     def get_optional_undefined_removed(self) -> Self:
         annotype = self.annotype
         if annotype is not None:
             annotype = annotype.get_optional_undefined_removed()
         res = dataclasses.replace(self, annotype=annotype, has_optional=False, has_undefined=False)
         return res
+
+    @property 
+    def is_user_dcls(self):
+        return self.dcls_info is not None and self.dcls_info.is_user_dcls
+
+    def get_bounded_type(self, bound_self: Self):
+        assert self.type == PFLExprType.FUNCTION
+        func_info = self.get_func_info_checked()
+        new_func_info = func_info.get_bounded_type(bound_self)
+        return dataclasses.replace(self, func_info=new_func_info)
 
     @classmethod
     def from_annotype(cls,
@@ -722,7 +1056,8 @@ class PFLExprInfo:
                       allow_union: bool = False,
                       allow_type_var: bool = False,
                       parse_cache: Optional[PFLParseCache] = None,
-                      proxy_dcls: Optional[Type[DataclassType]] = None) -> Self:
+                      proxy_dcls: Optional[Type[DataclassType]] = None,
+                      allow_param_spec: bool = False) -> Self:
         # nested union/typevar isn't supported
         if annotype.origin_type in BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
             res = cls(BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE[annotype.origin_type])
@@ -736,7 +1071,17 @@ class PFLExprInfo:
                 res = cls(PFLExprType.GENERIC_TYPE)
             else:
                 raise NotImplementedError(
-                    "Union only supported in function argument and return anno."
+                    "TypeVar only supported in function argument and return anno."
+                )
+        elif annotype.is_param_spec() or annotype.is_param_spec_args():
+            if allow_param_spec:
+                if annotype.is_param_spec():
+                    res = cls(PFLExprType.GENERIC_PARAM_SPEC)
+                else:
+                    res = cls(PFLExprType.GENERIC_PARAM_ARGS)
+            else:
+                raise NotImplementedError(
+                    "ParamSpec only supported in function argument anno."
                 )
         elif annotype.is_number_type():
             # here we support user subclassed base type
@@ -770,9 +1115,16 @@ class PFLExprInfo:
             if item is None:
                 # isn't stdlib
                 res.is_stdlib = False
+                # TODO if marked as compilable, parse fields here.
             else:
                 res.mapped = item.mapped_name
                 res.is_stdlib = True
+            if proxy_dcls is None:
+                # we dont care fields of proxy dcls.
+                res.dcls_info = PFLExprFuncInfo.from_dcls_type(
+                    annotype.origin_type, delay_parse_field=True)
+                res.dcls_info.is_dcls = True 
+                res.dcls_info.is_user_dcls = not res.is_stdlib
             if is_type:
                 res.proxy_dcls = proxy_dcls
         elif annotype.is_tuple_type():
@@ -782,7 +1134,16 @@ class PFLExprInfo:
                 for x in annotype.child_types
             ])
         elif annotype.is_any_type():
+
             res = cls(PFLExprType.ANY, [])
+        elif annotype.is_callable():
+            # first_child = annotype.child_types[0]
+            # assert first_child is not Ellipsis, "Callable[..., ReturnType] isn't supported, use full spec or use ParamSpec."
+            
+            # if isinstance(first_child, ParamSpec):
+            #     pass 
+            raise NotImplementedError
+
         elif annotype.origin_type is slice:
             # we only support slice(number?).
             res = cls(PFLExprType.SLICE, [])
@@ -795,6 +1156,10 @@ class PFLExprInfo:
                       DATACLASS_OBJECT)
             res.mapped = mapped_item.mapped_name
             annotype = parse_type_may_optional_undefined(mapped_item.dcls)
+            res.dcls_info = PFLExprFuncInfo.from_dcls_type(
+                annotype.origin_type, delay_parse_field=True)
+            res.dcls_info.is_dcls = True 
+            res.dcls_info.is_user_dcls = False
 
         res.annotype = annotype
         res.has_optional = annotype.is_optional
@@ -806,17 +1171,57 @@ class PFLExprInfo:
 
 
     @classmethod
+    def from_value(cls,
+                    value: Any) -> Self:
+        # only support scalar values (int/float/bool/str/None) and tuple of them.
+        if isinstance(value, bool):
+            st = cls(PFLExprType.BOOL)
+        elif isinstance(value, int):
+            st = cls(PFLExprType.NUMBER)
+        elif isinstance(value, float):
+            st = cls(PFLExprType.NUMBER)
+        elif isinstance(value, str):
+            st = cls(PFLExprType.STRING)
+        elif value is None:
+            st = cls(PFLExprType.NONE_TYPE)
+        elif value is ...:
+            st = cls(PFLExprType.ELLIPSIS)
+        elif isinstance(value, Undefined):
+            st = cls(PFLExprType.UNDEFINED_TYPE)
+        elif isinstance(value, tuple):
+            st = cls(PFLExprType.TUPLE, [cls.from_value(v) for v in value])
+        else:
+            raise ValueError(f"Unsupported constant value type: {type(value)}")
+        st.annotype = parse_type_may_optional_undefined(type(value))
+        return st 
+
+    @classmethod
     def from_signature(cls,
+                          name: str,
                        sig: inspect.Signature,
-                       ignore_self: bool = False,
+                       is_bound_method: bool = False,
                        self_type: Optional[AnnotatedType] = None,
                        overload_sigs: Optional[list[inspect.Signature]] = None,
                        raw_func: Optional[Callable] = None,
                        compilable_meta: Optional["PFLCompileFuncMeta"] = None) -> Self:
-        res_info = PFLExprFuncInfo.from_signature(sig, ignore_self=ignore_self, self_type=self_type, overload_sigs=overload_sigs)
-        res_info.raw_func = raw_func
-        res_info.compilable_meta = compilable_meta
+        res_info = PFLExprFuncInfo.from_signature(name, sig, is_bound_method=is_bound_method, self_type=self_type, overload_sigs=overload_sigs)
+        if raw_func is not None:
+            res_info.raw_func = raw_func
+        if compilable_meta is not None:
+            res_info.compilable_meta = compilable_meta
         res = cls(PFLExprType.FUNCTION, func_info=res_info)
+        return res
+
+    @classmethod
+    def from_dcls_type(cls,
+                       dcls: Type[DataclassType],
+                       external_annos: Optional[dict[str, Any]] = None,
+                       compilable_meta: Optional["PFLCompileFuncMeta"] = None,
+                       delay_parse_field: bool = False) -> Self:
+        res_info = PFLExprFuncInfo.from_dcls_type(dcls, external_annos, delay_parse_field)
+        if compilable_meta is not None:
+            res_info.compilable_meta = compilable_meta
+        res = cls(PFLExprType.DATACLASS_TYPE, dcls_info=res_info, annotype=parse_type_may_optional_undefined(dcls))
         return res
 
     def is_equal_type(self, other):
@@ -1048,29 +1453,9 @@ class PFLExprInfo:
                 c.typevar_substitution(typevar_map) for c in self.childs
             ], func_info=fn_info)
 
-    
-    def _parse_dataclass_ctor(self):
-        if self.proxy_dcls is not None:
-            fn = inspect.getattr_static(self.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
-            assert isinstance(fn, staticmethod)
-            func_st = get_parse_cache_checked().cached_parse_func(fn.__func__)
-            assert func_st.func_info is not None 
-            assert func_st.func_info.return_type is not None, "func return type must be annotated"
-            return func_st.func_info.args, func_st.func_info.return_type
-        else:
-            assert self.annotype is not None
-            func_args: list[PFLExprFuncArgInfo] = []
-            for k, (a, f) in self.annotype.get_dataclass_fields_and_annotated_types().items():
-                finfo_type = PFLExprInfo.from_annotype(a, is_type=False)
-                arg = PFLExprFuncArgInfo(k, finfo_type)
-                if f.default is not None:
-                    arg.default = f.default
-                arg.arg_name = k
-                func_args.append(arg)
-            ret_type = dataclasses.replace(self, type=PFLExprType.DATACLASS_OBJECT,
-                                    childs=[],
-                                    return_type=None)
-            return func_args, ret_type
+    def shallow_copy(self) -> Self:
+        # func info won't be copied to due with template dcls.
+        return dataclasses.replace(self, childs=self.childs.copy())
 
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
@@ -1156,12 +1541,26 @@ class PFLCompileFuncMeta:
     is_template: bool = False
     always_inline: bool = False
     userdata: Optional[Any] = None
+    # there is no template variable in python, so we can use this to indicate
+    # args that can be constexpr (not reqiured).
+    # if set, is_template must be True.
+    # for dataclass, this indicates fields that can be constexpr (TODO unused for now).
+    constexpr_args: Optional[set[str]] = None
     def need_delayed_processing(self):
         return self.is_template or self.always_inline
 
+    def __post_init__(self):
+        return self.validate()
+
+    def validate(self):
+        # if self.constexpr_args is not None:
+        #     assert self.is_template, "constexpr_args can only be set when is_template is True"
+        pass
+
+
 @dataclasses.dataclass
 class PFLCompileReq:
-    func: Callable
+    func_or_dcls: Callable
     uid: str
     meta: PFLCompileFuncMeta
     info: Optional[PFLExprFuncInfo] = None
@@ -1176,29 +1575,46 @@ class PFLCompileReq:
     bound_self: Optional[Any] = None
     # if some arguments are constexpr, we will use this to inline expand if.
     constexpr_args: Optional[dict[str, Any]] = None
+    is_dcls: bool = False
+    dcls_infer_field_type: bool = False
 
     def __post_init__(self):
         if self.is_method_def:
             assert self.self_type is not None 
 
     def __repr__(self):
-        prefix = "[func]"
-        if self.is_method_def:
-            prefix = "[method]"
-        if self.bound_self is not None:
-            prefix = "[bound-method]"
-        if self.meta.is_template:
-            prefix += "[template]"
-        elif self.meta.always_inline:
-            prefix += "[always-inline]"
-        return f"{prefix} {self.uid}"
+        if self.is_dcls:
+            prefix = f"[dcls]"
+            if self.meta.is_template:
+                prefix += "[template]"
+            return f"{prefix} {self.uid}"
+        else:
+            prefix = "[func]"
+            if self.is_method_def:
+                prefix = "[method]"
+            if self.bound_self is not None:
+                prefix = "[bound-method]"
+            if self.meta.is_template:
+                prefix += "[template]"
+            elif self.meta.always_inline:
+                prefix += "[always-inline]"
+            return f"{prefix} {self.uid}"
 
     def get_func_compile_uid(self, delayed_info: Optional[PFLExprFuncInfo] = None) -> str:
+        if self.is_dcls:
+            flag = 0
+            desc = "cls"
+            if self.meta.is_template:
+                flag |= PFLCompilableFlags.IS_TEMPLATE
+                assert self.info is not None 
+                desc = str(self.info)
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.DATACLASS), str(flag), desc]).uid_encoded
         if self.bound_self is None and not self.meta.is_template:
-            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.NORMAL), "normal"]).uid_encoded
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.FUNCTION), str(0), "fn"]).uid_encoded
         if self.bound_self is not None:
+            flag = PFLCompilableFlags.IS_BOUND
             assert not self.meta.is_template, "currently bound method can't be template"
-            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.BOUND), hex(id(self.bound_self))]).uid_encoded
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.FUNCTION), str(flag), f"fn-{hex(id(self.bound_self))}"]).uid_encoded
         else:
             # use signature as template func uid
             if delayed_info is not None:
@@ -1206,7 +1622,8 @@ class PFLCompileReq:
             else:
                 assert self.info is not None 
                 info = self.info
-            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.TEMPLATE_SPEC), str(info)]).uid_encoded
+            flag = PFLCompilableFlags.IS_TEMPLATE
+            return UniqueTreeId.from_parts([self.uid, str(PFLCompilableType.FUNCTION), str(flag), f"fn-{info}"]).uid_encoded
 
     def is_bound_method(self) -> bool:
         return self.bound_self is not None
@@ -1217,25 +1634,35 @@ def mark_pfl_compilable(fn: T) -> T: ...
 @overload
 def mark_pfl_compilable(fn: None = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
-        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Callable[[T], T]: ...
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None,
+        constexpr_args: Optional[Sequence[str]] = None) -> Callable[[T], T]: ...
 
 @register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
 def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
-        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Union[T, Callable[[T], T]]:
+        always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None,
+        constexpr_args: Optional[Sequence[str]] = None) -> Union[T, Callable[[T], T]]:
     def wrapper(fn_wrapped: T) -> T:
         prev_meta: Optional[PFLCompileFuncMeta] = getattr(fn_wrapped, PFL_COMPILE_META_ATTR, None)
+        constexpr_args_ = constexpr_args
+        if constexpr_args_ is not None:
+            constexpr_args_set = set(constexpr_args_)
+        else:
+            constexpr_args_set = None
         if meta is not None:
             setattr(fn_wrapped, PFL_COMPILE_META_ATTR, meta)
         else:
             if prev_meta is None:
-                prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template, always_inline=always_inline)
+                prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template, always_inline=always_inline,
+                    constexpr_args=constexpr_args_set)
                 setattr(fn_wrapped, PFL_COMPILE_META_ATTR, prev_meta)
             else:
                 prev_meta.backends = backends
                 prev_meta.inline_run_env_fn = inline_run_env_fn
                 prev_meta.is_template = is_template
                 prev_meta.always_inline = always_inline
+                prev_meta.constexpr_args = constexpr_args_set
+                prev_meta.validate()
         return cast(T, fn_wrapped)
     if fn is None:
         return wrapper
@@ -1247,6 +1674,7 @@ def get_compilable_meta(fn: Callable) -> Optional[PFLCompileFuncMeta]:
     if meta is None:
         return None
     return meta
+
 
 def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None,
                        static_type_infer: Optional[Callable[..., Any]] = None,
@@ -1306,15 +1734,27 @@ class PFLCompileConstantType(enum.IntEnum):
     DATACLASS_TYPE = 32
 
 @dataclasses.dataclass
+class PFLProcessedVarMeta:
+    value: Any
+    is_static: bool = False 
+    is_classmethod: bool = False
+    is_property: bool = False
+    compilable_meta: Optional[PFLCompileFuncMeta] = None
+
+
+@dataclasses.dataclass
 class PFLCompileConstant:
     type: PFLCompileConstantType
     value: Any
+    var_meta: PFLProcessedVarMeta
     is_stdlib: bool = False 
     bound_self: Optional[Any] = None
 
 
 class PFLCompilableType(enum.IntEnum):
-    NORMAL = 0
-    BOUND = 1
-    TEMPLATE_SPEC = 2
+    FUNCTION = 0
+    DATACLASS = 1
 
+class PFLCompilableFlags(enum.IntFlag):
+    IS_BOUND = enum.auto()
+    IS_TEMPLATE = enum.auto()

@@ -18,6 +18,7 @@ register_backend("js", PFLParseConfig(
     allow_slice=False,
     allow_new_var_after_if=True,
     tuple_assign_must_be_homogeneous=True,
+    allow_custom_class=False,
 ))
 
 @register_pfl_std(mapped_name="len", backend="js", mapped=len)

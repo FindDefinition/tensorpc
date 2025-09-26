@@ -15,7 +15,7 @@ from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN, PFL_STDLIB_FU
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
+from .core import (FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
                    get_parse_context_checked, param_fn, varparam_fn)
 
 
@@ -113,7 +113,7 @@ class PFLASTType(enum.IntEnum):
     EXPR = 1
     ARG = 2
     MODULE = 3
-
+    CLASS = 4
     STMT_MASK = 0x100
     ASSIGN = 0x101
     IF = 0x102
@@ -263,12 +263,6 @@ _PFL_AUG_ASSIGN_METHOD_NAME = {
 }
 
 _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME = {
-    CompareType.EQUAL: "__ne__",
-    CompareType.NOT_EQUAL: "__eq__",
-    CompareType.LESS: "__ge__",
-    CompareType.LESS_EQUAL: "__gt__",
-    CompareType.GREATER: "__le__",
-    CompareType.GREATER_EQUAL: "__lt__",
     BinOpType.ADD: "__radd__",
     BinOpType.SUB: "__rsub__",
     BinOpType.MULT: "__rmul__",
@@ -283,6 +277,17 @@ _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME = {
     BinOpType.BIT_AND: "__rand__",
     BinOpType.MATMUL: "__rmatmul__",
 
+}
+
+_PFL_COMPARE_TYPE_TO_REVERSE_METHOD_NAME = {
+    CompareType.EQUAL: "__ne__",
+    CompareType.NOT_EQUAL: "__eq__",
+    CompareType.LESS: "__ge__",
+    CompareType.LESS_EQUAL: "__gt__",
+    CompareType.GREATER: "__le__",
+    CompareType.GREATER_EQUAL: "__lt__",
+    CompareType.IN: "__contains__",
+    CompareType.NOT_IN: "__contains__",
 }
 
 SourceLocType: TypeAlias = tuple[int, int, Optional[int], Optional[int]]
@@ -460,14 +465,14 @@ class PFLAugAssign(PFLAstStmt):
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_cache_checked().cached_parse_func(
-                op_func, True, self_type=self.target.st.annotype)
+                op_func, self_type=self.target.st.annotype)
             finfo = op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
-            ) == 1, f"custom operator {op_name} must have one arg, but got {len(finfo.args)}"
+            ) == 2, f"custom operator {op_name} must have one non-self arg, but got {len(finfo.args)}"
             assert self.value.st.is_convertable(
-                finfo.args[0].type
-            ), f"aug assign value {self.value.st} not convertable to {finfo.args[0].type}"
+                finfo.args[1].type
+            ), f"aug assign value {self.value.st} not convertable to {finfo.args[1].type}"
             is_custom_type = True
             custom_res_type = finfo.return_type
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"
@@ -675,11 +680,11 @@ class PFLUnaryOp(PFLExpr):
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_cache_checked().cached_parse_func(
-                op_func, True, self_type=self.operand.st.annotype)
+                op_func, self_type=self.operand.st.annotype)
             finfo = op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
-            ) == 0, f"custom operator {op_name} must have no non-self arg, but got {len(finfo.args)}"
+            ) == 1, f"custom operator {op_name} must have no non-self arg, but got {len(finfo.args)}"
             is_custom_type = True
             custom_res_type = finfo.return_type
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"
@@ -784,9 +789,12 @@ class PFLBinOpBase(PFLExpr):
         if is_compare:
             assert isinstance(op, CompareType), f"op must be CompareType, but got {type(op)}"
             op_name = _PFL_COMPARE_TYPE_TO_METHOD_NAME[op]
+            rop_name = _PFL_COMPARE_TYPE_TO_REVERSE_METHOD_NAME[op]
         else:
             assert isinstance(op, BinOpType), f"op must be BinOpType, but got {type(op)}"
             op_name = _PFL_BINARY_TYPE_TO_METHOD_NAME[op]
+            rop_name = _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME[op]
+
         if left.st.type == PFLExprType.DATACLASS_OBJECT:
             dcls_type = left.st.get_origin_type_checked()
             op_func = inspect.getattr_static(dcls_type, op_name, None)
@@ -795,7 +803,6 @@ class PFLBinOpBase(PFLExpr):
                 resolved_op_func = op_func
         if resolved_custom_expr is None:
             if right.st.type == PFLExprType.DATACLASS_OBJECT:
-                rop_name = _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME[op]
                 dcls_type = right.st.get_origin_type_checked()
                 op_func = inspect.getattr_static(dcls_type, rop_name, None)
                 if op_func is not None:
@@ -805,7 +812,7 @@ class PFLBinOpBase(PFLExpr):
         if resolved_custom_expr is not None:
             assert resolved_op_func is not None 
             op_func_st = get_parse_cache_checked().cached_parse_func(
-                resolved_op_func, True, self_type=resolved_custom_expr.st.annotype)
+                resolved_op_func, self_type=resolved_custom_expr.st.annotype)
             finfo = op_func_st.get_func_info_checked()
             if not resolved_custom_expr.st.is_stdlib:
                 assert finfo.overloads is None, "custom operator don't support overloads."
@@ -825,7 +832,7 @@ class PFLBinOpBase(PFLExpr):
                 errors: list[str] = []
                 assert len(
                     finfo.args
-                ) == 1, f"custom operator {op_name} must have one arg, but got {len(finfo.args)}"
+                ) == 2, f"custom operator {op_name} must have one non-self arg, but got {len(finfo.args)}"
 
                 for i, overload in enumerate(overload_infos):
                     try:
@@ -833,9 +840,9 @@ class PFLBinOpBase(PFLExpr):
                             st_to_check = left.st
                         else:
                             st_to_check = right.st
-                        st_to_check.check_convertable(overload.args[0].type,
+                        st_to_check.check_convertable(overload.args[1].type,
                                             f"custom operator {op_name} overload {overload} arg")
-                        if st_to_check.is_equal_type(overload.args[0].type):
+                        if st_to_check.is_equal_type(overload.args[1].type):
                             score = 2
                         else:
                             score = 1
@@ -1016,7 +1023,7 @@ class PFLCall(PFLExpr):
 
     is_ctor: Union[Undefined, bool] = undefined
 
-    def check_and_infer_type(self):
+    def check_and_infer_type_with_overload(self) -> tuple[FuncMatchResult[PFLExpr], PFLExprFuncInfo]:
         # validate args
         is_ctor: bool = False
         if self.func.st.type == PFLExprType.DATACLASS_TYPE:
@@ -1024,37 +1031,74 @@ class PFLCall(PFLExpr):
             is_ctor = True
         self.is_ctor = is_ctor
         assert self.func.st.type == PFLExprType.FUNCTION or self.func.st.type == PFLExprType.DATACLASS_TYPE, f"func must be function/dcls, but got {self.func.st.type}"
-        overloads: list[tuple[list[PFLExprFuncArgInfo], bool, PFLExprInfo]] = []
+        overloads: list[tuple[FuncMatchResult[PFLExpr], PFLExprFuncInfo]] = []
         is_const = False
         if self.func.st.type == PFLExprType.FUNCTION:
             finfo = self.func.st.get_func_info_checked()
             overload_infos = [self.func.st.get_func_info_checked()]
             if finfo.overloads is not None:
                 overload_infos.extend(finfo.overloads)
+            # overload match may fail. 
+            match_errors: list[str] = []
             for overload_info in overload_infos:
-                last_is_vaarg = False
-                if overload_info.args:
-                    last_is_vaarg = overload_info.args[-1].is_vaargs
-                typevar_map = self._get_typevar_map(overload_info, last_is_vaarg)
+                try:
+                    match_res = self._get_matched_args(overload_info)
+                except BaseException as e:
+                    # traceback.print_exc()
+                    match_errors.append(str(e))
+                    continue
+                typevar_map = self._get_typevar_map(match_res)
                 if typevar_map:
                     overload_info = overload_info.typevar_substitution(typevar_map)
+                    # generic type of overload_info is resolved, so we create match res again.
+                    match_res = self._get_matched_args(overload_info)
                 assert overload_info.return_type is not None, f"func {self.func} overload {overload_info} must have return type"
-                overloads.append((overload_info.args, last_is_vaarg, overload_info.return_type))
+                overloads.append((match_res, overload_info))
+            if not overloads:
+                error_msg = f"func {self.func.st} overloads not match args {[a.st for a in self.args]} kws {self.keys}. match errors:\n"
+                for e in match_errors:
+                    error_msg += f"  - {e}\n"
+                print(error_msg)
+                raise ValueError(error_msg)
+
         elif self.func.st.type == PFLExprType.DATACLASS_TYPE:
-            # TODO: currently we only support dataclasses init as constexpr function 
             is_const = PFLExpr.all_constexpr(*self.args)
             if not is_undefined(self.vals):
                 is_const &= PFLExpr.all_constexpr(*self.vals)
-            func_args, return_type = self.func.st._parse_dataclass_ctor()
-            overloads.append((func_args, False, return_type))
+            if self.func.st.proxy_dcls is not None:
+                fn = inspect.getattr_static(self.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)
+                assert isinstance(fn, staticmethod)
+                func_st = get_parse_cache_checked().cached_parse_func(fn.__func__)
+                assert func_st.func_info is not None 
+                assert func_st.func_info.return_type is not None, "func return type must be annotated"
+                match_res = self._get_matched_args(func_st.func_info)
+                func_info = func_st.func_info
+                # func_args, return_type = func_st.func_info.args, func_st.func_info.return_type
+            else:
+                if self.func.st.is_stdlib:
+                    # stdlib dcls is lazy parsed.
+                    assert self.func.st.annotype is not None 
+                    dcls_st = get_parse_cache_checked().cached_parse_dcls(self.func.st.annotype.origin_type)
+                    func_info = dcls_st.get_func_info_checked()
+                else:
+                    # dcls st func_info store init info if exists 
+                    assert self.func.st.func_info is not None
+                    func_info = self.func.st.func_info
+                assert func_info.return_type is not None
+                if not func_info.is_dcls:
+                    # __init__, need to bound self
+                    func_info = func_info.get_bounded_type(func_info.return_type)
+            match_res = self._get_matched_args(func_info)
+            overloads.append((match_res, func_info))
         else:
             raise NotImplementedError
         errors: list[str] = []
         overload_scores: list[tuple[int, int, PFLExprInfo]] = []
+        # print("overloads", len(overloads))
         for i, overload in enumerate(overloads):
             try:
                 score = self._check_single_overload(overload[0], overload[1])
-                overload_scores.append((score, i, overload[2]))
+                overload_scores.append((score, i, overload[1].return_type))
             except BaseException as e:
                 # traceback.print_exc()
                 errors.append(str(e))
@@ -1102,7 +1146,16 @@ class PFLCall(PFLExpr):
                         self.st._constexpr_data = inspect.getattr_static(self.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)(*args, **kwargs)
                     else:
                         self.st._constexpr_data = self.func.st.get_origin_type_checked()(*args, **kwargs)
+            return overloads[best_idx]
 
+    def _get_matched_args(self, info: PFLExprFuncInfo):
+        args = self.args 
+        kwargs = {}
+        if not isinstance(self.keys, Undefined):
+            assert not isinstance(self.vals, Undefined)
+            for name, a in zip(self.keys, self.vals):
+                kwargs[name] = a
+        return info.match_args_to_sig((args, kwargs))
 
     def _check_typevar_substitution(self, arg_value: PFLExprInfo, func_arg: PFLExprInfo, typevar_map: dict[TypeVar, PFLExprInfo]):
         annotype = func_arg.annotype
@@ -1128,90 +1181,55 @@ class PFLCall(PFLExpr):
                 assert found, f"func {self.func.st} arg {tv}({arg_value}) not match constraints {tv.__constraints__}"
             typevar_map[tv] = dataclasses.replace(arg_value)
 
-    def _get_typevar_map(self, sig_info: PFLExprFuncInfo, last_is_vaarg: bool) -> dict[TypeVar, PFLExprInfo]:
-        func_args = sig_info.args
+    def _get_typevar_map(self, match_res: FuncMatchResult[PFLExpr]) -> dict[TypeVar, PFLExprInfo]:
         res: dict[TypeVar, PFLExprInfo] = {}
-        for i, a in enumerate(self.args):
-            if i >= len(func_args):
-                # TODO should we return or raise error when overloads isn't suitable?
-                return {} 
-            if not last_is_vaarg:
-                func_arg = func_args[i]
-                if func_arg.type.type == PFLExprType.GENERIC_TYPE:
-                    self._check_typevar_substitution(a.st, func_arg.type, res)
-            else:
-                if i < len(func_args) - 1:
-                    func_arg = func_args[i]
-                    right = func_arg
-                else:
-                    right = func_args[-1]
-                if right.type.type == PFLExprType.GENERIC_TYPE:
-                    self._check_typevar_substitution(a.st, right.type, res)
-
-        if not isinstance(self.keys, Undefined):
-            assert not isinstance(self.vals, Undefined)
-            for name, a in zip(self.keys, self.vals):
-                for arg in func_args:
-                    assert arg.arg_name is not None
-                    if name == arg.arg_name:
-                        if arg.type.type == PFLExprType.GENERIC_TYPE:
-                            self._check_typevar_substitution(a.st, arg.type, res)
-                        break
+        for arg_info, arg_expr in match_res.args:
+            if not is_undefined(arg_expr):
+                if arg_info.type.type == PFLExprType.GENERIC_TYPE:
+                    self._check_typevar_substitution(arg_expr.st, arg_info.type, res)
+        if match_res.vararg is not None:
+            vararg_info = match_res.vararg[0]
+            if vararg_info.type.type == PFLExprType.GENERIC_TYPE:
+                for arg_expr in match_res.vararg[1]:
+                    self._check_typevar_substitution(arg_expr.st, vararg_info.type, res)
+        if match_res.var_kwarg is not None:
+            kwarg_info = match_res.var_kwarg[0]
+            if kwarg_info.type.type == PFLExprType.GENERIC_TYPE:
+                for _, arg_expr in match_res.var_kwarg[1].items():
+                    self._check_typevar_substitution(arg_expr.st, kwarg_info.type, res)
         return res
 
-    def _match_arg_sts_to_sig(self, func_args: list[PFLExprFuncArgInfo], last_is_vaarg: bool):
-        if last_is_vaarg:
-            assert isinstance(self.keys, Undefined), "don't support use kwargs with *args"
-        if not last_is_vaarg:
-            assert len(self.args) <= len(
-                func_args
-            ), f"func {self.func.st} expect {len(func_args)} args, but got {len(self.args)}"
-        res: list[tuple[PFLExprFuncArgInfo, list[PFLExpr]]] = []
-        for func_arg in func_args:
-            res.append((func_arg, []))
-        for i, a in enumerate(self.args):
-            if not last_is_vaarg:
-                res[i][1].append(a)
-            else:
-                if i < len(func_args) - 1:
-                    res[i][1].append(a)
-                else:
-                    res[-1][1].append(a)
-        if not isinstance(self.keys, Undefined):
-            assert not isinstance(self.vals, Undefined)
-            for name, a in zip(self.keys, self.vals):
-                found = False
-                for i, arg in enumerate(func_args):
-                    assert arg.arg_name is not None
-                    if name == arg.arg_name:
-                        found = True 
-                        res[i][1].append(a)
-                        break
-                if not found:
-                    raise ValueError(f"can't find arg {name} in function {self.func.st}")
-        return res
 
-    def _check_single_overload(self, func_args: list[PFLExprFuncArgInfo], last_is_vaarg: bool):
-        if last_is_vaarg:
-            assert isinstance(self.keys, Undefined), "don't support use kwargs with *args"
-        if not last_is_vaarg:
-            assert len(self.args) <= len(
-                func_args
-            ), f"func {self.func.st} expect {len(func_args)} args, but got {len(self.args)}"
-        func_arg_st_param = self._match_arg_sts_to_sig(func_args, last_is_vaarg)
+    def _check_single_overload(self, match_res: FuncMatchResult[PFLExpr], func_info: PFLExprFuncInfo) -> int:
         match_score = 0
-        cnt = 0
-        for func_arg, args in func_arg_st_param:
-            if not args:
-                if not func_arg.is_vaargs:
-                    assert not is_undefined(func_arg.default), f"func overload {func_args} arg {func_arg.arg_name}({cnt}) has no matched value and default value"
-            for a in args:
-                a.st.check_convertable(func_arg.type, f"func {func_args} arg {func_arg.arg_name}({cnt})")
-                if a.st.is_equal_type(func_arg.type):
+        for arg_info, arg_expr in match_res.args:
+            log_prefix = f"func {func_info.name} arg {arg_info.arg_name}"
+            if not is_undefined(arg_expr):
+                arg_expr.st.check_convertable(arg_info.type, log_prefix)
+                if arg_expr.st.is_equal_type(arg_info.type):
                     match_score += 2
                 else:
                     match_score += 1
-            cnt += 1
+            else:
+                assert not is_undefined(arg_info.default_type), f"{log_prefix} don't have both arg value and default value"
+        if match_res.vararg is not None:
+            vararg_info = match_res.vararg[0]
+            log_prefix = f"func {func_info.name} vararg {vararg_info.arg_name}"
+            for arg_expr in match_res.vararg[1]:
+                arg_expr.st.check_convertable(vararg_info.type, log_prefix)
+                if arg_expr.st.is_equal_type(vararg_info.type):
+                    match_score += 2
+                else:
+                    match_score += 1
+        if match_res.var_kwarg is not None:
+            kwarg_info = match_res.var_kwarg[0]
+            log_prefix = f"func {func_info.name} varkwarg {kwarg_info.arg_name}"
+            for _, arg_expr in match_res.var_kwarg[1].items():
+                arg_expr.st.check_convertable(kwarg_info.type, log_prefix)
+                if arg_expr.st.is_equal_type(kwarg_info.type):
+                    match_score += 2
+                else:
+                    match_score += 1
         return match_score
 
     def consteval(self):
@@ -1353,22 +1371,37 @@ class PFLAttribute(PFLExpr):
                 assert self.value.st.type == PFLExprType.DATACLASS_TYPE # when proxy cls available, it must be dataclass type
                 field_types = AnnotatedType.get_dataclass_fields_and_annotated_types_static(self.value.st.proxy_dcls)
                 dcls_type = self.value.st.proxy_dcls
+                field_keys = field_types.keys()
             else:
                 assert self.value.st.annotype is not None, "dataclass must have annotype"
                 assert self.value.st.annotype.is_dataclass_type()
-                field_types = self.value.st.annotype.get_dataclass_fields_and_annotated_types(
-                )
-                dcls_type = self.value.st.annotype.origin_type
+                assert self.value.st.dcls_info is not None, f"dataclass {self.value.st.annotype} must have dcls_info"
+                # field_types = self.value.st.annotype.get_dataclass_fields_and_annotated_types(
+                # )
+                field_types = {}
+                field_keys = self.value.st.dcls_info._arg_name_to_idx.keys()
 
-            if self.attr in field_types:
-                field_annotype, field = field_types[self.attr]
-                new_st = PFLExprInfo.from_annotype(field_annotype,
-                                                   is_type=False)
+                dcls_type = self.value.st.annotype.origin_type
+            if self.attr in field_keys:
+                if self.value.st.proxy_dcls is not None:
+                    field_annotype, field = field_types[self.attr]
+                    field_default = field.default
+                    new_st = PFLExprInfo.from_annotype(field_annotype,
+                                                    is_type=False)
+                else:
+                    assert self.value.st.dcls_info is not None 
+                    field_arg = self.value.st.dcls_info.get_parsed_field(self.attr)
+                    field_default = field_arg.default
+                    new_st = field_arg.type.shallow_copy()
                 if self.value.st.type == PFLExprType.DATACLASS_TYPE:
                     # access constant
-                    default = field.default
+                    default = field_default
                     assert default is not dataclasses.MISSING, f"access field {self.attr} by type must have default value, we treat it as constant"
                     new_st._constexpr_data = default
+                else:
+                    if not is_undefined(self.value.st._constexpr_data):
+                        new_st._constexpr_data = getattr(self.value.st._constexpr_data, self.attr, undefined)
+                # print(self.attr, self.value.st._constexpr_data, new_st._constexpr_data)
                 self.st = new_st
             else:
                 # check attr is ClassVar (namespace alias)
@@ -1379,28 +1412,29 @@ class PFLAttribute(PFLExpr):
                     self.st = new_st
                 else:
                     unbound_func = getattr(dcls_type, self.attr)
-                    is_prop = False
-                    if isinstance(unbound_func, property):
-                        assert unbound_func.fget is not None 
-                        unbound_func = unbound_func.fget
-                        is_prop = True
-                        assert self.value.st.is_stdlib, "don't support property in user defined dataclass"
+                    prep_res = get_parse_cache_checked()._var_preproc(unbound_func)
+                    is_prop = prep_res.is_property
+                    unbound_func = prep_res.value
+                    if is_prop:
+                        assert self.value.st.is_stdlib, "don't support @property in user defined dataclass"
                     is_method_def = False
                     if self.value.st.type == PFLExprType.DATACLASS_OBJECT:
                         # TODO handle classmethod
-                        ignore_self = not isinstance(unbound_func, staticmethod)
+                        is_method_def = not isinstance(unbound_func, staticmethod)
                         self_type = self.value.st.annotype
                         self_st_type = self.value.st
-                        is_method_def = ignore_self
                     else:
-                        ignore_self = False
                         self_type = None
                         self_st_type = None
                         assert inspecttools.isstaticmethod(
                             dcls_type, self.attr
                         ), f"{self.attr} of {dcls_type} must be staticmethod"
                     new_st = get_parse_cache_checked().cached_parse_func(
-                        unbound_func, ignore_self=ignore_self, self_type=self_type)
+                        unbound_func, self_type=self_type,
+                        ext_preproc_res=prep_res)
+                    if self_st_type is not None:
+                        # bound method
+                        new_st = new_st.get_bounded_type(self_st_type)
                     new_finfo = new_st.get_func_info_checked()
                     new_finfo.is_property = is_prop
                     if is_prop:
@@ -1435,7 +1469,7 @@ class PFLAttribute(PFLExpr):
                 raise ValueError(
                     f"attr `{self.attr}` is not supported (defined) in type {self.value.st}")
             assert self.attr in methods, f"not supported attr {self.attr} for type {self.value.st}"
-            new_st = PFLExprInfo.from_signature(methods[self.attr])
+            new_st = PFLExprInfo.from_signature(self.attr, methods[self.attr])
             self.st = new_st
 
     def consteval(self):
@@ -1474,32 +1508,8 @@ class PFLAttribute(PFLExpr):
 class PFLConstant(PFLExpr):
     value: Any
 
-    @staticmethod
-    def _parse_nested_value(value: Any) -> Any:
-        # only support base types or tuple of base types for now.
-        # TODO support custom dataclass
-        if isinstance(value, bool):
-            st = PFLExprInfo(PFLExprType.BOOL)
-        elif isinstance(value, int):
-            st = PFLExprInfo(PFLExprType.NUMBER)
-        elif isinstance(value, float):
-            st = PFLExprInfo(PFLExprType.NUMBER)
-        elif isinstance(value, str):
-            st = PFLExprInfo(PFLExprType.STRING)
-        elif value is None:
-            st = PFLExprInfo(PFLExprType.NONE_TYPE)
-        elif value is ...:
-            st = PFLExprInfo(PFLExprType.ELLIPSIS)
-        elif isinstance(value, Undefined):
-            st = PFLExprInfo(PFLExprType.UNDEFINED_TYPE)
-        elif isinstance(value, tuple):
-            st = PFLExprInfo(PFLExprType.TUPLE, [PFLConstant._parse_nested_value(v) for v in value])
-        else:
-            raise ValueError(f"Unsupported constant value type: {type(value)}")
-        return st 
-
     def check_and_infer_type(self):
-        self.st = PFLConstant._parse_nested_value(self.value)
+        self.st = PFLExprInfo.from_value(self.value)
         if not isinstance(self.value, tuple):
             self.st.annotype = parse_type_may_optional_undefined(type(self.value))
         self.st._constexpr_data = self.value
@@ -1572,14 +1582,14 @@ class PFLSubscript(PFLExpr):
             assert getitem_op_func is not None, f"can't find {getitem_op_name} in custom type {get_qualname_of_type(dcls_type)}. you must define __getitem__ to use subscript"
             ctx = get_parse_context_checked()
             getitem_op_func_st = get_parse_cache_checked().cached_parse_func(
-                getitem_op_func, ignore_self=True, self_type=self.value.st.annotype)
+                getitem_op_func, self_type=self.value.st.annotype)
             finfo = getitem_op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
-            ) == 1, f"custom operator {getitem_op_name} must have {1} arg, but got {len(finfo.args)}"
+            ) == 2, f"custom operator {getitem_op_name} must have 1 non-self arg, but got {len(finfo.args)}"
             if not isinstance(self.slice, Sequence):
                 self.slice.st.check_convertable(
-                    finfo.args[0].type,
+                    finfo.args[1].type,
                     f"custom operator {getitem_op_name}|{getitem_op_func_st} arg")
             assert finfo.return_type is not None, f"custom operator {getitem_op_name}|{getitem_op_func_st} must have return type"
             assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
@@ -1594,10 +1604,10 @@ class PFLSubscript(PFLExpr):
                 setitem_op_func = inspect.getattr_static(dcls_type, setitem_op_name, None)
                 assert setitem_op_func is not None, f"can't find {setitem_op_name} in custom type {get_qualname_of_type(dcls_type)}."
                 setitem_op_func_st = get_parse_cache_checked().cached_parse_func(
-                    setitem_op_func, ignore_self=True, self_type=self.value.st.annotype)
+                    setitem_op_func, self_type=self.value.st.annotype)
                 finfo = setitem_op_func_st.get_func_info_checked()
                 assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
-                assert len(finfo.args) == 2, f"custom operator {setitem_op_name} must have {2} args, but got {len(finfo.args)}"
+                assert len(finfo.args) == 3, f"custom operator {setitem_op_name} must have 2 non-self args, but got {len(finfo.args)}"
                 if not resolved_custom_expr.st.is_stdlib:
                     # enqueue compile
                     creq = ctx.enqueue_func_compile(setitem_op_func, finfo, is_method_def=True, self_type=self.value.st)
@@ -1605,7 +1615,7 @@ class PFLSubscript(PFLExpr):
 
                 if not isinstance(self.slice, Sequence):
                     self.slice.st.check_convertable(
-                        finfo.args[0].type,
+                        finfo.args[1].type,
                         f"custom operator {setitem_op_name}|{setitem_op_func_st} arg")
             else:
                 self._update_std_func_meta(getitem_op_func)
@@ -1784,6 +1794,7 @@ class PFLDict(PFLExpr):
 @dataclasses.dataclass
 class _FuncCompileInfo:
     code: str = ""
+    path: str = "<string>"
     first_lineno: int = 0
     original: Optional[Any] = None
     meta: Optional[PFLCompileFuncMeta] = None
@@ -1805,13 +1816,56 @@ class PFLFunc(PFLAstStmt):
     compile_info: _FuncCompileInfo = dataclasses.field(default_factory=_FuncCompileInfo)
 
     def get_module_import_path(self):
+        return self.get_func_uid_no_spec().split("::")[0]
+
+    def get_func_uid_no_spec(self):
+        assert self.uid != ""
+        uid_parts = UniqueTreeId(self.uid).parts
+        return uid_parts[0]
+
+    def get_define_path(self):
+        return self.compile_info.path
+
+@dataclasses.dataclass
+class _ClassCompileInfo:
+    code: str = ""
+    first_lineno: int = 0
+    original: Optional[Any] = None
+    meta: Optional[PFLCompileFuncMeta] = None
+    path: str = "<string>"
+
+@dataclasses.dataclass(kw_only=True)
+class PFLClass(PFLAstStmt):
+    """PFL Class.  
+    this ast node only store metadata of a class, all methods
+    are stored separately. we can find them by qualname.
+    """
+    name: str
+    st: PFLExprInfo
+    # for user, compiler don't need this.
+    uid: str = ""
+    parent_uid: str = ""
+    init_uid: str = ""
+    post_init_uid: str = ""
+    compile_info: _ClassCompileInfo = dataclasses.field(default_factory=_ClassCompileInfo)
+
+    def get_module_import_path(self):
         assert self.uid != ""
         uid_parts = UniqueTreeId(self.uid).parts
         return uid_parts[0].split("::")[0]
 
+    def get_func_uid_no_spec(self):
+        assert self.uid != ""
+        uid_parts = UniqueTreeId(self.uid).parts
+        return uid_parts[0]
+
+    def get_define_path(self):
+        return self.compile_info.path
+
 @dataclasses.dataclass
 class _ModCompileInfo:
     code: str = ""
+    path: str = "<string>"
 
 @dataclasses.dataclass(kw_only=True)
 class PFLModule(PFLAstNodeBase):
@@ -1820,9 +1874,9 @@ class PFLModule(PFLAstNodeBase):
     compile_info: _ModCompileInfo = dataclasses.field(default_factory=_ModCompileInfo)
 
     def get_all_compiled(self):
-        res: dict[str, PFLFunc] = {}
+        res: dict[str, Union[PFLFunc, PFLClass]] = {}
         for stmt in self.body:
-            if isinstance(stmt, PFLFunc):
+            if isinstance(stmt, (PFLFunc, PFLClass)):
                 res[stmt.uid] = stmt 
         return res 
 
@@ -2118,9 +2172,10 @@ class PFLAstParseError(Exception):
 
 class PFLEvalError(Exception):
 
-    def __init__(self, msg: str, node: PFLAstNodeBase):
+    def __init__(self, msg: str, node: Optional[PFLAstNodeBase], traceback_set: bool = False):
         super().__init__(msg)
         self.node = node
+        self.traceback_set = traceback_set
 
 
 class PFLTreeNodeFinder:

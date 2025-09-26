@@ -39,6 +39,10 @@ class MemoryBlockDesc:
     byte_offset_with_hole = -1
     data_view: Optional[np.ndarray] = None
     indices: dict[str, np.ndarray] = dataclasses.field(default_factory=dict)
+    write_cnt: int = 0
+
+    def is_written(self) -> bool:
+        return self.write_cnt > 0
 
     def __repr__(self):
         return f"Memory[{self.size}|{self.dtype.name}|{self.offset}~{self.offset + self.size}|{self.offset_with_hole}~{self.offset_with_hole + self.size}]"
@@ -214,7 +218,7 @@ class SimMemoryStorage(SimTensorStorage):
         all_masked = map_result.all_masked
         # assert not all_masked
         if all_masked:
-            print("WARNING: all masked load detected.", pointer)
+            # print("WARNING: all masked load detected.", pointer)
             out = empty(pointer.shape, pointer.dtype)
             output_data = out.get_storage_checked().data
             if other is not None:
@@ -340,6 +344,8 @@ class SimMemoryStorage(SimTensorStorage):
                 return old
             return
         block_desc = self.memory_blocks[block_name]
+        # TODO use total byte instead of cnt.
+        block_desc.write_cnt += 1
         block_data = block_desc.get_data_view_checked()
         runner_ctx = get_pfl_runner_state()
         tensor_sim_ctx = get_tensorsim_context()
@@ -366,6 +372,8 @@ class SimMemoryStorage(SimTensorStorage):
         if isinstance(value, SimTensor):
             # WARNING: only write indices when value is Tensor.
             # otherwise unchanged.
+            if value.shape != pointer.shape:
+                value = broadcast_to(value, pointer.shape)
             if value.storage is None:
                 return
             if not block_desc.indices:

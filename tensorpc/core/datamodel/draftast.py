@@ -35,6 +35,7 @@ class DraftASTFuncType(enum.Enum):
     COLOR_NAME = "colorFromName"
     NUMPY_TO_LIST = "npToList"
     NUMPY_GETSUBARRAY = "npGetSubArray"
+    NUMPY_SLICE_FIRST_AXIS = "npSliceFirstAxis"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
@@ -42,7 +43,8 @@ _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.NOT_NULL.value, DraftASTFuncType.WHERE.value,
     DraftASTFuncType.CREATE_ARRAY.value, DraftASTFuncType.CONCAT.value,
     DraftASTFuncType.COLOR_SLICE.value, DraftASTFuncType.COLOR_NAME.value,
-    DraftASTFuncType.NUMPY_TO_LIST.value, DraftASTFuncType.NUMPY_GETSUBARRAY.value
+    DraftASTFuncType.NUMPY_TO_LIST.value, DraftASTFuncType.NUMPY_GETSUBARRAY.value,
+    DraftASTFuncType.NUMPY_SLICE_FIRST_AXIS.value
 }
 
 @dataclasses.dataclass

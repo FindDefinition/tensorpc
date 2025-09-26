@@ -16,6 +16,7 @@ import copy
 from functools import partial
 import inspect
 import io
+import json
 import os
 from pathlib import Path
 import pickle
@@ -25,6 +26,7 @@ from typing import Any, Dict, List, Optional
 import grpc
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_chunk_call_async
+from tensorpc.core.core_io import extract_object_from_data
 from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
 from tensorpc.dock.coretypes import ScheduleEvent, get_unique_node_id
@@ -42,9 +44,11 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.dock.jsonlike import Undefined
 from tensorpc.dock.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
+from tensorpc.utils.uniquename import UniqueNamePool
 from ..client import AppLocalMeta, MasterMeta
 from tensorpc import prim
 from tensorpc.dock.serv_names import serv_names
@@ -160,10 +164,11 @@ class FlowApp:
             special_methods = FlowSpecialMethods(self.app_su.serv_metas)
             if special_methods.create_layout is not None:
                 await self.app._app_run_layout_function(
-                    decorator_fn=special_methods.create_layout.get_binded_fn())
+                    decorator_fn=special_methods.create_layout.get_binded_fn(),
+                    raise_on_fail=True)
                 layout_created = True
             if not layout_created:
-                await self.app._app_run_layout_function()
+                await self.app._app_run_layout_function(raise_on_fail=True)
         else:
             self.app.root._attach(UniqueTreeIdForComp.from_parts([TENSORPC_APP_ROOT_COMP]),
                                   self.app._flow_app_comp_core)
@@ -475,89 +480,6 @@ class FlowApp:
         user_exc = UserMessage.create_error("UNKNOWN", f"AppServiceError: {repr(e)}", ss.getvalue())
         return AppEvent("", {AppEventType.UIException: UIExceptionEvent([user_exc])})
 
-    async def _send_loop(self):
-        # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
-        # so we should just use retry here.
-        shut_task = asyncio.create_task(self.shutdown_ev.wait(), name="app-shutdown-wait")
-        grpc_url = self.master_meta.grpc_url
-        async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
-            send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
-            wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            master_disconnect = 0.0
-            retry_duration = 2.0  # 2s
-            previous_event = AppEvent(self._uid, {})
-            while True:
-                # if send fail, MERGE incoming app events, and send again after some time.
-                # all app event is "replace" in frontend.
-                (done, pending) = await asyncio.wait(
-                    wait_tasks, return_when=asyncio.FIRST_COMPLETED)
-                if shut_task in done:
-                    break
-                ev: AppEvent = send_task.result()
-                if ev.is_loopback:
-                    for k, v in ev.type_to_event.items():
-                        if k == AppEventType.UIEvent:
-                            assert isinstance(v, UIEvent)
-                            await self.app._handle_event_with_ctx(v)
-                    send_task = asyncio.create_task(
-                        self._send_loop_queue.get(), name="app-send_loop_queue-get")
-                    wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-                    continue
-                ts = time.time()
-                # assign uid here.
-                ev.uid = self._uid
-                send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
-                wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-                if master_disconnect >= 0:
-                    previous_event = previous_event.merge_new(ev)
-                    if ts - master_disconnect > retry_duration:
-                        try:
-                            # await self._send_http_event(previous_event)
-                            await self._send_grpc_event_large(
-                                previous_event, robj)
-                            master_disconnect = -1
-                            previous_event = AppEvent(self._uid, {})
-                        except BaseException as e:
-                            # TODO send error event to frontend
-                            traceback.print_exc()
-                            # print("Retry connection Fail.")
-                            master_disconnect = ts
-                else:
-                    try:
-                        # print("SEND", ev.type)
-                        # await self._send_http_event(ev)
-                        await self._send_grpc_event_large(ev, robj)
-                        # print("SEND", ev.type, "FINISH")
-                    except grpc.aio.AioRpcError as e:
-                        traceback.print_exc()
-                        if e.code() in _grpc_status_master_disconnect:
-                            # print("Connection Fail.")
-                            # remote call may fail by connection broken
-                            # when disconnect to master/remote worker, enter slient mode
-                            previous_event = previous_event.merge_new(ev)
-                            master_disconnect = ts
-                        else:
-                            # other error. send exception
-                            exc_ev = self._create_exception_event(e)
-                            exc_ev.uid = self._uid
-                            try:
-                                await self._send_grpc_event_large(exc_ev, robj)
-                            except BaseException as e:
-                                traceback.print_exc()
-                    except BaseException as e:
-                        traceback.print_exc()
-                        exc_ev = self._create_exception_event(e)
-                        exc_ev.uid = self._uid
-                        try:
-                            await self._send_grpc_event_large(exc_ev, robj)
-                        except BaseException as e:
-                            traceback.print_exc()
-                # trigger sent event here.
-                if ev.sent_event is not None:
-                    ev.sent_event.set()
-
-        self._send_loop_task = None
-
     async def _send_loop_stream_main(self, robj: tensorpc.AsyncRemoteManager):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
@@ -583,7 +505,6 @@ class FlowApp:
                         self._send_loop_queue.get(), name="app-send_loop_queue-get")
                     wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                     continue
-                ts = time.time()
                 # assign uid here.
                 ev.uid = self._uid
                 send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
@@ -594,7 +515,13 @@ class FlowApp:
                 # trigger sent event here.
                 if ev.sent_event is not None:
                     ev.sent_event.set()
-
+                if ev._after_send_callback is not None:
+                    try:
+                        res = ev._after_send_callback()
+                        if inspect.iscoroutine(res):
+                            await res
+                    except:
+                        traceback.print_exc()
         except:
             traceback.print_exc()
             raise

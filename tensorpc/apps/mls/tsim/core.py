@@ -238,17 +238,30 @@ def _get_default_sim_dtype_mapping() -> dict[DTypeEnum, np.dtype]:
         DTypeEnum.bfloat16: np.dtype(np.float32),
     }
 
+class TensorSimMode(enum.IntEnum):
+    FULL = 0
+    # only run logic (integer/boolean) ops, skip floating point ops such as matmul.
+    # raise error if you convert float to int/boolean.
+    # WARNING: we will reuse float buffer if possible, user shouldn't rely on float values.
+    LOGIC_ONLY = 1
+    # only run shape/dtype inference.
+    META_ONLY = 2
+
 @dataclasses.dataclass 
 class TensorSimConfig:
-    meta_only: bool = False
     default_int_dtype: DTypeEnum = DTypeEnum.int64
     default_float_dtype: DTypeEnum = DTypeEnum.float32
     record_memory: bool = False
+    mode: TensorSimMode = TensorSimMode.FULL
     # used to override dtype runned in numpy.
     # e.g. {DTypeEnum.float8: np.float32} can be used
     # to run float8 as float32 in numpy.
     dtype_mapping: dict[DTypeEnum, np.dtype] = dataclasses.field(
         default_factory=_get_default_sim_dtype_mapping)
+
+    @property 
+    def meta_only(self):
+        return self.mode == TensorSimMode.META_ONLY
 
 @dataclasses.dataclass 
 class TensorSimIoMatrixInfo:
@@ -375,3 +388,9 @@ def get_flush_sim_io_ops() -> list[TensorSimIoOp]:
     res = ctx._recorded_io_ops.copy()
     ctx._recorded_io_ops.clear()
     return res
+
+def get_sim_mode() -> TensorSimMode:
+    ctx = _TENSOR_SIM_CONTEXT.get()
+    if ctx is None:
+        return TensorSimMode.FULL
+    return ctx.cfg.mode

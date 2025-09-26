@@ -83,8 +83,9 @@ class ComputeFlowApp:
         init_cmd = ""
         if "init_cmd" in secret:
             init_cmd = f"{secret['init_cmd']}\n"
+        port = secret.get("port", 22)
         self.ssh_desc = SSHConnDesc(
-            "localhost:22", secret["username"], secret["password"], init_cmd=init_cmd)
+            f"localhost:{port}", secret["username"], secret["password"], init_cmd=init_cmd)
         executors = [
             SSHCreationNodeExecutor("remote", ResourceDesc(), self.ssh_desc, [
                 init_cmd
@@ -93,7 +94,7 @@ class ComputeFlowApp:
         self.cflow = ComputeFlow(executors=executors)
         return self.cflow
 
-    # @mark_did_mount
+    @mark_did_mount
     async def _mount(self):
         # create debug flow for fast evaluation
         draft = self.cflow.dm.get_draft_type_only()

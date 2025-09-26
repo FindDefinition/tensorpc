@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional, Union
 from typing_extensions import Literal
 
 from tensorpc.core.moduleid import get_qualname_of_type
-from .parser import DoubleGlob, IndexItem, ModuleStackQuery, ModuleWeightQuery, PartialGlob, PlainItem, QueryItem, SingleQuery, ModuleVariableQuery, TypeItem, parse_pmql
+from .parser import DoubleGlob, IdentityItem, IndexItem, ModuleStackQuery, ModuleWeightQuery, PartialGlob, PlainItem, QueryItem, SingleQuery, ModuleVariableQuery, TypeItem, parse_pmql
 
 
 class SpecialModuleType(enum.IntEnum):
@@ -112,6 +112,8 @@ def _do_query_on_module_dict_no_double_star(cur_items: list[dict[str, Any]], que
                         qname = next_item["__type_qualname__"]
                         if item.id in qname:
                             new_items.append(next_item)
+            if isinstance(item, IdentityItem):
+                new_items.append(cur_item)
         cur_items = new_items
     return cur_items
 

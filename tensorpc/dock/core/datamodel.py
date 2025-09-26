@@ -52,11 +52,16 @@ class DataModelUpdateSelf:
     partialTailArgs: Union[Undefined, list[Any]] = undefined
 
 @dataclasses.dataclass
+class DataModelPeriodUpdateSelf(DataModelUpdateSelf):
+    period: float = 1000.0
+
+@dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
     # include all datamodel methods marked with pfl function.
     pfllibrary: Union[Undefined, bytes] = undefined
     modelUpdateCallbacks: Union[Undefined, dict[str, DataModelUpdateSelf]] = undefined
+    modelPeriodCallbacks: Union[Undefined, dict[str, DataModelPeriodUpdateSelf]] = undefined
 
 def _print_draft_change_event(ev: DraftChangeEvent, draft_expr_str_dict):
     print("DraftChangeEvent:")
@@ -366,7 +371,15 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             "type": 2,
             "model": self.model,
         }
-        return await self.send_and_wait(self.create_comp_event(msg))
+        if self._flow_exclude_field_ids:
+            facto_fn = partial(_dict_facto_with_exclude, 
+                            exclude_field_ids=self._flow_exclude_field_ids)
+            msg_dict = asdict_no_deepcopy_with_field(
+                        _DataclassSer(obj=msg),
+                        dict_factory_with_field=facto_fn)
+            return await self.send_and_wait(self.create_comp_event_raw(msg_dict))
+        else:
+            return await self.send_and_wait(self.create_comp_event(msg))
         # await self.send_and_wait(self.update_event(dataObject=self.model))
 
     def get_draft_from_object(self) -> _T:
@@ -410,12 +423,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     async def _update_with_jmes_ops_backend(self, ops: list[DraftUpdateOp]):
         # convert dynamic node to static in op to avoid where op.
-        ops = ops.copy()
-        for i in range(len(ops)):
-            op = ops[i]
-            if op.has_dynamic_node_in_main_path():
-                ops[i] = stabilize_getitem_path_in_op_main_path(
-                    op, self.get_draft_type_only(), self._model)
         if not self._draft_change_event_handlers:
             apply_draft_update_ops(self.model, ops)
         else:
@@ -522,9 +529,16 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         # convert dynamic node to static in op to avoid where op.
-        ops = await self._update_with_jmes_ops_backend(ops)
-        # any modify on external field won't be included in frontend.
+        ops = ops.copy()
+        for i in range(len(ops)):
+            op = ops[i]
+            if op.has_dynamic_node_in_main_path():
+                ops[i] = stabilize_getitem_path_in_op_main_path(
+                    op, self.get_draft_type_only(), self._model)
         frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        backend_ops = [dataclasses.replace(op) for op in ops]
+
+        # any modify on external field won't be included in frontend.
         # any external field data will be omitted in opData.
         if self._flow_exclude_field_ids:
             facto_fn = partial(_dict_facto_with_exclude, 
@@ -534,6 +548,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             _DataclassSer(obj=op.opData),
                             dict_factory_with_field=facto_fn)
                 op.opData = cast(dict, opData)["obj"]
+        frontend_ops = [op.to_data_deepcopied() for op in frontend_ops]
+        ops = await self._update_with_jmes_ops_backend(backend_ops)
         if need_freeze:
             frontend_ops = [op.freeze_assign_data(is_json_only) for op in frontend_ops]
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
@@ -604,7 +620,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     def connect_draft_store(self,
                             path: str,
-                            backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]]):
+                            backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]],
+                            clear_previous: bool = False):
         """Register event handler that store and send update info to your backend.
 
         **WARNING**: this function must be called before mount.
@@ -618,7 +635,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._store = DraftFileStorage(path, model, backend_map) # type: ignore
         self.event_after_mount.on(
             partial(self._fetch_internal_data_from_draft_store,
-                    store=self._store))
+                    store=self._store,
+                    clear_previous=clear_previous))
         self.event_draft_update.on(
             partial(self._handle_draft_store_update,
                     store=self._store))
@@ -630,11 +648,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     def _clear_draft_store_status(self):
         self._draft_store_data_fetched = False
 
-    async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage):
+    async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage, clear_previous: bool = False):
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
         prev_model = self._model
-        self._model = await store.fetch_model()
+        if clear_previous:
+            await store.write_whole_model(self._model)
+        else:
+            self._model = await store.fetch_model()
         self.props.dataObject = self._model
         # user should init their external fields in this event.
         # TODO should we capture draft here?

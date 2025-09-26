@@ -223,8 +223,8 @@ class ComputeFlow(mui.FlexBox):
                 global_container,
             ]).prop(flex=1),
         ])
-        self.dm.connect_draft_store(f"__tensorpc_cflow", AppDraftFileStoreBackend())
-
+        # self.dm.connect_draft_store(f"__tensorpc_cflow", AppDraftFileStoreBackend(), clear_previous=False)
+        # print(self.dm.model)
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
         flow_with_editor.bind_fields(visibles=f"array(`true`, {flow_draft.show_editor})")

@@ -14,8 +14,9 @@ import time
 import traceback
 import types
 import triton
+from tensorpc.apps.mls.logger import LOGGER
 from tensorpc.apps.mls.tsim import get_tensorsim_context_checked
-from tensorpc.apps.mls.tsim.core import get_tensorsim_context
+from tensorpc.apps.mls.tsim.core import TensorSimConfig, TensorSimMode, get_tensorsim_context
 from tensorpc.apps.mls.tsim.tensor import SimTensor
 from tensorpc.core import pfl
 from typing_extensions import Literal, Self
@@ -28,6 +29,7 @@ import triton.language as tl
 
 from tensorpc.core.annolib import Undefined
 from tensorpc.core.moduleid import get_object_type_from_module_id
+from tensorpc.core.pfl.constants import PFL_COMPILE_META_ATTR
 from tensorpc.core.pfl.core import PFLInlineRunEnv
 from tensorpc.utils.package_finder import find_submodule_from_file
 
@@ -129,7 +131,7 @@ class ConstExpr:
                       mapped=tl.pointer_type)
 @dataclasses.dataclass
 class pointer_type:
-    dtype: int
+    element_ty: int
 
 
 @pfl.register_pfl_std(mapped_name="TritonBlockTensor", backend="triton")
@@ -180,13 +182,13 @@ class Tensor:
         else:
             if self._wrapped.storage is None:
                 return PointerTensor(
-                    tsim.create_pointer_tensor_meta(dtype.dtype,
+                    tsim.create_pointer_tensor_meta(dtype.element_ty,
                                                     self._wrapped.shape))
             ctx = tsim.get_tensorsim_context_checked()
             assert ctx.global_mem is not None, "pointer of pointer must have global memory set."
             return PointerTensor(
                 tsim.create_pointer_tensor(
-                    dtype.dtype,
+                    dtype.element_ty,
                     self._wrapped.get_storage_checked().data, ctx.global_mem))
 
     @staticmethod
@@ -573,6 +575,21 @@ class Tensor:
                                                                         1])
         return res
 
+    def cumsum(self, axis: int) -> Self:
+        return self._replace_wrapped(self._wrapped.cumsum(axis))
+
+    # @staticmethod
+    # def max_with_indices(input: Tensor, axis: int, return_indices_tie_break_left: bool = True, keep_dims: bool = False) -> Tensor: ...
+
+    # @staticmethod
+    # def min_with_indices(input: Tensor, axis: int, return_indices_tie_break_left: bool = True, keep_dims: bool = False) -> Tensor: ...
+
+    def sum(self,
+            axis: int,
+            keep_dims: bool = False,
+            dtype: Optional[int] = None) -> Self:
+        assert isinstance(axis, int)
+        return self._replace_wrapped(self._wrapped.sum(axis, keep_dims))
 
 @pfl.register_pfl_std(mapped_name="TritonPointerTensor", backend="triton")
 @dataclasses.dataclass
@@ -1190,6 +1207,20 @@ class triton_std_math:
         else:
             return res_wrapped
 
+    @staticmethod
+    def _clamp_infer(fn: Callable, x: pfl.PFLExprInfo, min: pfl.PFLExprInfo,
+                     max: pfl.PFLExprInfo) -> Optional[pfl.PFLMetaInferResult]:
+        if x.has_metadata():
+            return pfl.PFLMetaInferResult(x.metadata_checked)
+        return None 
+
+    @staticmethod
+    @pfl.configure_std_func(meta_infer=_clamp_infer)
+    def clamp(x: Tensor, min: Union[Tensor, int, float],
+              max: Union[Tensor, int, float]) -> Tensor:
+        min_wrapped = min._wrapped if isinstance(min, Tensor) else min
+        max_wrapped = max._wrapped if isinstance(max, Tensor) else max
+        return Tensor(tsim.clamp(x._wrapped, min_wrapped, max_wrapped))
 
 @pfl.register_pfl_std(mapped_name="tl", backend="triton", mapped=tl)
 @dataclasses.dataclass
@@ -1410,6 +1441,7 @@ class triton_std(triton_std_math):
     @staticmethod
     @overload
     def store(pointer: BlockPointer, value: Tensor,
+              mask: Optional[Tensor] = None,
               boundary_check: Optional[tuple[int, ...]] = None,
              cache_modifier: Optional[str] = None,
              eviction_policy: Optional[str] = None) -> None:
@@ -1442,6 +1474,16 @@ class triton_std(triton_std_math):
             pointer._wrapped.store([0, 0], value_wrapped)
             return
         pointer._wrapped.store(value_wrapped, mask_wrapped)
+    
+    @staticmethod
+    def static_range(start: int,
+              stop: Optional[int] = None,
+              step: Optional[int] = None) -> range:
+        if stop is not None:
+            if step is not None:
+                return range(start, stop, step)
+            return range(start, stop)
+        return range(start)
 
     @staticmethod
     def range(start: int,
@@ -1455,6 +1497,7 @@ class triton_std(triton_std_math):
                 return range(start, stop, step)
             return range(start, stop)
         return range(start)
+
 
     @staticmethod
     @overload
@@ -1533,6 +1576,10 @@ class triton_std(triton_std_math):
         assert isinstance(axis, int)
         return Tensor(input._wrapped.min(axis, keep_dims))
 
+    @staticmethod
+    def cumsum(input: Tensor, axis: int) -> Tensor:
+        return Tensor(input._wrapped.cumsum(axis))
+
     # @staticmethod
     # def max_with_indices(input: Tensor, axis: int, return_indices_tie_break_left: bool = True, keep_dims: bool = False) -> Tensor: ...
 
@@ -1576,7 +1623,7 @@ class triton_std(triton_std_math):
         if isinstance(dtype_val, pointer_type):
             if x.type == pfl.PFLExprType.NUMBER:
                 assert isinstance(dtype._constexpr_data, pointer_type)
-                res = tsim.create_pointer_scalar_meta(dtype_val.dtype)
+                res = tsim.create_pointer_scalar_meta(dtype_val.element_ty)
                 if res.is_floating():
                     return pfl.PFLMetaInferResult(PointerScalarFloat(res))
                 else:
@@ -1592,7 +1639,7 @@ class triton_std(triton_std_math):
         assert dtype.has_constexpr_data(
         ), "dtype must have constexpr data for cast operation"
         if isinstance(dtype._constexpr_data, pointer_type):
-            dtype_enum = tsim.DTypeEnum(dtype._constexpr_data.dtype)
+            dtype_enum = tsim.DTypeEnum(dtype._constexpr_data.element_ty)
             if x.type == pfl.PFLExprType.NUMBER:
                 if dtype_enum.is_floating_type():
                     return PointerScalarFloat
@@ -1626,7 +1673,7 @@ class triton_std(triton_std_math):
                 assert isinstance(dtype_val, pointer_type)
                 ctx = tsim.get_tensorsim_context_checked()
                 assert ctx.global_mem is not None, "pointer of pointer must have global memory set."
-                res = tsim.create_pointer_scalar(dtype_val.dtype, int(x),
+                res = tsim.create_pointer_scalar(dtype_val.element_ty, int(x),
                                                  ctx.global_mem)
                 if res.is_floating():
                     return PointerScalarFloat(res)
@@ -1895,6 +1942,10 @@ class triton_std(triton_std_math):
         assert res is not None 
         return res
 
+    @staticmethod
+    def debug_barrier() -> None:
+        return None 
+
 T = TypeVar("T")
 
 def _triton_anno_transform(inferred: pfl.PFLExprInfo,
@@ -1995,11 +2046,35 @@ def _validate_and_convert_triton_kwargs(
             # TODO add support for string constexpr
             assert isinstance(
                 v, (int, float,
-                    bool, str)), f"Unsupported type {type(v)} for triton kwargs."
+                    bool, str, types.NoneType)), f"Unsupported type {type(v)} for triton kwargs."
             new_kwargs[k] = v
 
     return new_kwargs, global_mem
 
+def _convert_triton_real_kwargs_to_np(
+    kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    import torch
+    from triton.tools.tensor_descriptor import TensorDescriptor as TTTensorDescriptor
+
+    new_kwargs: dict[str, Any] = {}
+    for k, v in kwargs.items():
+        if isinstance(v, torch.Tensor):
+            if v.dtype == torch.bfloat16:
+                v = v.to(torch.float32)
+            new_kwargs[k] = v.cpu().numpy()
+        elif isinstance(v, TTTensorDescriptor):
+            data = v.base 
+            if data.dtype == torch.bfloat16:
+                data = data.to(torch.float32)
+            new_kwargs[k] = HostTensorDescriptor(data.cpu().numpy(), v.block_shape)
+        else:
+            # TODO add support for string constexpr
+            assert isinstance(
+                v, (int, float,
+                    bool, str, types.NoneType)), f"Unsupported type {type(v)} for triton kwargs."
+            new_kwargs[k] = v
+    return new_kwargs
 
 def _create_metadata_from_triton_kwargs(
         kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -2034,7 +2109,7 @@ def _create_metadata_from_triton_kwargs(
             # TODO add support for string constexpr
             assert isinstance(
                 v, (int, float,
-                    bool, str)), f"Unsupported type {type(v)} for triton kwargs {k}."
+                    bool, str, types.NoneType)), f"Unsupported type {type(v)} for triton kwargs {k}."
             new_kwargs[k] = v
 
     return new_kwargs
@@ -2081,20 +2156,29 @@ def mark_triton_compilable(
         sim_kwargs: Optional[dict[str, Any]] = None,
         real_kwargs: Optional[dict[str, Any]] = None,
         raw_fn: Optional[Callable[[dict[str, Any]], Any]] = None) -> Union[T, Callable[[T], T]]:
-
+    
     def wrapper(fn_wrapped: T) -> T:
         prev_meta: Optional[TritonSimFuncMeta] = getattr(
             fn_wrapped, pfl.PFL_COMPILE_META_ATTR, None)
         inline_run_env_fn_ = inline_run_env_fn
-        # if inline_run_env_fn_ is not None:
-        #     inline_run_env_fn_ = partial(_handle_triton_inline_data, inline_run_env_fn_)
+        # get constexpr args
+        sig = inspect.signature(cast(Callable, fn_wrapped))
+        constexpr_args_set = set()
+        for param in sig.parameters.values():
+            if param.annotation is tl.constexpr:
+                constexpr_args_set.add(param.name)
+        if not constexpr_args_set:
+            constexpr_args = None
+        else:
+            constexpr_args = constexpr_args_set
         if prev_meta is None:
             prev_meta = TritonSimFuncMeta(["triton"],
                                           inline_run_env_fn_,
                                           is_template=is_template,
                                           sim_kwargs=sim_kwargs,
                                           real_kwargs=real_kwargs,
-                                          raw_fn=raw_fn)
+                                          raw_fn=raw_fn,
+                                          constexpr_args=constexpr_args)
             setattr(fn_wrapped, pfl.PFL_COMPILE_META_ATTR, prev_meta)
         else:
             prev_meta.backends = ["triton"]
@@ -2103,6 +2187,8 @@ def mark_triton_compilable(
             prev_meta.sim_kwargs = sim_kwargs
             prev_meta.real_kwargs = real_kwargs
             prev_meta.raw_fn = raw_fn
+            prev_meta.constexpr_args = constexpr_args
+            prev_meta.validate()
 
         return cast(T, fn_wrapped)
 
@@ -2117,7 +2203,7 @@ class TritonInlineRunEnv(PFLInlineRunEnv):
     raw_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-class TritonKernelRunner(pfl.PFLAsyncRunner):
+class TritonKernelRunner(pfl.PFLAsyncRunnerV2):
 
     def __init__(self, library: pfl.PFLLibrary, inline_env: PFLInlineRunEnv):
         super().__init__(library)
@@ -2421,13 +2507,15 @@ def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
     fn[sim_info.grid_size_for_triton](**kwargs_tt)
     # compare result here.
     run_info = _get_triton_compile_infos(fn, kwargs_tt)
+    if run_info.metadata["n_spills"] > 0:
+        LOGGER.warning(f"{run_info.metadata['n_spills']} register spills detected. try eliminate it to increase performance.")
     print(run_info.best_config)
     for k, ref in sim_info.ref_results.items():
         if isinstance(ref, HostTensorDescriptor):
             ref_data = ref.data
         else:
             ref_data = ref
-        res = kwargs_th[k].cpu().numpy()
+        res = kwargs_th[k].float().cpu().numpy()
         if sim_info.postprocess_fn is not None:
             res = sim_info.postprocess_fn(k, res)
         
@@ -2459,13 +2547,11 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
         assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
         try:
-
             for j in range(warming_up):
                 fn[sim_info.grid_size_for_triton](**kwargs_tt)
         except:
             traceback.print_exc()
             continue 
-
         stream = torch.cuda.current_stream()
         for j in range(run_cnt):
             start_ev = torch.cuda.Event(enable_timing=True)
@@ -2480,10 +2566,12 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
             print(f"{fn_name} {kw_set_name}(triton) dur: {duration:.3f} ms")
             time.sleep(0.01)
         if raw_fn is not None:
+            kwargs_th_ = kwargs_th.copy()
+            kwargs_th_["__triton_kwargs__"] = kwargs_tt
             for j in range(warming_up):
-                raw_fn(kwargs_th)
+                raw_fn(kwargs_th_)
             for j in range(run_cnt):
-                duration = raw_fn(kwargs_th)
+                duration = raw_fn(kwargs_th_)
                 if isinstance(duration, float):
                     duration_dict = {
                         "raw": duration,
@@ -2497,6 +2585,9 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                     f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
                 print(f"{fn_name}(raw) dur: {raw_dur_msg}")
         run_info = _get_triton_compile_infos(fn, kwargs_tt)
+        if run_info.metadata["n_spills"] > 0:
+            LOGGER.warning(f"{run_info.metadata['n_spills']} register spills detected. try eliminate it to increase performance.")
+        
         print("nregs:", run_info.metadata["n_regs"], "nspills:", run_info.metadata["n_spills"], 
               "shared:", run_info.metadata["shared"], "cfg", run_info.best_config)
     assert run_info is not None
@@ -2510,10 +2601,34 @@ def _may_triton_func(fn: Any) -> Any:
     return fn
 
 
+def _triton_var_preproc(fn: Any) -> pfl.PFLProcessedVarMeta:
+    if isinstance(fn, triton.runtime.Autotuner):
+        fn = fn.fn
+    is_triton_jit = False
+    if isinstance(fn, triton.JITFunction):
+        is_triton_jit = True
+        res = fn.fn
+    else:
+        res = fn
+    proc_res = pfl.default_pfl_var_proc(res)
+    fn_metadata = proc_res.compilable_meta
+    if is_triton_jit and fn_metadata is None:
+        meta = pfl.PFLCompileFuncMeta(is_template=True)
+        proc_res.compilable_meta = meta
+    return proc_res 
+
+def _tt_assign_check(tgt_meta: Any, src_meta: Any):
+    if isinstance(tgt_meta, Tensor) and isinstance(
+            src_meta, Tensor):
+        assert tgt_meta._wrapped.dtype == src_meta._wrapped.dtype, \
+            f"Assigning {src_meta} to {tgt_meta} with different dtype {src_meta._wrapped.dtype} != {tgt_meta._wrapped.dtype}"
+        assert tgt_meta._wrapped.shape == src_meta._wrapped.shape, \
+            f"Assigning {src_meta} to {tgt_meta} with different shape {src_meta._wrapped.shape} != {tgt_meta._wrapped.shape}"
+
 def parse_triton_compilable_to_runner(
     fn: Union[triton.JITFunction, triton.runtime.Autotuner],
     do_meta_eval: bool = True,
-    module_code_getter: Optional[Callable[[Any], str]] = None
+    module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None
 ) -> TritonKernelRunner:
     if isinstance(fn, triton.runtime.Autotuner):
         fn = fn.fn
@@ -2545,15 +2660,147 @@ def parse_triton_compilable_to_runner(
     lib = pfl.parse_func_to_pfl_library(fn.fn,
                                         backend="triton",
                                         external_anno=(external_annos, None),
-                                        func_unwrapper=_may_triton_func,
-                                        var_preproc=_may_triton_func,
+                                        var_preproc=_triton_var_preproc,
                                         anno_transform=_triton_anno_transform,
-                                        module_code_getter=module_code_getter,
+                                        module_code_path_getter=module_code_path_getter,
                                         constexpr_args=constexpr_args)
     if do_meta_eval:
-        evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib)
+        evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib, assign_check=_tt_assign_check)
         evaluator.eval_total_tree(fn.fn, meta_args)
     return TritonKernelRunner(lib, env)
+
+class TritonRuntimeRunnerNested:
+    def __init__(self, grid: Union[tuple[int, ...], Callable[[Any], tuple[int, ...]]], 
+            fn: Union[triton.JITFunction, triton.runtime.Autotuner],
+            autotune_cfg_idx: int = 0,
+            module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
+            mode: TensorSimMode = TensorSimMode.FULL):
+        self._autotuner: Optional[triton.runtime.Autotuner] = None
+        self._autotune_cfg_idx = autotune_cfg_idx
+        if isinstance(fn, triton.runtime.Autotuner):
+            self._autotuner = fn
+            fn = fn.fn
+        self.fn = fn
+        self.grid = grid
+        self._fn_unwrapped = inspect.unwrap(fn.fn)
+        sig = inspect.signature(self._fn_unwrapped)
+        self._mode = mode
+
+        self._sig = sig
+        self._module_code_path_getter = module_code_path_getter
+
+    async def _run_sim(self,  *args, **kwargs):
+        import torch
+        from triton.tools.tensor_descriptor import TensorDescriptor as TTTensorDescriptor
+        triton_reserved_param_names = {
+            "maxnreg", "num_warps", "num_stages", "num_ctas"
+        }
+        kwargs_without_reserved = {k: v for k, v in kwargs.items() if k not in triton_reserved_param_names}
+        kwargs_reserved = {k: v for k, v in kwargs.items() if k in triton_reserved_param_names}
+        mapped_kwargs = self._sig.bind(*args, **kwargs_without_reserved).arguments
+        mapped_kwargs.update(kwargs_reserved)
+        mapped_kwargs = self._get_autotuner_run_kwargs(mapped_kwargs)
+        kwargs_cpu = mapped_kwargs.copy()
+        kwargs_cpu = _convert_triton_real_kwargs_to_np(kwargs_cpu)
+        kwargs_for_sim, global_mem = _validate_and_convert_triton_kwargs(kwargs_cpu)
+        assert global_mem is not None 
+        grid_may_fn = self.grid
+        if inspect.isfunction(grid_may_fn):
+            grid_size = grid_may_fn(mapped_kwargs)
+        else:
+            grid_size = cast(tuple[int, ...], grid_may_fn)
+        type_hints = get_type_hints(self._fn_unwrapped)
+        constexpr_args = {}
+        for k, v in type_hints.items():
+            if v is tl.constexpr:
+                constexpr_args[k] = kwargs_for_sim[k]
+        meta_args = _create_metadata_from_triton_kwargs(kwargs_for_sim)
+        external_annos = {k: type(v) for k, v in meta_args.items()}
+        do_meta_eval = True
+        lib = pfl.parse_func_to_pfl_library(self.fn.fn,
+                                            backend="triton",
+                                            external_anno=(external_annos, None),
+                                            var_preproc=_triton_var_preproc,
+                                            anno_transform=_triton_anno_transform,
+                                            module_code_path_getter=self._module_code_path_getter,
+                                            constexpr_args=constexpr_args)
+        if do_meta_eval:
+            evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib, assign_check=_tt_assign_check)
+            evaluator.eval_total_tree(self.fn.fn, meta_args)
+        runner = pfl.PFLAsyncRunnerV2(lib)
+        fn_no_jit = _may_triton_func(self.fn.fn)
+        lib = runner._library
+        jkl_arr_tuple = np.meshgrid(
+            range(grid_size[0]), range(grid_size[1]), range(grid_size[2]),
+            indexing="ij")
+        jkl_arr = np.stack(jkl_arr_tuple, axis=-1).reshape(
+            -1, 3)
+        sim_cfg = TensorSimConfig(mode=self._mode)
+        for jkl in jkl_arr:
+            j = int(jkl[0])
+            k = int(jkl[1])
+            l = int(jkl[2])
+            with tsim.enter_tensorsim_context([j, k, l],
+                                                grid_size,
+                                                global_mem=global_mem,
+                                                cfg=sim_cfg):
+                kwargs_cloned = kwargs_for_sim.copy()
+                # clone pointer tensor because it may be modified in place
+                for key, v in kwargs_cloned.items():
+                    if isinstance(
+                            v, (PointerTensor, PointerScalarFloat,
+                                PointerScalarInt, TensorDescriptor)):
+                        kwargs_cloned[key] = v.clone()
+                await (runner.run_func(
+                    lib.get_compiled_unit_specs(fn_no_jit)[0].uid,
+                    kwargs_cloned))
+        # print(kwargs_for_sim)
+        if self._mode == TensorSimMode.FULL:
+            for k, v in mapped_kwargs.items():
+                is_written = False
+                if k in global_mem.memory_blocks:
+                    is_written = global_mem.memory_blocks[k].is_written()
+                if is_written:
+                    if isinstance(v, torch.Tensor):
+                        v.copy_(torch.from_numpy(global_mem.memory_blocks[k].get_data_view_checked())) 
+                    elif isinstance(v, TTTensorDescriptor):
+                        v.base.copy_(torch.from_numpy(global_mem.memory_blocks[k].get_data_view_checked()))
+        else:
+            assert self._mode == TensorSimMode.LOGIC_ONLY
+            # for logic only, we run real triton kernel instead of sim.
+            # logic only is used to check memory access and detect invalid
+            # reduce on empty value.
+            if self._autotuner is not None:
+                self._autotuner[self.grid](*args, **kwargs)
+            else:
+                self.fn[self.grid](*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        asyncio.run(self._run_sim(*args, **kwargs))
+
+    def _get_autotuner_run_kwargs(self, mapped_kwargs):
+        if self._autotuner is None:
+            return mapped_kwargs
+        if hasattr(self._autotuner, "best_config"):
+            config = self._autotuner.best_config
+        else:
+            config = self._autotuner.configs[self._autotune_cfg_idx]
+        full_nargs = {**mapped_kwargs, **config.all_kwargs()}
+        if config.pre_hook is not None:
+            config.pre_hook(full_nargs)
+        return full_nargs
+
+
+class TritonRuntimeRunner:
+    def __init__(self, fn: Union[triton.JITFunction, triton.runtime.Autotuner], 
+            autotune_cfg_idx: int = 0,
+            mode: TensorSimMode = TensorSimMode.FULL):
+        self.fn = fn
+        self._autotune_cfg_idx = autotune_cfg_idx
+        self._mode = mode
+
+    def __getitem__(self, grid):
+        return TritonRuntimeRunnerNested(grid, self.fn, mode=self._mode) 
 
 @dataclasses.dataclass
 class Duration:

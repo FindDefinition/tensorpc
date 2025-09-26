@@ -20,6 +20,7 @@ class Label:
     offsetX: float = 0
     offsetY: float = 0
 
+FONTSIZE_WIDTH_APPROX = 0.7
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class MatrixBase:
@@ -98,6 +99,22 @@ class Matrix(MatrixBase):
     hovered: bool = False
 
     @classmethod 
+    def empty(cls):
+        return cls(
+            name="",
+            width=1,
+            height=1,
+            widthVis=1,
+            heightVis=1,
+            widthLayout=1,
+            heightLayout=1,
+            shape=[1, 1],
+            offsetX=0.0, 
+            offsetY=0.0,
+        )
+
+
+    @classmethod 
     def from_array(cls, name: str, arr: np.ndarray, padding: int = 2, transposed: bool = False, label_with_shape: bool = True):
         return cls.from_shape(name, list(arr.shape), padding, transposed, label_with_shape)
 
@@ -122,7 +139,7 @@ class Matrix(MatrixBase):
             transposed=transposed,
         )
 
-        desc_length = res.get_desc_length(label_with_shape)
+        desc_length = res.get_desc_length(label_with_shape) * FONTSIZE_WIDTH_APPROX
         layout_w, layout_h = res.get_vis_wh(padding=2)
         res.widthLayout = layout_w
         res.heightLayout = layout_h
@@ -605,7 +622,7 @@ def layout_table_inplace(table: list[list[Optional[Union[Label, Matrix]]]], elem
                 continue 
             if isinstance(cell, Label):
                 # string cell, use font height to determine size.
-                layout_wh[i, j] = (len(cell.text) * cell.fontSize + elem_padding * 2, cell.fontSize + elem_padding * 2)
+                layout_wh[i, j] = (len(cell.text) * cell.fontSize * FONTSIZE_WIDTH_APPROX + elem_padding * 2, cell.fontSize + elem_padding * 2)
             elif isinstance(cell, Matrix):
                 # matrix cell, use matrix size.
                 vis_wh = cell.get_vis_wh(padding=elem_padding)

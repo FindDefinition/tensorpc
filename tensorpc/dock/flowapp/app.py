@@ -525,7 +525,8 @@ class App:
         with_code_editor: bool = True,
         reload: bool = False,
         decorator_fn: Optional[Callable[[], Union[mui.LayoutType,
-                                                  mui.FlexBox]]] = None):
+                                                  mui.FlexBox]]] = None,
+        raise_on_fail: bool = False):
         self.root._prevent_add_layout = False
         prev_comps = self.__previous_error_sync_props.copy()
         prev_user_states = self.__previous_error_persist_state.copy()
@@ -592,15 +593,25 @@ class App:
                 "app_create_layout failed!!! check your app_create_layout. if "
                 "you are using reloadable app, just check and save your app code!"
             )
-            await self._queue.put(
-                AppEvent(
-                    "", {
-                        AppEventType.UIException:
-                        ev,
-                        AppEventType.UpdateLayout:
-                        LayoutEvent(
-                            self._get_fallback_layout(fbm, with_code_editor))
-                    }))
+            if raise_on_fail:
+                await self._queue.put(
+                    AppEvent(
+                        "", {
+                            AppEventType.UIException:
+                            ev,
+                        }))
+
+                raise e
+            else:
+                await self._queue.put(
+                    AppEvent(
+                        "", {
+                            AppEventType.UIException:
+                            ev,
+                            AppEventType.UpdateLayout:
+                            LayoutEvent(
+                                self._get_fallback_layout(fbm, with_code_editor))
+                        }))
             return
         if not new_is_flex:
             if isinstance(res, Sequence):

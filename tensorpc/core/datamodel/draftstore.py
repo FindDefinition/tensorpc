@@ -218,10 +218,11 @@ class DraftMongoStoreBackend(DraftFileStoreBackendBase):
         coll.delete_many({"key": {"$regex": f"^{path_p.name}/"}})
 
 class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
-    def __init__(self, root: Path, with_bak: bool = False, verbose_fs: bool = False):
+    def __init__(self, root: Path, with_bak: bool = False, verbose_fs: bool = False, read_only: bool = False):
         self._root = root
         self._with_bak = with_bak
         self._verbose_fs = verbose_fs
+        self._read_only = read_only
     
     def _get_abs_path(self, path: str, with_bak: bool = False) -> Path:
         if with_bak:
@@ -255,6 +256,8 @@ class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
                 return None 
 
     async def write(self, path: str, data: Any) -> None:
+        if self._read_only:
+            return 
         t = time.time()
         path_p = self._get_abs_path(path)
         path_p_parent = path_p.parent 
@@ -271,6 +274,8 @@ class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
 
     async def update(self, path: str, ops: list[DraftUpdateOp]) -> None:
         # for in-memory store, avoid store and frontend share same dict.
+        if self._read_only:
+            return 
         ops = [
             dataclasses.replace(o, opData=json.loads(json.dumps(o.opData)))
             for o in ops
@@ -287,6 +292,8 @@ class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
             await self.write(path, data)
 
     async def remove(self, path: str) -> None:
+        if self._read_only:
+            return 
         path_p = self._get_abs_path(path)
         path_p.unlink()
         if self._with_bak:
@@ -305,6 +312,8 @@ class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
         return res
 
     async def remove_folder(self, path: str) -> Any:
+        if self._read_only:
+            return 
         path_p = Path(path)
         if not path_p.exists():
             return False
@@ -933,20 +942,33 @@ def get_splitted_update_model_ops(root_path: str, ops: list[DraftUpdateOp],
 
 
 class DraftFileStorage(Generic[T]):
-
+    """A draft storage for a dataclass model.
+    It support splitted storage for different fields in different backend.
+    It also support splitted storage for map field, each key-value pair in the map will be stored in different file.
+    Args:
+        root_path: The root path of the draft storage.
+        model: The dataclass model instance.
+        store: The draft storage backend or a dict of backend with store id as key.
+        main_store_id: The main store id, default is "".
+        batch_write_duration: The duration (in seconds) to batch write operations, default is -1 (no batch).
+        read_only: If True, the storage is read-only and write operations will be ignored.
+            usually used in distributed app that only master node can write draft storage.
+    """
     def __init__(self,
                  root_path: str,
                  model: T,
                  store: Union[DraftStoreBackendBase,
                               Mapping[str, DraftStoreBackendBase]],
                  main_store_id: str = "",
-                 batch_write_duration: int = -1):
+                 batch_write_duration: int = -1,
+                 read_only: bool = False):
         self._root_path = root_path
         if not isinstance(store, Mapping):
             store = {main_store_id: store}
         self._store = store
         self._model = model
         self._main_store_id = main_store_id
+        self._read_only = read_only
         assert dataclasses.is_dataclass(model)
         all_store_ids = set(self._store.keys())
         self._mashumaro_decoder: Optional[BasicDecoder] = None
@@ -1048,6 +1070,8 @@ class DraftFileStorage(Generic[T]):
         return self._has_splitted_store
 
     async def write_whole_model(self, new_model: T):
+        if self._read_only:
+            return
         assert type(new_model) == type(self._model)
         self._model = new_model
         await self._write_whole_model(self._store, new_model, self._exclude_field_ids,
@@ -1057,17 +1081,18 @@ class DraftFileStorage(Generic[T]):
     async def fetch_model(self) -> T:
         data = await self._store[self._main_store_id].read(self._root_path)
         if data is None:
-            # not exist, create new
-            if self._has_splitted_store:
-                await self._write_whole_model(self._store,
-                                             self._model,
-                                             self._exclude_field_ids,
-                                             self._root_path,
-                                             main_store_id=self._main_store_id)
-            else:
-                await self._store[self._main_store_id
-                                  ].write(self._root_path,
-                                          as_dict_no_undefined(self._model))
+            if not self._read_only:
+                # not exist, create new
+                if self._has_splitted_store:
+                    await self._write_whole_model(self._store,
+                                                self._model,
+                                                self._exclude_field_ids,
+                                                self._root_path,
+                                                main_store_id=self._main_store_id)
+                else:
+                    await self._store[self._main_store_id
+                                    ].write(self._root_path,
+                                            as_dict_no_undefined(self._model))
             return self._model
         if self._has_splitted_store:
             await self._fetch_model_recursive(type(self._model), data,
@@ -1079,15 +1104,18 @@ class DraftFileStorage(Generic[T]):
             dec, _ = self._lazy_get_mashumaro_coder()
             self._model: T = dec.decode(data)  # type: ignore
         # write whole model to clean unused (ignored, external) fields
-        await self._write_whole_model(self._store,
-                                     self._model,
-                                     self._exclude_field_ids,
-                                     self._root_path,
-                                     main_store_id=self._main_store_id)
+        if not self._read_only:
+            await self._write_whole_model(self._store,
+                                        self._model,
+                                        self._exclude_field_ids,
+                                        self._root_path,
+                                        main_store_id=self._main_store_id)
         return self._model
 
     async def update_model(self, root_draft: Any, ops: list[DraftUpdateOp]):
         if not ops:
+            return 
+        if self._read_only:
             return 
         assert isinstance(root_draft, DraftBase)
         # convert dynamic node to static in op

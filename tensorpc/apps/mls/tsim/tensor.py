@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
 from tensorpc.apps.mls.tsim.core import DTypeEnum, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType
+from .core import get_sim_mode, TensorSimMode
 
 @dataclasses.dataclass
 class SimTensorStorage:
@@ -181,6 +182,7 @@ class SimTensorStorage:
         new_storage.indices = {}
         new_shape: list[int] = []
         permute_inds: list[int] = []
+        permute_shape: list[int] = []
         for i, dim in enumerate(self.data.shape):
             if i in axes:
                 if keepdims:
@@ -188,17 +190,21 @@ class SimTensorStorage:
             else:
                 new_shape.append(dim)
                 permute_inds.append(i)
-        old_ndim = self.data.ndim
-        for k in self.indices.keys():
-            indices, element_shape = self.get_unflatten_inds(k)
-            permute_inds_cur = permute_inds.copy()
-            pure_inds_ndim = self.data.ndim - indices.ndim
-            permute_inds_cur.extend(c + old_ndim for c in range(pure_inds_ndim))
-            permute_inds_cur.extend(axes)
-            new_indices = indices.transpose(permute_inds_cur)
-            new_indices_shape = list(new_data.shape) + list(new_indices.shape)[-len(axes) - pure_inds_ndim:]
-            new_indices = new_indices.reshape(new_indices_shape) 
-            new_storage.indices[k] = (cast(np.ndarray, new_indices)).reshape(-1, *element_shape)
+                permute_shape.append(dim)
+        # old_ndim = self.data.ndim
+        # for k in self.indices.keys():
+        #     indices, element_shape = self.get_unflatten_inds(k)
+        #     permute_inds_cur = permute_inds.copy()
+        #     pure_inds_ndim = self.data.ndim - indices.ndim
+        #     permute_inds_cur.extend(c + old_ndim for c in range(pure_inds_ndim))
+        #     permute_inds_cur.extend(axes)
+        #     new_indices = indices.transpose(permute_inds_cur)
+        #     new_indices_shape = list(new_data.shape) + list(new_indices.shape)[-len(axes) - pure_inds_ndim:]
+        #     print("!!!", k, element_shape, indices.shape, permute_inds, new_indices.shape, new_indices_shape)
+        #     new_indices = new_indices.reshape(new_indices_shape) 
+        #     new_storage.indices[k] = (cast(np.ndarray, new_indices)).reshape(-1, *permute_shape)
+        #     new_storage.get_unflatten_inds(k)
+        # print("WTFWTF", new_data.shape, self.data.shape, {k: v.shape for k, v in new_storage.indices.items()})
         new_storage.data = new_data
         return new_storage
 
@@ -206,6 +212,16 @@ class SimTensorStorage:
         new_data = np.concatenate((self.data, *[o.data for o in other_list]), axis=axis)
         # TODO use full-element-trace instead of indices system. no need to implement indices here.
         new_storage = dataclasses.replace(self, data=new_data, indices={})
+        return new_storage
+
+    def broadcast_to(self, new_shape: Sequence[int]) -> Self:
+        new_data = np.broadcast_to(self.data, new_shape)
+        new_storage = dataclasses.replace(self, data=new_data)
+        new_storage.indices = {}
+        for k in self.indices.keys():
+            indices, element_shape = self.get_unflatten_inds(k)
+            new_indices = np.broadcast_to(indices, (*new_shape, *element_shape))
+            new_storage.indices[k] = new_indices.reshape(-1, *element_shape)
         return new_storage
 
 @dataclasses.dataclass
@@ -374,19 +390,32 @@ class SimTensorBase:
         res.storage = new_storage
         return res
 
+    def cumsum(self, dim: int):
+        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
+            return dataclasses.replace(self)
+        new_data = np.cumsum(self.storage.data, axis=dim)
+        new_storage = self.storage.clone()
+        new_storage.data = new_data
+        res = dataclasses.replace(self, shape=list(map(int, new_data.shape)))
+        res.storage = new_storage
+        return res
+
     def _unary_base(self, op_type: UnaryOpType) -> Self:
         if self.storage is None:
             return dataclasses.replace(self, shape=list(map(int, self.shape)))
-        if op_type == UnaryOpType.UADD:
-            new_data = +self.storage.data
-        elif op_type == UnaryOpType.USUB:
-            new_data = -self.storage.data
-        elif op_type == UnaryOpType.NOT:
-            new_data = ~self.storage.data
-        elif op_type == UnaryOpType.INVERT:
-            new_data = np.invert(self.storage.data)
+        if get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating():
+            new_data = self.storage.data
         else:
-            raise ValueError(f"Unsupported unary operation: {op_type}")
+            if op_type == UnaryOpType.UADD:
+                new_data = +self.storage.data
+            elif op_type == UnaryOpType.USUB:
+                new_data = -self.storage.data
+            elif op_type == UnaryOpType.NOT:
+                new_data = ~self.storage.data
+            elif op_type == UnaryOpType.INVERT:
+                new_data = np.invert(self.storage.data)
+            else:
+                raise ValueError(f"Unsupported unary operation: {op_type}")
         new_storage = dataclasses.replace(self.storage, data=new_data)
         res = dataclasses.replace(self, shape=list(map(int, new_data.shape)))
         res.storage = new_storage
@@ -418,11 +447,12 @@ class SimTensorBase:
                 pointer_dtype = other.dtype
                 res_replace_tgt = other
                 assert self.is_integer() or self.is_unsigned(), "Pointer tensor can only be operated with integer or unsigned tensor"
-
         if is_pointer:
             assert op_type in (BinOpType.ADD, BinOpType.SUB), "Pointer tensors can only be added or subtracted"
-        if self.storage is None:
+        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
             if isinstance(other, SimTensorBase):
+                if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+                    assert other.is_floating()
                 if op_type == BinOpType.MATMUL:
                     assert len(self.shape) >= 2 and len(other.shape) >= 2
                     new_shape_no_mm = np.broadcast_shapes(self.shape[:-2], other.shape[:-2])
@@ -446,8 +476,15 @@ class SimTensorBase:
                     raise NotImplementedError
                 new_shape = self.shape
                 new_dtype = self.dtype_promotion(self.dtype, other_dtype)
-            return dataclasses.replace(res_replace_tgt, shape=list(map(int, new_shape)), dtype=new_dtype)
+            if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+                new_data = np.empty(new_shape, dtype=self.dtype_to_np(new_dtype))
+                new_storage = SimTensorStorage(data=new_data, indices={})
+            else:
+                new_storage = None
+            return dataclasses.replace(res_replace_tgt, shape=list(map(int, new_shape)), dtype=new_dtype, storage=new_storage)
         if isinstance(other, SimTensorBase):
+            if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+                assert not other.is_floating()
             assert other.storage is not None 
             other_data = other.storage.data
             # new_dtype = self.dtype_promotion(self.dtype, other.dtype)
@@ -506,6 +543,9 @@ class SimTensorBase:
             return res
 
     def _compare_base(self, other: Union[Self, int, float, bool], op_type: CompareType) -> Self:
+        # TODO how to support compare mask in logic only mode?
+        if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+            assert not self.is_floating()
         if self.storage is None:
             if isinstance(other, SimTensorBase):
                 new_shape = np.broadcast_shapes(self.shape, other.shape)
@@ -516,6 +556,9 @@ class SimTensorBase:
                 new_dtype = self.dtype
             return dataclasses.replace(self, shape=list(map(int, new_shape)), dtype=new_dtype)
         if isinstance(other, SimTensorBase):
+            if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+                assert not other.is_floating()
+
             assert other.storage is not None 
             new_shape = np.broadcast_shapes(self.shape, other.shape)
             other_data = other.storage.data
@@ -667,7 +710,12 @@ class SimTensor(SimTensorBase):
                 new_shape.append(dim)
             elif keepdims:
                 new_shape.append(1)
-        res = dataclasses.replace(self, shape=new_shape)
+        if get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating():
+            new_data = np.empty(new_shape, dtype=self.dtype_to_np(self.dtype))  # type: ignore
+            new_storage = SimTensorStorage(data=new_data, indices={})
+        else:
+            new_storage = None
+        res = dataclasses.replace(self, shape=new_shape, storage=new_storage)
         return res
 
     def _reduce_base(self, rtype: NumpyReduceType, axis: Optional[Union[Sequence[int], int]] = None, keepdims: bool = False) -> Self:
@@ -681,7 +729,9 @@ class SimTensor(SimTensorBase):
             axis = tuple([axis])
         elif isinstance(axis, Sequence):
             axis = tuple(axis)
-        if self.storage is None:
+        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
+            # logic only mode don't support argmax/argmin.
+            assert rtype != NumpyReduceType.ARGMAX and rtype != NumpyReduceType.ARGMIN, "argmax/argmin is not supported in logic only mode"
             return self._reduce_meta_only(axis, keepdims)
         else:
             if rtype == NumpyReduceType.SUM:
@@ -948,9 +998,8 @@ def broadcast_to(tensor: SimTensor, shape: Sequence[int]) -> SimTensor:
         # only meta inference is supported
         new_shape = np.broadcast_shapes(tensor.shape, shape)
         return dataclasses.replace(tensor, shape=list(map(int, new_shape)))
-    new_data = np.broadcast_to(tensor.storage.data, shape)
-    new_storage = dataclasses.replace(tensor.storage, data=new_data)
-    return dataclasses.replace(tensor, shape=list(map(int, new_data.shape)), storage=new_storage)
+    new_storage = tensor.storage.broadcast_to(shape)
+    return dataclasses.replace(tensor, shape=list(map(int, new_storage.data.shape)), storage=new_storage)
 
 def arange(start: int, stop: Optional[int] = None, step: int = 1, dtype: int = DTypeEnum.int64) -> SimTensor:
     """

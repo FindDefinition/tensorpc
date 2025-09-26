@@ -287,7 +287,6 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         args: ExceptionParam,
     ) -> bool:
         handled = False
-
         with self._lock:
             funcs = list(self._exc_event_handlers.values())
         if not funcs:

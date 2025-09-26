@@ -81,3 +81,6 @@ def maximum(x: Union[int, float, bool, SimTensor], y: Union[int, float, bool, Si
 
 def minimum(x: Union[int, float, bool, SimTensor], y: Union[int, float, bool, SimTensor]):
     return _extend_bin_op(_ExtendBinOpType.MINIMUM, x, y)
+
+def clamp(x: SimTensor, min: Union[int, float, SimTensor], max: Union[int, float, SimTensor]) -> SimTensor:
+    return maximum(minimum(x, max), min)

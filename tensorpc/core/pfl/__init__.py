@@ -14,14 +14,17 @@ from .constants import (PFL_COMPILE_META_ATTR, PFL_FUNC_ANNO_META_ATTR,
                         PFL_STDLIB_FUNC_META_ATTR)
 from .core import (PFLCompileFuncMeta, PFLExprInfo, PFLExprType,
                    PFLInlineRunEnv, PFLMetaInferResult, PFLParseConfig,
-                   PFLVariableMeta, configure_std_func,
+                   PFLVariableMeta, PFLProcessedVarMeta, configure_std_func,
                    get_parse_cache_checked, get_parse_context, mark_meta_infer,
-                   mark_pfl_compilable, register_backend, get_compilable_meta)
+                   mark_pfl_compilable, register_backend, get_compilable_meta,
+                   PFLTemplateFnSpecMeta, PFLTemplateFnSpecArgsMeta)
 from .evaluator import (PFLAsyncRunner, PFLRunnerStateType,
-                        PFLStaticEvaluator, consteval_expr)
+                        PFLStaticEvaluator, consteval_expr,
+                        PFLAsyncRunnerV2)
 from .parser import (ast_dump, iter_child_nodes, parse_expr_to_df_ast,
                      parse_func_to_pfl_ast, parse_func_to_pfl_library,
-                     pfl_ast_to_dict, PFLParser, PFLLibrary)
+                     pfl_ast_to_dict, default_pfl_var_proc, 
+                     PFLParser, PFLLibrary)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                       NodeVisitor, PFLAnnAssign, PFLArg, PFLArray, PFLAssign,
                       PFLAstNodeBase, PFLAstStmt, PFLASTType, PFLAttribute,
@@ -31,7 +34,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
                       PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder,
                       PFLUnaryOp, PFLWhile, UnaryOpType, unparse_pfl_ast,
                       unparse_pfl_ast_to_lines, unparse_pfl_expr, walk,
-                      SourceLocType, PFLTreeExprFinder)
+                      SourceLocType, PFLTreeExprFinder, PFLClass)
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
                       register_pfl_std, register_pfl_builtin_proxy,
                       compiler_remove_optional)

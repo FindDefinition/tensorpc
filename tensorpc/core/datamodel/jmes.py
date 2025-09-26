@@ -2,9 +2,12 @@ import enum
 from typing import Any, Union
 import jmespath 
 from jmespath import functions
+import jmespath.lexer
 from jmespath.parser import ParsedResult
+from jmespath.visitor import TreeInterpreter
 import numpy as np
 from tensorpc.utils.perfetto_colors import create_slice_name, perfetto_string_to_color
+from jmespath.compat import with_repr_method
 
 class FrontendReservedKeys(enum.Enum):
     """reserved keys that exists in frontend
@@ -89,7 +92,15 @@ class _JMESCustomFunctions(functions.Functions):
         if isinstance(obj, np.ndarray):
             if obj.ndim == 0:
                 return None
-            return obj[index:index+1]
+            return obj[index]
+        return None 
+
+    @functions.signature({'types': []}, {'types': ["number"]}, {'types': ["number"]})
+    def _func_npSliceFirstAxis(self, obj, start, end):
+        if isinstance(obj, np.ndarray):
+            if obj.ndim == 0:
+                return None
+            return obj[start:end]
         return None 
 
     @functions.signature({'types': []}, {'types': ["number"], 'variadic': True})
@@ -118,11 +129,55 @@ class _JMESCustomFunctions(functions.Functions):
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 
+# workaround for ternary operator support in jmespath
+# https://github.com/jmespath-community/python-jmespath/pull/33
+
+jmespath.parser.Parser.BINDING_POWER["question"] = 2
+jmespath.parser.Parser.BINDING_POWER["or"] = 3
+jmespath.parser.Parser.BINDING_POWER["and"] = 4
+jmespath.lexer.Lexer.SIMPLE_TOKENS["?"] = "question"
+
+def _ternary_operator(condition, left, right):
+    return {"type": "ternary_operator", "children": [condition, left, right]}
+
+class _JMESTreeInterpreterExtend(TreeInterpreter):
+    def visit_ternary_operator(self, node, value):
+        condition = node['children'][0]
+        evaluation = self.visit(condition, value)
+
+        if self._is_false(evaluation):
+            falsyNode = node['children'][2]
+            return self.visit(falsyNode, value)
+        else:
+            truthyNode = node['children'][1]
+            return self.visit(truthyNode, value)
+
+class _JMESParserExtend(jmespath.parser.Parser):
+    """add ternary operator support to jmespath parser.
+    """
+    def _token_led_question(self, condition):
+        left = self._expression()
+        self._match('colon')
+        right = self._expression()
+        return _ternary_operator(condition, left, right)
+
+    def _parse(self, expression, options=None):
+        res = super()._parse(expression, options)
+        return _ParsedResultExtend(res.expression, res.parsed)
+
+@with_repr_method
+class _ParsedResultExtend(ParsedResult):
+    def search(self, value, options=None):
+        evaluator = _JMESTreeInterpreterExtend(options)
+        return evaluator.evaluate(self.parsed, value)
 
 def compile(expression: str) -> ParsedResult:
-    return jmespath.compile(expression, options=_JMES_EXTEND_OPTIONS) # type: ignore
+    return _JMESParserExtend().parse(expression, options=_JMES_EXTEND_OPTIONS)
+    # return jmespath.compile(expression, options=_JMES_EXTEND_OPTIONS) # type: ignore
 
 def search(expression: Union[str, ParsedResult], data: dict) -> Any:
     if isinstance(expression, ParsedResult):
         return expression.search(data, options=_JMES_EXTEND_OPTIONS)
-    return jmespath.search(expression, data, options=_JMES_EXTEND_OPTIONS)
+    return compile(expression, _JMES_EXTEND_OPTIONS).search(data, options=_JMES_EXTEND_OPTIONS)
+
+    # return jmespath.search(expression, data, options=_JMES_EXTEND_OPTIONS)

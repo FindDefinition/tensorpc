@@ -20,6 +20,8 @@ from tensorpc.dock.core.appcore import Event, EventDataType
 from tensorpc.dock.core.common import handle_standard_event
 from tensorpc.core.datamodel.typemetas import RangedFloat, RangedInt
 from tensorpc.dock.components.mui import (Image as MUIImage, PointerEventsProperties, MUIComponentType)
+from pydantic import field_validator, model_validator
+from typing_extensions import Self
 
 from .base import (PyDanticConfigForNumpy, NumberType, ThreeBasicProps, ThreeComponentBase, Object3dBaseProps, Vector3Type, 
     Object3dWithEventBase, InteractableProps, ValueType, ThreeContainerBase, ThreeComponentType,
@@ -664,7 +666,9 @@ class ImageProps(Object3dBaseProps, InteractableProps):
     toneMapped: Union[bool, Undefined] = undefined
     transparent: Union[bool, Undefined] = undefined
     opacity: Union[NumberType, Undefined] = undefined
-
+    # if image isn't dynamic, you should cache it, otherwise
+    # don't cache it. False by default.
+    cached: Union[bool, Undefined] = undefined
 
 class Image(Object3dWithEventBase[ImageProps]):
 
@@ -868,9 +872,11 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class TextProps(Object3dBaseProps):
-    value: str = ""
+    value: Union[str, list[str]] = ""
+    positions: Union[np.ndarray, list[Vector3Type], Undefined] = undefined
+    colors: Union[np.ndarray, list[Vector3Type], Undefined] = undefined
     characters: Union[str, Undefined] = undefined
     color: Annotated[Union[str, int, Undefined],
                      typemetas.ColorRGB(default="white")] = undefined
@@ -905,12 +911,27 @@ class TextProps(Object3dBaseProps):
     strokeOpacity: Union[NumberType, Undefined] = undefined
     fillOpacity: Union[NumberType, Undefined] = undefined
 
+    @model_validator(mode="after")
+    def _check_value(self) -> Self:
+        if not isinstance(self.value, str):
+            assert isinstance(self.value, list)
+            assert isinstance(self.positions, (list, np.ndarray))
+            assert len(self.value) == len(self.positions), "value and positions must have same length"
+            if isinstance(self.positions, np.ndarray):
+                assert self.positions.ndim == 2 and self.positions.shape[1] in [2, 3], "positions must be [N, 2/3] array"
+        return self
 
 class Text(Object3dWithEventBase[TextProps]):
 
-    def __init__(self, init: str) -> None:
+    def __init__(self, init: Union[str, list[str]], positions: Optional[Union[np.ndarray, list[Vector3Type]]] = None) -> None:
         super().__init__(UIType.ThreeText, TextProps)
+        if isinstance(init, str):
+            assert positions is None 
+        else:
+            assert positions is not None
         self.props.value = init
+        if positions is not None:
+            self.props.positions = positions
 
     def get_sync_props(self) -> dict[str, Any]:
         res = super().get_sync_props()
@@ -918,6 +939,7 @@ class Text(Object3dWithEventBase[TextProps]):
         return res
 
     async def update_value(self, value: str):
+        assert isinstance(value, str)
         self.props.value = value
         upd: dict[str, Any] = {"value": value}
         await self.send_and_wait(self.create_update_event(upd))
@@ -941,7 +963,7 @@ class LineProps(Object3dBaseProps):
     dashed: Union[bool, Undefined] = undefined
     dashSize: Union[NumberType, Undefined] = undefined
     gapSize: Union[NumberType, Undefined] = undefined
-    vertexColors: Union[tuple[NumberType, NumberType, NumberType],
+    vertexColors: Union[tuple[NumberType, NumberType, NumberType], np.ndarray,
                         Undefined] = undefined
     lineWidth: Union[NumberType, Undefined] = undefined
     segments: Union[bool, Undefined] = undefined

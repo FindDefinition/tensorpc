@@ -183,16 +183,6 @@ class _ServiceNames:
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.handle_simple_rpc.__name__)
 
     @property
-    def REMOTE_COMP_MOUNT_APP(self):
-        from tensorpc.dock.serv.remote_comp import RemoteComponentService
-        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.mount_app.__name__)
-
-    @property
-    def REMOTE_COMP_UNMOUNT_APP(self):
-        from tensorpc.dock.serv.remote_comp import RemoteComponentService
-        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.unmount_app.__name__)
-
-    @property
     def REMOTE_COMP_GET_LAYOUT(self):
         from tensorpc.dock.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_layout_dict.__name__)

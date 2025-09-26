@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any, Callable, ForwardRef, Optional, Type, Union, cast
 
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.core.annolib import (AnnotatedArg, AnnotatedType, T_dataclass,
+from tensorpc.core.annolib import (AnnotatedArg, AnnotatedType, DataclassType, T_dataclass,
                                    Undefined,
                                    child_type_generator_with_dataclass,
                                    is_undefined, parse_annotated_function,
@@ -30,14 +30,16 @@ from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE,
                    PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo,
                    PFLExprType, PFLInlineRunEnv, PFLMetaInferResult,
                    PFLParseConfig, PFLParseContext, PFLStdlibFuncMeta,
-                   StaticEvalConfig, enter_parse_context,
+                   StaticEvalConfig, PFLProcessedVarMeta, enter_parse_context,
                    evaluate_annotation_expr, get_compilable_meta,
                    get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
-                   get_parse_context, get_parse_context_checked)
+                   get_parse_context, get_parse_context_checked,
+                   is_dcls_init_defined_by_user,
+                   is_dcls_post_init_defined_by_user)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLArray, PFLAssign, PFLAstNodeBase, PFLAstParseError,
                       PFLAstStmt, PFLASTType, PFLAttribute, PFLAugAssign,
-                      PFLBinOp, PFLBoolOp, PFLBreak, PFLCall, PFLCompare,
+                      PFLBinOp, PFLBoolOp, PFLBreak, PFLCall, PFLClass, PFLCompare,
                       PFLConstant, PFLContinue, PFLDict, PFLEvalError, PFLExpr,
                       PFLExprStmt, PFLFor, PFLFunc, PFLIf, PFLIfExp, PFLModule,
                       PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript,
@@ -90,40 +92,66 @@ _AST_COMPARE_TO_PFL_COMPARE = {
     ast.NotIn: CompareType.NOT_IN,
 }
 
+_ALLOWED_SPEC_AST_TYPES = set([PFLASTType.ARRAY, PFLASTType.TUPLE])
 
 class PFLLibrary:
 
     def __init__(self, modules: dict[str, PFLModule]):
-        all_compiled_units: dict[str, PFLFunc] = {}
+        all_compiled_units: dict[str, Union[PFLFunc, PFLClass]] = {}
         all_func_uid_to_specs: dict[str, list[PFLFunc]] = {}
+        all_func_uid_to_cls_specs: dict[str, list[PFLClass]] = {}
+
         backend: str = ""
         for k, v in modules.items():
             all_units = v.get_all_compiled()
             for k1, v1 in all_units.items():
-                if backend == "":
-                    backend = v1.backend
-                else:
-                    assert v1.backend == backend, "all compiled units must have the same backend"
                 k1_parts = UniqueTreeId(k1).parts
-                if k1_parts[0] not in all_func_uid_to_specs:
-                    all_func_uid_to_specs[k1_parts[0]] = []
-                all_func_uid_to_specs[k1_parts[0]].append(v1)
+                if isinstance(v1, PFLFunc):
+                    if backend == "":
+                        backend = v1.backend
+                    else:
+                        assert v1.backend == backend, "all compiled units must have the same backend"
+                    if k1_parts[0] not in all_func_uid_to_specs:
+                        all_func_uid_to_specs[k1_parts[0]] = []
+                    all_func_uid_to_specs[k1_parts[0]].append(v1)
+                else:
+                    k1_parts = UniqueTreeId(k1).parts
+                    if k1_parts[0] not in all_func_uid_to_cls_specs:
+                        all_func_uid_to_cls_specs[k1_parts[0]] = []
+                    all_func_uid_to_cls_specs[k1_parts[0]].append(v1)
                 all_compiled_units[k1] = v1
         assert modules and all_compiled_units
         self._stmt_finder: Optional[dict[str, PFLTreeNodeFinder]] = None
         self._modules = modules
+        self._path_to_modules = {m.compile_info.path: m for m in modules.values()}
+        assert len(self._path_to_modules) == len(modules), "module path duplicate, shouldn't happen"
         self._compiled_units = all_compiled_units
         self._func_uid_to_compiled_units = all_func_uid_to_specs
-
+        self._func_uid_to_compiled_classes = all_func_uid_to_cls_specs
         self._backend = backend
         self._inline_env_cache: dict[str, PFLInlineRunEnv] = {}
+
+    @staticmethod 
+    def split_pfl_func_uid(uid: str):
+        parts = UniqueTreeId(uid).parts
+        return parts
+
+    @staticmethod 
+    def extract_fn_uid_nospec(uid: str):
+        return PFLLibrary.split_pfl_func_uid(uid)[0]
+
+    @staticmethod 
+    def extract_fn_name(uid: str):
+        parts = PFLLibrary.split_pfl_func_uid(uid)
+        qname = parts[0]
+        return ".".join(qname.split("::")[1:])
 
     def _cached_get_stmt_finder(self):
         if self._stmt_finder is not None:
             return self._stmt_finder
         self._stmt_finder = {}
         for k, v in self._modules.items():
-            self._stmt_finder[k] = PFLTreeNodeFinder(v, (PFLAstStmt, ))
+            self._stmt_finder[v.compile_info.path] = PFLTreeNodeFinder(v, (PFLAstStmt, ))
         return self._stmt_finder
 
     def dump_to_json_dict(self):
@@ -187,7 +215,7 @@ class PFLLibrary:
         return self._modules
 
     @property
-    def all_compiled(self) -> dict[str, PFLFunc]:
+    def all_compiled(self) -> dict[str, Union[PFLFunc, PFLClass]]:
         return self._compiled_units
 
     @property
@@ -198,12 +226,20 @@ class PFLLibrary:
     def backend(self) -> str:
         return self._backend
 
+    def get_compiled_func_by_uid(self, uid: str) -> PFLFunc:
+        res = self._compiled_units[uid]
+        assert isinstance(res, PFLFunc)
+        return res
+
+    def get_compiled_cls_by_uid(self, uid: str) -> PFLClass:
+        res = self._compiled_units[uid]
+        assert isinstance(res, PFLClass)
+        return res
 
 @dataclasses.dataclass
 class ReturnInfo:
     complete: bool
     all_return_stmts: list[PFLReturn]
-
 
 _SUPPORTED_PYTHON_BUILTINS = {
     "int": int,
@@ -222,6 +258,31 @@ _SUPPORTED_PYTHON_BUILTINS = {
 
 }
 
+def default_pfl_var_proc(val: Any):
+    is_static = False 
+    is_classm = False 
+    is_property = False
+
+    if isinstance(val, (classmethod, staticmethod)):
+        res_fn = val.__func__
+        is_static = isinstance(val, staticmethod)
+        is_classm = isinstance(val, classmethod)
+    elif isinstance(val, property):
+        assert val.fget is not None 
+        res_fn =  val.fget
+        is_property = True
+    else:
+        res_fn = val
+
+    if inspect.isfunction(res_fn):
+        res_fn = inspect.unwrap(res_fn)
+        fn_meta = get_compilable_meta(res_fn)
+        return PFLProcessedVarMeta(value=res_fn, 
+            is_static=is_static,
+            is_classmethod=is_classm,
+            is_property=is_property,
+            compilable_meta=fn_meta)
+    return PFLProcessedVarMeta(value=res_fn)
 
 class MapAstNodeToConstant(ast.NodeVisitor):
     """map every ast name/attribute to a stdlib item.
@@ -230,11 +291,10 @@ class MapAstNodeToConstant(ast.NodeVisitor):
     """
 
     def __init__(self,
-                 func_unwrapper: Callable[[Any], Callable],
                  func_globals: dict[str, Any],
                  error_ctx: PFLErrorFormatContext,
                  backend: str = "js",
-                 var_preproc: Optional[Callable[[Any], Any]] = None):
+                 var_preproc: Callable[[Any], PFLProcessedVarMeta] = default_pfl_var_proc):
         super().__init__()
         self.func_globals = {**func_globals}
         for k, v in _SUPPORTED_PYTHON_BUILTINS.items():
@@ -242,13 +302,13 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 self.func_globals[k] = v
         self.backend = backend
         self.var_preproc = var_preproc
-        self.func_unwrapper = func_unwrapper
         self._node_to_compile_constant: dict[ast.AST, PFLCompileConstant] = {}
 
         self.error_ctx = error_ctx
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # visit func node except decorators
+        # compiled decorators isn't supported.
         self.visit(node.args)
         for stmt in node.body:
             self.visit(stmt)
@@ -305,24 +365,25 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                       self.backend) in STD_REGISTRY._type_backend_to_item
         if has_std_parent and not cur_is_std:
             return self.generic_visit(node)
-
-        if self.var_preproc is not None:
-            # used to handle custom wrappers. e.g. triton.jit
-            cur_obj = self.var_preproc(cur_obj)
-        if cur_obj is partial:
-            return self.generic_visit(node)
-
-        is_stdlib = False
         bound_self = None
-        # TODO detect classmethod and reject it.
-        if isinstance(cur_obj, staticmethod):
-            cur_obj = cur_obj.__func__
         if inspect.ismethod(cur_obj):
             # method will never be stdlib.
             const_type = PFLCompileConstantType.FUNCTION
             bound_self = cur_obj.__self__
             cur_obj = cur_obj.__func__
-        elif inspect.isfunction(cur_obj) or isinstance(
+        # if self.var_preproc is not None:
+        # used to handle custom wrappers. e.g. triton.jit or triton.aggregate
+        # for triton.aggregate, we can convert it to standard dataclass 
+        prep_res = self.var_preproc(cur_obj)
+        cur_obj = prep_res.value 
+        if cur_obj is partial:
+            return self.generic_visit(node)
+
+        is_stdlib = False
+        # TODO detect classmethod and reject it.
+        # if isinstance(cur_obj, staticmethod):
+        #     cur_obj = cur_obj.__func__
+        if inspect.isfunction(cur_obj) or isinstance(
                 cur_obj, type) or inspect.ismodule(cur_obj) or inspect.isclass(
                     cur_obj) or inspect.isbuiltin(cur_obj):
             # check is stdlib.
@@ -348,17 +409,18 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                     const_type = PFLCompileConstantType.DATACLASS_TYPE
                 else:
                     const_type = PFLCompileConstantType.FUNCTION
-                cur_obj = self.func_unwrapper(cur_obj)
+                # cur_obj = self.func_unwrapper(cur_obj)
         else:
             # builtin types and tuple of them.
             # validate by PFLConstant.
-            PFLConstant._parse_nested_value(cur_obj)
+            PFLExprInfo.from_value(cur_obj)
             const_type = PFLCompileConstantType.BUILTIN_VALUE
         self._node_to_compile_constant[node] = PFLCompileConstant(
             value=cur_obj,
             type=const_type,
             is_stdlib=is_stdlib,
-            bound_self=bound_self)
+            bound_self=bound_self,
+            var_meta=prep_res)
         return node
 
     def visit_Name(self, node: ast.Name):
@@ -368,68 +430,23 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         return self._visit_Attribute_or_name(node)
 
 
-def _register_temp_dcls_to_std(args: list[AnnotatedArg],
-                               backend: str,
-                               global_dict: dict,
-                               external_anno: Optional[tuple[dict[str, Any],
-                                                             Any]] = None,
-                               parent_from_qn: Optional[Type] = None):
-    for i, arg in enumerate(args):
-        param = arg.param
-        assert param is not None
-        # only support positional args
-        assert param.kind in [
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.POSITIONAL_ONLY
-        ]
-        if external_anno is not None and arg.name in external_anno[0]:
-            arg_type = external_anno[0][arg.name]
-        else:
-            arg_type = arg.type
-        if arg_type is None:
-            continue
-        if arg_type is Any:
-            if i == 0 and parent_from_qn is not None and arg.name == "self":
-                arg_type = parent_from_qn
-        if arg_type not in BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE:
-            if dataclasses.is_dataclass(arg_type):
-                assert inspect.isclass(arg_type)
-                for dcls_child in child_type_generator_with_dataclass(
-                        arg_type):
-                    if inspect.isclass(
-                            dcls_child) and dataclasses.is_dataclass(
-                                dcls_child):
-
-                        item = STD_REGISTRY.get_item_by_dcls(
-                            dcls_child, backend)
-                        if item is None:
-                            # add a temp item for this dataclass type
-                            temp_mapped_name = UniqueTreeId.from_parts([
-                                backend, "temp",
-                                get_qualname_of_type(dcls_child)
-                            ]).uid_encoded
-                            global_dict[(temp_mapped_name,
-                                         backend)] = StdRegistryItem(
-                                             dcls_child,
-                                             temp_mapped_name,
-                                             backend=backend,
-                                             is_temp=True)
-
-
-def _get_module_code_by_fn(func: Callable):
+def _get_module_code_path_by_fn(func: Callable):
     mod = inspect.getmodule(func)
-    assert mod is not None, "module_code_getter must be provided if func isn't a module function"
+    assert mod is not None, "module_code_path_getter must be provided if func isn't a module function"
     module_code = inspect.getsource(mod)
-    return module_code
+    return module_code, inspect.getabsfile(mod)
 
 @dataclasses_plain.dataclass
 class _CompileFuncCache:
     tree: ast.FunctionDef
     module_code: str
+    module_path: str
+
     module_code_lines: list[str]
     code: str 
     first_lineno: int
     func_lines: list[str]
+
 
 class PFLParser:
 
@@ -439,45 +456,54 @@ class PFLParser:
                  func_code_getter: Optional[Callable[[Any],
                                                      tuple[list[str],
                                                            int]]] = None,
-                 module_code_getter: Optional[Callable[[Any], str]] = None,
-                 func_unwrapper: Optional[Callable[[Any], Callable]] = None,
+                 module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
                  var_preproc: Optional[Callable[[Any], Any]] = None,
                 anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
-                                PFLExprInfo]] = None):
+                                PFLExprInfo]] = None,
+                get_compilable_meta_fn: Optional[Callable[[Callable], Optional[PFLCompileFuncMeta]]] = None):
         self._backend = backend
         if parse_cfg is None:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
             parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
         self._parse_cfg = parse_cfg
-
+        if get_compilable_meta_fn is None:
+            get_compilable_meta_fn = get_compilable_meta
         if func_code_getter is None:
             func_code_getter = inspect.getsourcelines
-        if module_code_getter is None:
-            module_code_getter = _get_module_code_by_fn
-        if func_unwrapper is None:
-            func_unwrapper = unwrap_fn_static_cls_property
+        if module_code_path_getter is None:
+            module_code_path_getter = _get_module_code_path_by_fn
+        if var_preproc is None:
+            var_preproc = default_pfl_var_proc
+        self._var_preproc = var_preproc
         self._func_code_getter = func_code_getter
-        self._module_code_getter = module_code_getter
-        self._func_unwrapper = func_unwrapper
+        self._module_code_path_getter = module_code_path_getter
         # anno_transform: (infered_anno, original_anno) -> new_anno
         # used for convert third-party annotations such as tl.constexpr in triton.jit
         # also user can determine constexpr data based on annotation.
         self._anno_transform = anno_transform
-        self._var_preproc = var_preproc
 
-        self._all_compiled: dict[str, PFLFunc] = {}
+        self._all_compiled: dict[str, Union[PFLFunc, PFLClass]] = {}
         self._current_compiling: set[str] = set()
 
         self.func_node_to_meta: dict[ast.AST, PFLCompileFuncMeta] = {}
 
         self._cache_fn_precompile_info: dict[Callable, _CompileFuncCache] = {}
+        self._get_compilable_meta_fn = get_compilable_meta_fn
 
-    def _parse_expr_to_df_ast(self, expr: ast.expr,
+    def _parse_expr_to_pfl_notype(self, expr: ast.expr) -> PFLExpr:
+        """Parse an expression to PFLExpr without type inference.
+        Most features are disabled. currently only used to replace
+        jmespath.
+        """
+        raise NotImplementedError
+
+    def _parse_expr_to_pfl(self, expr: ast.expr,
                               scope: dict[str, PFLExprInfo]) -> PFLExpr:
         source_loc = (expr.lineno, expr.col_offset, expr.end_lineno,
                       expr.end_col_offset)
         try:
             ctx = get_parse_context_checked()
+            parse_cache = get_parse_cache_checked()
             if isinstance(expr, ast.Name) or isinstance(expr, ast.Attribute):
                 if expr in ctx.node_to_constants:
                     item = ctx.node_to_constants[expr]
@@ -506,16 +532,15 @@ class PFLParser:
 
                             self_type = PFLExprInfo.from_annotype(
                                 self_annotype)
-                        compilable_meta: Optional[
-                            PFLCompileFuncMeta] = get_compilable_meta(
-                                item.value)
-                        if compilable_meta is None or not compilable_meta.need_delayed_processing(
+                        meta: Optional[
+                            PFLCompileFuncMeta] = item.var_meta.compilable_meta
+                        if meta is None or not meta.need_delayed_processing(
                         ):
-                            new_st = get_parse_cache_checked(
-                            ).cached_parse_func(item.value,
-                                                ignore_self=item.bound_self
+                            new_st = parse_cache.cached_parse_func(item.value,
+                                                is_bound_method=item.bound_self
                                                 is not None,
-                                                self_type=self_annotype)
+                                                self_type=self_annotype,
+                                                ext_preproc_res=item.var_meta)
                             new_finfo = new_st.get_func_info_checked()
                             creq = ctx.enqueue_func_compile(
                                 item.value,
@@ -535,11 +560,43 @@ class PFLParser:
                             req = ctx.get_compile_req(
                                 item.value,
                                 None,
-                                compilable_meta,
+                                meta,
                                 is_method_def=False,
                                 self_type=self_type,
                                 is_prop=False,
                                 bound_self=item.bound_self)
+                            new_st.delayed_compile_req = req
+                            res = PFLName(PFLASTType.NAME,
+                                          source_loc,
+                                          id=req.uid,
+                                          st=new_st)
+                        # make all function object constexpr.
+                        new_st._constexpr_data = item.value
+                    elif item.type == PFLCompileConstantType.DATACLASS_TYPE:
+                        meta = item.var_meta.compilable_meta
+                        if meta is None or not meta.need_delayed_processing(
+                        ):
+                            new_st = parse_cache.cached_parse_dcls(item.value)
+                            new_finfo = new_st.get_dcls_info_checked()
+                            # set self_type for init and post_init
+                            creq = ctx.enqueue_dcls_compile(
+                                item.value,
+                                new_finfo,
+                                self_type=new_st)
+                            res = PFLName(PFLASTType.NAME,
+                                          source_loc,
+                                          id=new_finfo.func_uid,
+                                          st=new_st)
+                            res.st.compiled_uid = creq.get_func_compile_uid()
+                        else:
+                            new_st = PFLExprInfo.from_dcls_type(item.value, delay_parse_field=True)
+                            new_finfo = new_st.get_dcls_info_checked()
+                            req = ctx.get_compile_req(
+                                item.value,
+                                new_finfo,
+                                meta,
+                                is_dcls=True,
+                                self_type=new_st)
                             new_st.delayed_compile_req = req
                             res = PFLName(PFLASTType.NAME,
                                           source_loc,
@@ -558,7 +615,7 @@ class PFLParser:
                                       id=expr.id,
                                       st=dataclasses.replace(st))
                     else:
-                        value = self._parse_expr_to_df_ast(expr.value, scope)
+                        value = self._parse_expr_to_pfl(expr.value, scope)
                         attr = expr.attr
                         st = value.st
                         res = PFLAttribute(PFLASTType.ATTR,
@@ -576,11 +633,11 @@ class PFLParser:
             elif isinstance(expr, ast.Slice):
                 assert get_parse_context_checked(
                 ).cfg.allow_slice, "slice is disabled in config"
-                lo = self._parse_expr_to_df_ast(
+                lo = self._parse_expr_to_pfl(
                     expr.lower, scope) if expr.lower is not None else undefined
-                hi = self._parse_expr_to_df_ast(
+                hi = self._parse_expr_to_pfl(
                     expr.upper, scope) if expr.upper is not None else undefined
-                step = self._parse_expr_to_df_ast(
+                step = self._parse_expr_to_pfl(
                     expr.step, scope) if expr.step is not None else undefined
                 res = PFLSlice(PFLASTType.SLICE,
                                source_loc,
@@ -589,16 +646,16 @@ class PFLParser:
                                step=step)
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Subscript):
-                value = self._parse_expr_to_df_ast(expr.value, scope)
+                value = self._parse_expr_to_pfl(expr.value, scope)
                 slice: Union[Sequence[PFLExpr], PFLExpr]
                 if isinstance(expr.slice, ast.Tuple):
                     assert get_parse_context_checked(
                     ).cfg.allow_nd_slice, "nd slice is disabled in config"
                     slice = []
                     for item in expr.slice.elts:
-                        slice.append(self._parse_expr_to_df_ast(item, scope))
+                        slice.append(self._parse_expr_to_pfl(item, scope))
                 else:
-                    slice = self._parse_expr_to_df_ast(expr.slice, scope)
+                    slice = self._parse_expr_to_pfl(expr.slice, scope)
                 is_store = undefined
                 if isinstance(expr.ctx, ast.Store):
                     is_store = True
@@ -610,17 +667,17 @@ class PFLParser:
                 res.check_and_infer_type()
             elif isinstance(expr, ast.List):
                 elts = [
-                    self._parse_expr_to_df_ast(elt, scope) for elt in expr.elts
+                    self._parse_expr_to_pfl(elt, scope) for elt in expr.elts
                 ]
                 res = PFLArray(PFLASTType.ARRAY, source_loc, elts=elts)
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Dict):
                 keys = [
-                    self._parse_expr_to_df_ast(key, scope)
+                    self._parse_expr_to_pfl(key, scope)
                     if key is not None else None for key in expr.keys
                 ]
                 values = [
-                    self._parse_expr_to_df_ast(value, scope)
+                    self._parse_expr_to_pfl(value, scope)
                     for value in expr.values
                 ]
                 res = PFLDict(PFLASTType.DICT,
@@ -630,7 +687,7 @@ class PFLParser:
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Tuple):
                 elts = [
-                    self._parse_expr_to_df_ast(elt, scope) for elt in expr.elts
+                    self._parse_expr_to_pfl(elt, scope) for elt in expr.elts
                 ]
                 res = PFLTuple(PFLASTType.TUPLE, source_loc, elts=elts)
                 res.check_and_infer_type()
@@ -638,7 +695,7 @@ class PFLParser:
                 op = BoolOpType.AND if isinstance(expr.op,
                                                   ast.And) else BoolOpType.OR
                 values = [
-                    self._parse_expr_to_df_ast(value, scope)
+                    self._parse_expr_to_pfl(value, scope)
                     for value in expr.values
                 ]
                 res = PFLBoolOp(PFLASTType.BOOL_OP,
@@ -648,8 +705,8 @@ class PFLParser:
                 res.check_and_infer_type()
             elif isinstance(expr, ast.BinOp):
                 op = _AST_BINOP_TO_PFL_BINOP[type(expr.op)]
-                left = self._parse_expr_to_df_ast(expr.left, scope)
-                right = self._parse_expr_to_df_ast(expr.right, scope)
+                left = self._parse_expr_to_pfl(expr.left, scope)
+                right = self._parse_expr_to_pfl(expr.right, scope)
                 res = PFLBinOp(PFLASTType.BIN_OP,
                                source_loc,
                                op=op,
@@ -658,18 +715,18 @@ class PFLParser:
                 res.check_and_infer_type()
             elif isinstance(expr, ast.UnaryOp):
                 op = _AST_UNARYOP_TO_PFL_UNARYOP[type(expr.op)]
-                operand = self._parse_expr_to_df_ast(expr.operand, scope)
+                operand = self._parse_expr_to_pfl(expr.operand, scope)
                 res = PFLUnaryOp(PFLASTType.UNARY_OP,
                                  source_loc,
                                  op=op,
                                  operand=operand)
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Compare):
-                left = self._parse_expr_to_df_ast(expr.left, scope)
+                left = self._parse_expr_to_pfl(expr.left, scope)
                 assert len(expr.ops) == 1
                 op = _AST_COMPARE_TO_PFL_COMPARE[type(expr.ops[0])]
                 assert len(expr.comparators) == 1
-                right = self._parse_expr_to_df_ast(expr.comparators[0], scope)
+                right = self._parse_expr_to_pfl(expr.comparators[0], scope)
                 res = PFLCompare(PFLASTType.COMPARISON,
                                  source_loc,
                                  op=op,
@@ -678,7 +735,7 @@ class PFLParser:
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Call):
                 args = [
-                    self._parse_expr_to_df_ast(arg, scope) for arg in expr.args
+                    self._parse_expr_to_pfl(arg, scope) for arg in expr.args
                 ]
                 kw_keys: list[str] = []
                 vals: list[PFLExpr] = []
@@ -689,17 +746,19 @@ class PFLParser:
                 for kw in expr.keywords:
                     assert kw.arg is not None, "don't support **kw"
                     kw_keys.append(kw.arg)
-                    val_expr = self._parse_expr_to_df_ast(kw.value, scope)
+                    val_expr = self._parse_expr_to_pfl(kw.value, scope)
                     vals.append(val_expr)
                     kw_sts[kw.arg] = val_expr.st
                 arg_infos_from_call = ([a.st for a in args], kw_sts)
                 ctx = get_parse_context_checked()
                 # TODO support template func here.
                 # we need to assign a unique id for each specialized function
-                func = self._parse_expr_to_df_ast(expr.func, scope)
+                func = self._parse_expr_to_pfl(expr.func, scope)
                 if func.st.delayed_compile_req is not None:
+                    req = func.st.delayed_compile_req
+                    assert isinstance(req, PFLCompileReq)
                     req = dataclasses.replace(
-                        func.st.delayed_compile_req,
+                        req,
                         args_from_call=arg_infos_from_call)
                     # only template and inline function allow inline expand
                     # print(req.get_func_compile_uid())
@@ -772,7 +831,6 @@ class PFLParser:
                             f"compile-time function {raw_func} not implemented"
                         )
                 else:
-                    # TODO support pfl function (PFLFunc)
                     parse_cfg = get_parse_context_checked().cfg
                     if not parse_cfg.allow_kw:
                         assert not expr.keywords, f"kwargs is disabled, you need to enable it in parse config."
@@ -782,15 +840,39 @@ class PFLParser:
                                   args=args,
                                   keys=kw_keys if kw_keys else undefined,
                                   vals=vals if vals else undefined)
-                    res.check_and_infer_type()
-
+                    match_res, overload_info = res.check_and_infer_type_with_overload()
+                    # handle template fn spec
+                    if overload_info.has_template_fn_spec:
+                        for arg_info, arg_expr in match_res.args:
+                            if arg_info.template_fn_arg_spec_idx is not None:
+                                assert not is_undefined(arg_expr), "template fn spec can't use default."
+                                _, arg_spec_expr_info = match_res.args[arg_info.template_fn_arg_spec_idx]
+                                assert not is_undefined(arg_spec_expr_info), "arg spec can't use default."
+                                assert isinstance(arg_spec_expr_info, (PFLArray, PFLTuple)), "arg spec must be array or tuple"
+                                # for fn spec, we only support PFLName or list/tuple of PFLName.
+                                if isinstance(arg_expr, PFLName):
+                                    elts = [arg_expr]
+                                else:
+                                    assert isinstance(arg_expr, (PFLArray, PFLTuple)), "arg expr must be name, array or tuple"
+                                    elts = arg_expr.elts
+                                # compile template func via args in arg spec
+                                for elt in elts:
+                                    assert elt.st.type == PFLExprType.FUNCTION
+                                    req = elt.st.delayed_compile_req
+                                    assert isinstance(req, PFLCompileReq), f"fn {elt.st} don't have compile req (not template)"
+                                    req = dataclasses.replace(
+                                        req,
+                                        args_from_call=((x.st for x in arg_spec_expr_info.elts), {}))
+                                    compiled_func = self.parse_compile_req_to_pfl_ast(
+                                        req, allow_inline_expand=True)
+                                    elt.st = dataclasses.replace(compiled_func.st)
             elif isinstance(expr, ast.IfExp):
                 res = PFLIfExp(
                     PFLASTType.IF_EXP,
                     source_loc,
-                    test=self._parse_expr_to_df_ast(expr.test, scope),
-                    body=self._parse_expr_to_df_ast(expr.body, scope),
-                    orelse=self._parse_expr_to_df_ast(expr.orelse, scope))
+                    test=self._parse_expr_to_pfl(expr.test, scope),
+                    body=self._parse_expr_to_pfl(expr.body, scope),
+                    orelse=self._parse_expr_to_pfl(expr.orelse, scope))
                 res.check_and_infer_type()
             else:
                 raise PFLAstParseError(f"not support {type(expr)}", expr)
@@ -814,11 +896,10 @@ class PFLParser:
         block: list[PFLAstStmt] = []
         # block = PFLFunc(PFLASTType.BLOCK, -1, -1, "", [], [])
         return_info = ReturnInfo(complete=False, all_return_stmts=[])
-
+        req = get_parse_context_checked().compile_req
         for stmt in body:
             source_loc = (stmt.lineno, stmt.col_offset, stmt.end_lineno,
                           stmt.end_col_offset)
-
             try:
                 if not isinstance(stmt, tuple(_ALL_SUPPORTED_AST_TYPES)):
                     raise PFLAstParseError(f"not support {type(stmt)}", stmt)
@@ -830,9 +911,24 @@ class PFLParser:
                             raise PFLAstParseError(
                                 "only support single assign", stmt)
                     if stmt.value is not None:
-                        value = self._parse_expr_to_df_ast(stmt.value, scope)
+                        value = self._parse_expr_to_pfl(stmt.value, scope)
                     else:
                         value = None
+                    if value is not None and req is not None and req.dcls_infer_field_type:
+                        attr_target: Optional[ast.Attribute] = None
+                        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Attribute):
+                            attr_target = stmt.target
+
+                        elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                            tgt_temp = stmt.targets[0]
+                            if isinstance(tgt_temp, ast.Attribute):
+                                attr_target = tgt_temp
+
+                        if attr_target is not None and isinstance(attr_target.value, ast.Name):
+                            val_in_scope = scope[attr_target.value.id]
+                            if val_in_scope.type == PFLExprType.DATACLASS_OBJECT:
+                                dcls_info = val_in_scope.get_dcls_info_checked()
+                                dcls_info.delayed_init_set_field_type(attr_target.attr, value.st)
 
                     anno_st: Optional[PFLExprInfo] = None
                     if isinstance(stmt, ast.AnnAssign):
@@ -861,7 +957,7 @@ class PFLParser:
                             value.st.check_convertable(scope[tgt.id],
                                                        "assign value")
                         scope[tgt.id] = value.st
-                        target = self._parse_expr_to_df_ast(tgt, scope)
+                        target = self._parse_expr_to_pfl(tgt, scope)
 
                         assert isinstance(target, PFLName)
                         target.is_new = is_new_var
@@ -882,7 +978,7 @@ class PFLParser:
                                     scope[elt.id], "assign value")
                             scope[elt.id] = value.st.childs[i]
                             is_new_vars.append(is_new_var)
-                        target = self._parse_expr_to_df_ast(tgt, scope)
+                        target = self._parse_expr_to_pfl(tgt, scope)
                         assert isinstance(target, PFLTuple)
                         ctx = get_parse_context_checked()
                         if ctx.cfg.tuple_assign_must_be_homogeneous:
@@ -893,7 +989,7 @@ class PFLParser:
                             assert isinstance(tgt_pfl_name, PFLName)
                             tgt_pfl_name.is_new = is_new_vars[i]
                     else:
-                        target = self._parse_expr_to_df_ast(tgt, scope)
+                        target = self._parse_expr_to_pfl(tgt, scope)
 
                     if isinstance(stmt, ast.Assign):
                         assert value is not None
@@ -905,7 +1001,6 @@ class PFLParser:
                         node.check_and_infer_type()
                         block.append(node)
                     else:
-                        assert value is not None
                         assert anno_st is not None
                         target.st = anno_st
                         node = PFLAnnAssign(PFLASTType.ANN_ASSIGN,
@@ -916,10 +1011,15 @@ class PFLParser:
                                             value=value)
                         node.check_and_infer_type()
                         block.append(node)
+                    # if isinstance(target, PFLAttribute) and value is not None and req is not None and req.dcls_infer_field_type:
+                    #     maybe_template_dcls = target.value
+                    #     if maybe_template_dcls.st.type == PFLExprType.DATACLASS_OBJECT:
+                    #         dcls_info = maybe_template_dcls.st.get_dcls_info_checked()
+                    #         dcls_info.delayed_init_set_field_type(target.attr, value.st)
                 elif isinstance(stmt, ast.AugAssign):
-                    target = self._parse_expr_to_df_ast(stmt.target, scope)
+                    target = self._parse_expr_to_pfl(stmt.target, scope)
                     op = _AST_BINOP_TO_PFL_BINOP[type(stmt.op)]
-                    value = self._parse_expr_to_df_ast(stmt.value, scope)
+                    value = self._parse_expr_to_pfl(stmt.value, scope)
                     node = PFLAugAssign(PFLASTType.AUG_ASSIGN,
                                         source_loc,
                                         target=target,
@@ -931,7 +1031,7 @@ class PFLParser:
                         scope[target.id] = target.st
                 elif isinstance(stmt, ast.If):
                     ctx = get_parse_context_checked()
-                    test = self._parse_expr_to_df_ast(stmt.test, scope)
+                    test = self._parse_expr_to_pfl(stmt.test, scope)
                     if test.is_const and ctx.cfg.inline_constexpr_if:
                         # TODO we can't do constexpr inline when a dependency
                         # isn't a template function.
@@ -991,7 +1091,7 @@ class PFLParser:
                 elif isinstance(stmt, ast.For):
                     # variable created in for/while scope won't leaked to parent scope.
                     private_scope = scope.copy()
-                    value = self._parse_expr_to_df_ast(stmt.iter,
+                    value = self._parse_expr_to_pfl(stmt.iter,
                                                        private_scope)
                     tgt = stmt.target
                     if isinstance(tgt, ast.Tuple):
@@ -1018,7 +1118,7 @@ class PFLParser:
                         if ctx.cfg.tuple_assign_must_be_homogeneous:
                             assert all(is_new_vars) or not any(is_new_vars), \
                                 "tuple assign must be homogeneous, all new or all old"
-                        target = self._parse_expr_to_df_ast(tgt, private_scope)
+                        target = self._parse_expr_to_pfl(tgt, private_scope)
                         assert isinstance(target, PFLTuple)
                         for i, elt in enumerate(tgt.elts):
                             tgt_pfl_name = target.elts[i]
@@ -1046,7 +1146,7 @@ class PFLParser:
                                 target_st.check_convertable(
                                     private_scope[tgt.id], "assign value")
                             private_scope[tgt.id] = target_st
-                        target = self._parse_expr_to_df_ast(
+                        target = self._parse_expr_to_pfl(
                             stmt.target, private_scope)
                         assert isinstance(target, PFLName)
                         target.is_new = is_new_var
@@ -1062,7 +1162,7 @@ class PFLParser:
                     block.append(res_node)
                 elif isinstance(stmt, ast.While):
                     private_scope = scope.copy()
-                    test = self._parse_expr_to_df_ast(stmt.test, private_scope)
+                    test = self._parse_expr_to_pfl(stmt.test, private_scope)
                     forbody, rinfo = self._parse_block_to_pfl_ast(
                         stmt.body, private_scope)
                     return_info.all_return_stmts.extend(rinfo.all_return_stmts)
@@ -1076,13 +1176,13 @@ class PFLParser:
                 elif isinstance(stmt, ast.Expr):
                     node = PFLExprStmt(PFLASTType.EXPR_STMT,
                                        source_loc,
-                                       value=self._parse_expr_to_df_ast(
+                                       value=self._parse_expr_to_pfl(
                                            stmt.value, scope))
                     block.append(node)
                 elif isinstance(stmt, ast.Return):
                     value = None
                     if stmt.value is not None:
-                        value = self._parse_expr_to_df_ast(stmt.value, scope)
+                        value = self._parse_expr_to_pfl(stmt.value, scope)
                     ret_stmt = PFLReturn(PFLASTType.RETURN,
                                          source_loc,
                                          value=value)
@@ -1156,11 +1256,8 @@ class PFLParser:
         private_scope = scope.copy()
         external_arg_annos: Optional[dict[str, Any]] = None
         external_ret_anno: Optional[Any] = None
-        func_meta: Optional[PFLCompileFuncMeta] = None
         if external_annos is not None:
             external_arg_annos, external_ret_anno = external_annos
-        if stmt in self.func_node_to_meta:
-            func_meta = self.func_node_to_meta[stmt]
         num_arg_no_default = len(stmt.args.args) - len(stmt.args.defaults)
         arg_dict_from_call: Optional[dict[str, PFLExprInfo]] = None
         parse_ctx = get_parse_context_checked()
@@ -1169,6 +1266,11 @@ class PFLParser:
             arg_dict_from_call = self._map_call_args_to_func_def(
                 arg_infos_from_call[0], arg_infos_from_call[1], stmt,
                 compile_req.is_bound_method())
+        meta = compile_req.meta
+        # print(arg_infos_from_call)
+        # if arg_dict_from_call is not None:
+        #     for k, v in arg_dict_from_call.items():
+        #         print(k, v._constexpr_data)
         for i, arg in enumerate(stmt.args.args):
             if i == 0 and compile_req.is_bound_method():
                 continue
@@ -1182,6 +1284,7 @@ class PFLParser:
             anno_in_ast = None
             if arg.annotation is not None:
                 anno_in_ast = evaluate_annotation_expr(arg.annotation)
+            # print("anno_in_ast", anno_in_ast)
             anno_st = None
             anno_in_ast_st = None
             if i == 0 and compile_req.is_method_def:
@@ -1189,9 +1292,9 @@ class PFLParser:
                 anno_st = dataclasses.replace(self_type)
             default = undefined
             if i >= num_arg_no_default:
-                default_pfl = self._parse_expr_to_df_ast(stmt.args.defaults[i - num_arg_no_default], scope)
+                default_pfl = self._parse_expr_to_pfl(stmt.args.defaults[i - num_arg_no_default], scope)
                 assert default_pfl.is_const, \
-                    f"default value of arg {arg.arg} must be constant, but got {default_pfl}"
+                    f"default value of arg {arg.arg} must be constexpr, but got {default_pfl}"
                 default = default_pfl
             if anno_st is None:
                 if external_arg_annos is not None:
@@ -1210,25 +1313,28 @@ class PFLParser:
                         anno_st_from_call = dataclasses.replace(
                             arg_dict_from_call[arg.arg],
                             )
-                        if not is_undefined(constexpr_data):
-                            anno_st_from_call._constexpr_data = constexpr_data
                         if anno_in_ast is not None:
                             if self._anno_transform is not None:
                                 # user should validate in anno_transform
                                 anno_st = self._anno_transform(
                                     anno_st_from_call, anno_in_ast, default)
                             else:
-                                # validate by parser
+                                # if _anno_transform is None, we 
+                                # prefer annotation defined in function def
+                                # than anno from args.
                                 anno_in_ast_st = PFLExprInfo.from_annotype(
                                     parse_type_may_optional_undefined(
                                         anno_in_ast))
                                 assert anno_st_from_call.is_convertable(
                                     anno_in_ast_st)
                                 # use type from annotation
-                                # TODO if template, we should use type from call arg
+                                anno_in_ast_st._constexpr_data = anno_st_from_call._constexpr_data
                                 anno_st = anno_in_ast_st
                         else:
                             anno_st = anno_st_from_call
+                        if not is_undefined(constexpr_data):
+                            anno_st._constexpr_data = constexpr_data
+
             if anno_st is None and anno_in_ast is not None:
                 anno_st = PFLExprInfo.from_annotype(
                     parse_type_may_optional_undefined(anno_in_ast))
@@ -1239,6 +1345,10 @@ class PFLParser:
 
             assert anno_st is not None, f"can't get annotation of arg {arg.arg} from both func def and external."
             st = anno_st
+            # reset constexpr to undefined if arg not in constexpr_args set in meta
+            if meta.constexpr_args and arg.arg not in meta.constexpr_args:
+                st._constexpr_data = undefined
+
             arg_obj = PFLArg(PFLASTType.ARG, arg_loc, arg=arg.arg, st=st)
             if arg.annotation is not None:
                 arg_obj.annotation = ast.unparse(arg.annotation)
@@ -1248,7 +1358,7 @@ class PFLParser:
             private_scope[arg_obj.arg] = arg_obj.st
         # for pfl_arg, default in zip(args[num_arg_no_default:],
         #                             stmt.args.defaults):
-        #     default_pfl = self._parse_expr_to_df_ast(default, scope)
+        #     default_pfl = self._parse_expr_to_pfl(default, scope)
         #     assert default_pfl.is_const, \
         #         f"default value of arg {pfl_arg.arg} must be constant, but got {default_pfl}"
         #     pfl_arg.default = default_pfl
@@ -1280,17 +1390,15 @@ class PFLParser:
         for a in args:
             arg_info = PFLExprFuncArgInfo(a.arg, a.st)
             if a.default is not None:
-                arg_info.default = a.default.st._constexpr_data if a.default.is_const else None
+                arg_info.default = a.default.st._constexpr_data if a.default.is_const else undefined
+                arg_info.default_type = a.default.st
             finfo_args.append(arg_info)
         func_node_finfo = PFLExprFuncInfo(
-            finfo_args,
+            stmt.name,
             ret_sts[0],
+            finfo_args,
             is_method=is_method,
         )
-        # if stmt.name == "_attn_fwd_inner_tma_v2":
-        #     breakpoint()
-
-
         func_node_st = PFLExprInfo(type=PFLExprType.FUNCTION,
                                    func_info=func_node_finfo)
         func_node = PFLFunc(PFLASTType.FUNC,
@@ -1317,7 +1425,7 @@ class PFLParser:
         # if stmt.decorator_list:
         #     # ctx = get_parse_context_checked()
         #     # ctx._disable_type_check = True
-        #     func_node.decorator_list = [self._parse_expr_to_df_ast(e, scope) for e in stmt.decorator_list]
+        #     func_node.decorator_list = [self._parse_expr_to_pfl(e, scope) for e in stmt.decorator_list]
         #     # ctx._disable_type_check = False
 
         # TODO disable nested func support
@@ -1325,13 +1433,14 @@ class PFLParser:
         # TODO add function to scope
         return func_node
 
-    def parse_compile_req_to_pfl_ast(
+    def parse_func_compile_req_to_pfl_ast(
             self,
             req: PFLCompileReq,
             allow_inline_expand: bool = False) -> PFLFunc:
+        assert not req.is_dcls
         parse_cfg = self._parse_cfg
         backend = self._backend
-        func = req.func
+        func = req.func_or_dcls
         # if length of func_qname_parts > 1, get the last part class from globals
         func_uid = req.uid
         func_meta = req.meta
@@ -1342,13 +1451,14 @@ class PFLParser:
         if func in self._cache_fn_precompile_info:
             cache = self._cache_fn_precompile_info[func]
             module_code = cache.module_code
+            module_path = cache.module_path
             func_node = cache.tree
             func_code_lines = cache.func_lines
             code = cache.code 
             first_lineno = cache.first_lineno
             module_code_lines = cache.module_code_lines
         else:
-            module_code = self._module_code_getter(func)
+            module_code, module_path = self._module_code_path_getter(func)
             func_code_lines, first_lineno = getsourcelinesby_lines(
                 func, [line + '\n' for line in module_code.splitlines()])
             func_code_lines = [l.rstrip() for l in func_code_lines]
@@ -1366,6 +1476,7 @@ class PFLParser:
             module_code_lines = module_code.splitlines()
             self._cache_fn_precompile_info[func] = _CompileFuncCache(
                 module_code=module_code,
+                module_path=module_path,
                 tree=func_node,
                 module_code_lines=module_code_lines,
                 func_lines=func_code_lines,
@@ -1393,7 +1504,6 @@ class PFLParser:
             fn_globals[first_arg.arg] = req.bound_self
         # find funcdef
         transformer = MapAstNodeToConstant(
-            self._func_unwrapper,
             fn_globals,
             PFLErrorFormatContext(func_code_lines),
             backend=backend,
@@ -1414,7 +1524,7 @@ class PFLParser:
             parse_ctx = PFLParseContext(
                 module_code_lines,
                 anno_eval_globals,
-                self._func_unwrapper,
+                self._var_preproc,
                 cfg=parse_cfg,
                 backend=backend,
                 node_to_constants=transformer._node_to_compile_constant,
@@ -1452,10 +1562,11 @@ class PFLParser:
                 func_pfl_node.compile_info.first_lineno = first_lineno
                 func_pfl_node.compile_info.original = func
                 func_pfl_node.compile_info.meta = func_meta
+                func_pfl_node.compile_info.path = module_path
                 if func_compile_uid not in self._all_compiled:
                     self._all_compiled[func_compile_uid] = func_pfl_node
                 else:
-                    func_pfl_node = self._all_compiled[func_compile_uid]
+                    func_pfl_node = cast(PFLFunc, self._all_compiled[func_compile_uid])
 
             except PFLAstParseError as e:
                 error_line = get_parse_context_checked(
@@ -1463,6 +1574,137 @@ class PFLParser:
                 print(error_line)
                 raise e
         return func_pfl_node
+
+
+    def parse_dcls_compile_req_to_pfl_ast(
+            self,
+            req: PFLCompileReq,
+            allow_inline_expand: bool = False) -> PFLClass:
+        assert req.is_dcls
+        ctx = get_parse_context_checked()
+        dcls_type = req.self_type
+        assert isinstance(dcls_type, PFLExprInfo)
+        dcls_obj_type = dataclasses.replace(dcls_type, type=PFLExprType.DATACLASS_OBJECT)
+        lineno = inspect.getsourcelines(req.func_or_dcls)[1]
+        cls_node = PFLClass(PFLASTType.CLASS, (lineno, 0, -1, -1),
+            name=req.func_or_dcls.__name__, st=dcls_type)
+        assert inspect.isclass(req.func_or_dcls)
+        has_user_init = is_dcls_init_defined_by_user(req.func_or_dcls)
+        has_user_pinit = is_dcls_post_init_defined_by_user(req.func_or_dcls)
+        parse_cache = get_parse_cache_checked()
+        # template dataclasses info is shared for all subsequence usage.
+        _, module_path = self._module_code_path_getter(req.func_or_dcls)
+
+        if has_user_init:
+            fn = req.func_or_dcls.__init__
+            if req.meta.is_template:
+                if req.args_from_call is not None:
+                    args_from_call = ([dcls_obj_type] + req.args_from_call[0], req.args_from_call[1])
+                else:
+                    args_from_call = ([dcls_obj_type], {})
+                fn_req = ctx.get_compile_req(fn, None, req.meta, is_method_def=True, self_type=dcls_obj_type,
+                    args_from_call=args_from_call)
+                fn_req.dcls_infer_field_type = True
+                compiled_func = self.parse_func_compile_req_to_pfl_ast(
+                    fn_req, allow_inline_expand=allow_inline_expand)
+                # parse 
+                dcls_info = dcls_type.get_dcls_info_checked()
+                for field in dcls_info.args:
+                    assert field.is_type_parsed, f"you must set all fields in init fn when your dcls is template, got {field.arg_name} missing."
+                cls_node.init_uid = compiled_func.uid
+                # use func_info to store init function info
+                dcls_type.func_info = compiled_func.st.get_func_info_checked()
+                if req.meta.constexpr_args:
+                    for field in dcls_info.args:
+                        if field.arg_name not in req.meta.constexpr_args:
+                            field.type._constexpr_data = undefined
+            else:
+                new_st = parse_cache.cached_parse_func(fn,
+                                    self_type=dcls_obj_type.annotype)
+                new_finfo = new_st.get_func_info_checked()
+                if new_finfo.compilable_meta is not None:
+                    assert not new_finfo.compilable_meta.is_template, \
+                        "non-template class should have non-template init function"
+                creq = ctx.enqueue_func_compile(
+                    fn,
+                    new_finfo,
+                    is_method_def=True,
+                    self_type=dcls_obj_type,
+                    is_prop=False)
+                # parse 
+                cls_node.init_uid = creq.get_func_compile_uid()
+                # use func_info to store init function info
+                dcls_type.func_info = new_finfo
+            dcls_type.func_info.return_type = dcls_obj_type
+        else:
+            if req.meta.is_template:
+                dcls_info = req.info
+                assert dcls_info is not None and req.args_from_call is not None
+                matched = dcls_info.match_args_to_sig(req.args_from_call)
+                for field_info, arg_st in matched.args:
+                    if not is_undefined(arg_st):
+                        field_info.type = arg_st 
+                        field_info.is_type_parsed = True
+                    else:
+                        assert not is_undefined(field_info.default_type), \
+                            f"field {field_info.arg_name} default type must be defined"
+                        field_info.type = field_info.default_type
+                        field_info.is_type_parsed = True
+                dcls_type.func_info = dataclasses.replace(dcls_info)
+            else:
+                dcls_info = req.info
+                assert dcls_info is not None
+                dcls_type.func_info = dataclasses.replace(dcls_info)
+
+        if has_user_pinit:
+            fn = req.func_or_dcls.__post_init__
+            if req.meta.is_template:
+
+                fn_req = ctx.get_compile_req(fn, None, req.meta, is_method_def=True, self_type=dcls_obj_type,
+                    args_from_call=req.args_from_call)
+                # parse 
+                compiled_func = self.parse_func_compile_req_to_pfl_ast(
+                    fn_req, allow_inline_expand=allow_inline_expand)
+                cls_node.post_init_uid = compiled_func.uid
+            else:
+                new_st = parse_cache.cached_parse_func(fn,
+                                    self_type=dcls_obj_type.annotype)
+                new_finfo = new_st.get_func_info_checked()
+                if new_finfo.compilable_meta is not None:
+                    assert not new_finfo.compilable_meta.is_template, \
+                        "non-template class should have non-template post_init function"
+                creq = ctx.enqueue_func_compile(
+                    fn,
+                    new_finfo,
+                    is_method_def=True,
+                    self_type=dcls_obj_type,
+                    is_prop=False)
+                cls_node.post_init_uid = creq.get_func_compile_uid()
+
+        cls_node.st = dcls_type
+        compilable_uid = req.get_func_compile_uid()
+        cls_node.name = req.func_or_dcls.__name__
+        cls_node.uid = compilable_uid
+        cls_node.st.compiled_uid = compilable_uid
+        cls_node.compile_info.original = req.func_or_dcls
+        cls_node.compile_info.meta = req.meta
+        cls_node.compile_info.path = module_path
+        if compilable_uid not in self._all_compiled:
+            self._all_compiled[compilable_uid] = cls_node
+        else:
+            cls_node = cast(PFLClass, self._all_compiled[compilable_uid])
+        return cls_node 
+
+    def parse_compile_req_to_pfl_ast(
+            self,
+            req: PFLCompileReq,
+            allow_inline_expand: bool = False) -> Union[PFLClass, PFLFunc]:
+        if req.is_dcls:
+            return self.parse_dcls_compile_req_to_pfl_ast(req,
+                                                           allow_inline_expand)
+        else:
+            return self.parse_func_compile_req_to_pfl_ast(req,
+                                                          allow_inline_expand)
 
     def _get_compile_req(
             self,
@@ -1479,7 +1721,9 @@ class PFLParser:
             bound_self = func.__self__
             # get unbound func
             func = func.__func__
-        func = self._func_unwrapper(func)
+        prep_res = self._var_preproc(func)
+        func = prep_res.value
+        func_meta = prep_res.compilable_meta
         func_qname_parts = func.__qualname__.split('.')
         # if length of func_qname_parts > 1, get the last part class from globals
         self_type = None
@@ -1497,7 +1741,6 @@ class PFLParser:
             ), f"parent {parent_from_qn} must be a dataclass type, got {type(parent_from_qn)}"
             self_type = parse_type_may_optional_undefined(parent_from_qn)
         func_uid = get_module_id_of_type(func)
-        func_meta = get_compilable_meta(func)
         func_sig = inspect.signature(func)
         is_method_def = False
         if self_type is not None and len(func_sig.parameters) > 0 and \
@@ -1531,7 +1774,7 @@ class PFLParser:
         outer_ctx = get_parse_context()
         assert outer_ctx is None, "must be root"
         parse_ctx_root = PFLParseContext.create_root_ctx(
-            self._backend, self._func_unwrapper, self._parse_cfg,
+            self._backend, self._var_preproc, self._parse_cfg,
             func_need_to_compile)
         with enter_parse_context(parse_ctx_root):
             while func_need_to_compile:
@@ -1540,7 +1783,7 @@ class PFLParser:
                 ) not in self._all_compiled:
                     PFL_LOGGER.warning("%s", str(compile_req))
                     self.parse_compile_req_to_pfl_ast(compile_req)
-        return self._all_compiled[req.get_func_compile_uid()]
+        return cast(PFLFunc, self._all_compiled[req.get_func_compile_uid()])
 
     def parse_funcs_to_pfl_ast(
             self,
@@ -1556,7 +1799,7 @@ class PFLParser:
             req = self._get_compile_req(funcs[j], external_anno)
             func_need_to_compile.append(req)
         parse_ctx_root = PFLParseContext.create_root_ctx(
-            self._backend, self._func_unwrapper, self._parse_cfg,
+            self._backend, self._var_preproc, self._parse_cfg,
             func_need_to_compile)
         with enter_parse_context(parse_ctx_root):
             while func_need_to_compile:
@@ -1568,7 +1811,7 @@ class PFLParser:
         return self._all_compiled_to_pfl_library(self._all_compiled)
 
     def _all_compiled_to_pfl_library(
-            self, all_compiled: dict[str, PFLFunc]) -> PFLLibrary:
+            self, all_compiled: dict[str, Union[PFLFunc, PFLClass]]) -> PFLLibrary:
         """Convert all compiled functions to a PFL library."""
 
         all_modules: dict[str, PFLModule] = {}
@@ -1576,10 +1819,11 @@ class PFLParser:
             module_id = v.get_module_import_path()
             if module_id not in all_modules:
                 assert v.compile_info.original is not None
-                module_code = self._module_code_getter(v.compile_info.original)
+                module_code, path = self._module_code_path_getter(v.compile_info.original)
                 mod = PFLModule(PFLASTType.MODULE, (-1, -1, None, None),
                                 uid=module_id)
                 mod.compile_info.code = module_code
+                mod.compile_info.path = path
                 all_modules[module_id] = mod
             all_modules[module_id].body.append(v)
         return PFLLibrary(all_modules)
@@ -1600,27 +1844,22 @@ class PFLParser:
         node_to_constants = {}
         if var_scope is not None:
             transformer = MapAstNodeToConstant(
-                self._func_unwrapper,
                 var_scope,
                 PFLErrorFormatContext(expr_str_lines),
                 backend=backend,
                 var_preproc=self._var_preproc)
             transformer.visit(tree)
             node_to_constants = transformer._node_to_compile_constant
-            # tree = ast.fix_missing_locations(
-            #     MapAstNodeToConstant(var_scope, PFLErrorFormatContext(expr_str_lines), backend=backend).visit(tree))
         assert isinstance(tree, ast.Expression)
         tree_expr = tree.body
         # find funcdef
         with enter_parse_context(
                 PFLParseContext(expr_str_lines, {},
-                                self._func_unwrapper,
+                                self._var_preproc,
                                 cfg=parse_cfg,
                                 backend=backend,
                                 node_to_constants=node_to_constants)) as ctx:
             init_scope: dict[str, PFLExprInfo] = {}
-            for k, v in STD_REGISTRY.global_dict.items():
-                init_scope[v.mapped_name] = ctx.cache.cached_parse_std_item(v)
             if var_scope is None:
                 scope = init_scope.copy()
             else:
@@ -1630,7 +1869,7 @@ class PFLParser:
                         parse_type_may_optional_undefined(type(v)),
                         is_type=False)
             try:
-                res = self._parse_expr_to_df_ast(tree_expr, scope)
+                res = self._parse_expr_to_pfl(tree_expr, scope)
             except PFLAstParseError as e:
                 error_line = get_parse_context_checked(
                 ).format_error_from_lines_node(e.node)
@@ -1646,16 +1885,15 @@ def parse_func_to_pfl_ast(
         parse_cfg: Optional[PFLParseConfig] = None,
         func_code_getter: Optional[Callable[[Any], tuple[list[str],
                                                          int]]] = None,
-        module_code_getter: Optional[Callable[[Any], str]] = None,
-        func_unwrapper: Optional[Callable[[Any], Callable]] = None,
-        var_preproc: Optional[Callable[[Any], Any]] = None,
+        module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
+        var_preproc: Optional[Callable[[Any], PFLProcessedVarMeta]] = None,
         anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
                                           PFLExprInfo]] = None,
-        all_compiled: Optional[dict[str, PFLFunc]] = None,
+        all_compiled: Optional[dict[str, Union[PFLFunc, PFLClass]]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None,
         constexpr_args: Optional[dict[str, Any]] = None) -> PFLFunc:
     parser = PFLParser(backend, parse_cfg, func_code_getter,
-                       module_code_getter, func_unwrapper, var_preproc,
+                       module_code_path_getter, var_preproc,
                        anno_transform)
     if all_compiled is not None:
         parser._all_compiled = all_compiled
@@ -1670,9 +1908,8 @@ def parse_func_to_pfl_library(
         parse_cfg: Optional[PFLParseConfig] = None,
         func_code_getter: Optional[Callable[[Any], tuple[list[str],
                                                          int]]] = None,
-        module_code_getter: Optional[Callable[[Any], str]] = None,
-        func_unwrapper: Optional[Callable[[Any], Callable]] = None,
-        var_preproc: Optional[Callable[[Any], Any]] = None,
+        module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
+        var_preproc: Optional[Callable[[Any], PFLProcessedVarMeta]] = None,
         anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
                                           PFLExprInfo]] = None,
         external_anno: Optional[tuple[dict[str, Any], Any]] = None,
@@ -1682,7 +1919,7 @@ def parse_func_to_pfl_library(
     if your func is dynamic generated, you need to use `tempfile_in_linecache` to add your dynamic code to linecache.
     """
     parser = PFLParser(backend, parse_cfg, func_code_getter,
-                       module_code_getter, func_unwrapper, var_preproc,
+                       module_code_path_getter, var_preproc,
                        anno_transform)
     parser.parse_func_to_pfl_ast(func, scope, external_anno, constexpr_args)
     return parser._all_compiled_to_pfl_library(parser._all_compiled)

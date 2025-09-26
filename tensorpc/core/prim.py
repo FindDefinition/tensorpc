@@ -45,6 +45,8 @@ def is_loopback_call():
     """tell service whether rpc is a loopback call, 
     i.e. call from the same process without RPC/socket.
     """
+    if not is_in_server_context():
+        return True 
     return get_server_context().is_loopback_call
 
 def get_service(key):

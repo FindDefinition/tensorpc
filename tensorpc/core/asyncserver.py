@@ -29,7 +29,7 @@ import numpy as np
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_PORT_MAX_TRY
 from tensorpc.core.defs import ServiceDef
-from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
+from tensorpc.core.server_core import ProtobufServiceCore, ServerDistributedMeta, ServerMeta
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
@@ -337,13 +337,15 @@ def serve(service_def: ServiceDef,
           ssl_key_path: str = "",
           ssl_crt_path: str = "",
           create_loop: bool = False,
-          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+          dist_meta: Optional[ServerDistributedMeta] = None):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta, dist_meta)
     return serve_service_core(server_core, wait_time, length, is_local,
                               max_threads, process_id, ssl_key_path, ssl_crt_path,
-                              max_port_retry=max_port_retry)
+                              max_port_retry=max_port_retry,
+                              dist_meta=dist_meta)
 
 def serve_service_core(service_core: ProtobufServiceCore,
           wait_time=-1,
@@ -355,7 +357,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
           ssl_crt_path: str = "",
           create_loop: bool = False,
           start_thread_ev: Optional[threading.Event] = None,
-          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+          dist_meta: Optional[ServerDistributedMeta] = None):
     # url = '[::]:{}'.format(port)
     # smeta = ServerMeta(port=port, http_port=-1)
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -386,6 +389,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
         service_core._loop = None
         if create_loop:
             loop.close()
+        if dist_meta is not None:
+            dist_meta.cleanup()
 
 
 # import uvloop
@@ -399,10 +404,11 @@ def serve_with_http(service_def: ServiceDef,
                     process_id=-1,
                     ssl_key_path: str = "",
                     ssl_crt_path: str = "",
-                    max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+                    max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+                    dist_meta: Optional[ServerDistributedMeta] = None):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta, dist_meta)
     loop = asyncio.get_event_loop()
     try:
         # uvloop.install()
@@ -428,3 +434,5 @@ def serve_with_http(service_def: ServiceDef,
         if _cleanup_coroutines:
             loop.run_until_complete(*_cleanup_coroutines)
         server_core._loop = None 
+        if dist_meta is not None:
+            dist_meta.cleanup()

@@ -15,6 +15,7 @@ import traceback
 from typing import (TYPE_CHECKING, Any, AsyncIterator, Callable, Dict,
                     Iterator, List, Mapping, Optional, Sequence, Union)
 import dataclasses
+from typing_extensions import Literal
 
 import aiohttp
 from tensorpc.core.asyncclient import AsyncRemoteManager
@@ -36,19 +37,82 @@ class ServerMeta:
     port: int
     http_port: int
 
+@dataclasses.dataclass
+class ServerDistributedMeta:
+    rank: int 
+    world_size: int 
+
+    mode: Literal["torch_gloo", "torch_nccl", "torch_gloo_nccl", "none"] = "none"
+    torch_pg: Optional[Any] = None  # torch.distributed.ProcessGroup
+
+    _inited: bool = False
+
+    def init_backend(self):
+        if self._inited:
+            return
+        if self.mode.startswith("torch"):
+            import torch 
+            import torch.distributed as dist
+            if self.mode == "torch_gloo":
+                dist.init_process_group(backend="gloo")
+                self.torch_pg = dist.new_group(backend="gloo")
+            elif self.mode == "torch_nccl":
+                dist.init_process_group(backend="nccl")
+                self.torch_pg = dist.new_group(backend="nccl")
+                torch.cuda.set_device(self.rank)
+            elif self.mode == "torch_gloo_nccl":
+                dist.init_process_group(backend="cpu:gloo,cuda:nccl")
+                self.torch_pg = dist.new_group(backend="cpu:gloo,cuda:nccl")
+                torch.cuda.set_device(self.rank)
+            else:
+                raise ValueError(f"unknown torch distributed mode {self.mode}")
+            self.rank = dist.get_rank(self.torch_pg)
+            self.world_size = dist.get_world_size(self.torch_pg)
+            LOGGER.warning(f"torch distributed inited, rank {self.rank}, world size {self.world_size}, backend {self.mode}")
+        else:
+            assert self.mode == "none"
+            assert self.rank == 0 and self.world_size == 1
+        self._inited = True
+
+    def all_gather_object(self, obj: Any) -> List[Any]:
+        if self.mode.startswith("torch"):
+            assert self.torch_pg is not None
+            import torch.distributed as dist
+            objs = [None for _ in range(self.world_size)]
+            dist.all_gather_object(objs, obj, group=self.torch_pg)
+            return objs
+        else:
+            raise ValueError(f"all_gather_object not supported in mode {self.mode}")
+
+    def barrier(self):
+        if self.mode.startswith("torch"):
+            assert self.torch_pg is not None
+            import torch.distributed as dist
+            dist.barrier(group=self.torch_pg)
+        else:
+            raise ValueError(f"barrier not supported in mode {self.mode}")
+
+    def cleanup(self):
+        if self.mode.startswith("torch") and self._inited:
+            assert self.torch_pg is not None
+            import torch.distributed as dist
+            dist.destroy_process_group()
+            self.torch_pg = None
+            self._inited = False
 
 class _ExposedServerProps(object):
     """we save static methods/props of service to a object
     """
 
     def __init__(self, exec_lock, service_units, shutdown_event, local_url,
-                 is_sync: bool, server_meta: ServerMeta):
+                 is_sync: bool, server_meta: ServerMeta, dist_meta: Optional[ServerDistributedMeta] = None):
         self.exec_lock = exec_lock
         self.service_units = service_units
         self.shutdown_event = shutdown_event
         self.local_url = local_url
         self.is_sync = is_sync
         self.server_meta = server_meta
+        self.dist_meta = dist_meta
         self.http_client_session: Optional[aiohttp.ClientSession] = None
         self._async_shutdown_event: Optional[asyncio.Event] = None
         self._executor: Optional[Executor] = None
@@ -125,7 +189,7 @@ def get_global_context() -> ServerGlobalContext:
 class ServiceCore(object):
 
     def __init__(self, local_url: str, service_def: ServiceDef, is_sync: bool,
-                 server_meta: ServerMeta):
+                 server_meta: ServerMeta, dist_meta: Optional[ServerDistributedMeta] = None):
         self._exec_lock = threading.Lock()
         self.local_url = local_url
         self.shutdown_event = threading.Event()
@@ -140,11 +204,13 @@ class ServiceCore(object):
         self._register_exit_lock = threading.Lock()
         self._exit_funcs = {}
         self.server_meta = server_meta
+        self.dist_meta = dist_meta
         self._exposed_props = _ExposedServerProps(self._exec_lock,
                                                   self.service_units,
                                                   self.shutdown_event,
                                                   self.local_url, is_sync,
-                                                  server_meta)
+                                                  server_meta,
+                                                  dist_meta)
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync,
                                                    server_meta)

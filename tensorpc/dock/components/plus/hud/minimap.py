@@ -16,6 +16,8 @@ import tensorpc.core.datamodel as D
 from tensorpc.dock.components.plus.tensorutil import TensorContainer
 from tensorpc.dock.components.three.event import HudLayoutChangeEvent, KeyboardHoldEvent, PointerEvent
 from tensorpc.core.pfl.backends.js import Math, MathUtil
+from tensorpc.dock.core.datamodel import _compile_pfllibrary
+
 @dataclasses.dataclass
 class SimpleLayout:
     scrollFactorX: three.NumberType = 1.0
@@ -289,3 +291,5 @@ class MiniMap(three.Group):
     async def set_new_childs(self, childs: three.ThreeLayoutType):
         await self._child_group.set_new_layout(childs) # type: ignore
 
+if __name__ == "__main__":
+    _compile_pfllibrary(MinimapModel)

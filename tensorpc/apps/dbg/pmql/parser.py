@@ -34,6 +34,10 @@ class IndexItem:
     is_all: bool
 
 @dataclasses.dataclass
+class IdentityItem:
+    pass 
+
+@dataclasses.dataclass
 class PartialGlob:
     glob: list[str]
     regex: Optional[re.Pattern] = None
@@ -46,7 +50,7 @@ class PartialGlob:
             self.regex = re.compile(glob_re)
         return self.regex
 
-QueryItem: TypeAlias = Union[PlainItem, TypeItem, DoubleGlob, IndexItem, PartialGlob]
+QueryItem: TypeAlias = Union[PlainItem, TypeItem, DoubleGlob, IndexItem, PartialGlob, IdentityItem]
 
 @dataclasses.dataclass
 class SingleQuery:
@@ -149,6 +153,9 @@ class PMQLTransformer(Transformer):
 
     def double_glob(self, items):
         return DoubleGlob()
+
+    def identity_item(self, items):
+        return IdentityItem()
 
     def partial_glob(self, items):
         res: list[str] = []

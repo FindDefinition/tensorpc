@@ -41,6 +41,16 @@ class ComputeNodeBase(abc.ABC):
     def get_node_detail_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
         return None
 
+    def get_remote_preview_container(self) -> Optional[mui.FlexBox]:
+        """Compute flow will call this and set remote box as child of this container.
+        """
+        return None
+
+    def get_remote_detail_container(self) -> Optional[mui.FlexBox]:
+        """Compute flow will call this and set remote box as child of this container.
+        """
+        return None
+
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type: Any,
                                      _handler: GetCoreSchemaHandler):
@@ -93,6 +103,7 @@ class ComputeNodeDesc:
     is_dynamic_cls: bool = False
     resource_desp: Optional[ResourceDesc] = None
     # static layout
+    # remote layout is only allowed in class-based node.
     layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
     detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
     # state def
@@ -102,6 +113,7 @@ class ComputeNodeDesc:
     # private executor
     # WARNING: node with private executor always run in local.
     temp_executor_creator: Optional[Callable[[Any], Any]] = None
+    layout_in_remote: bool = False
 
     def get_resizer(self):
         if self.resizer_props is not None:
@@ -309,6 +321,8 @@ class ComputeNodeRuntime:
     out_handles: list[AnnoHandle]
     executor: Optional[Any] = None # TODO find a way to replace Any with real type
     impl_code: str = ""
+    # remote executor that stores current node instance.
+    remote_executor: Optional[Any] = None
 
     def has_private_exec(self):
         return self.cfg.temp_executor_creator is not None

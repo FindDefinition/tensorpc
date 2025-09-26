@@ -34,7 +34,7 @@ def _matmul_kernel_test_fn(is_persist: bool) -> pfl.PFLInlineRunEnv:
         "BLOCK_SIZE_N": 64,
         "BLOCK_SIZE_K": 32,
         "GROUP_SIZE_M": 8,
-        "NUM_SMS": NUM_SMS
+        "NUM_SMS": NUM_SMS,
     }
     ref_kwargs = {
         "c_ptr": c_ref
@@ -42,10 +42,12 @@ def _matmul_kernel_test_fn(is_persist: bool) -> pfl.PFLInlineRunEnv:
     num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
-    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
+    sim_info = tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
         [None, "b_ptr"],
         ["a_ptr", "c_ptr"]
-    ]))
+    ], grid_size_for_triton=lambda META: (triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]), 1, 1))
+
+    return pfl.PFLInlineRunEnv(test_kwargs, userdata=sim_info)
 
 def _matmul_kernel_test_fn_tma(is_persist: bool) -> pfl.PFLInlineRunEnv:
     M = 240
@@ -78,10 +80,11 @@ def _matmul_kernel_test_fn_tma(is_persist: bool) -> pfl.PFLInlineRunEnv:
     num_grid = triton.cdiv(M, test_kwargs["BLOCK_SIZE_M"]) * triton.cdiv(N, test_kwargs["BLOCK_SIZE_N"])
     if is_persist:
         num_grid = min(num_grid, NUM_SMS)
-    return pfl.PFLInlineRunEnv(test_kwargs, userdata=tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
-        [None, "b_ptr"],
-        ["a_ptr", "c_ptr"]
-    ]))
+    sim_info = tritonstd.TritonSimInfo((num_grid, 1, 1), ref_kwargs, vis_layout=[
+        [None, "b_desc"],
+        ["a_desc", "c_desc"]
+    ])
+    return pfl.PFLInlineRunEnv(test_kwargs, userdata=sim_info)
 
 @triton.jit
 @pfl.mark_pfl_compilable(is_template=True)
@@ -208,7 +211,6 @@ def matmul_kernel(
     for k in tl.range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
-        pfl.compiler_print_type(a_ptrs)
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
@@ -317,8 +319,8 @@ def matmul_kernel_tma_persistent(a_desc, b_desc, c_desc,  #
         # In this case we partition the accumulator into 2 BLOCK_SIZE_M x BLOCK_SIZE_N // 2 tensors
         if EPILOGUE_SUBTILE:
             acc = tl.reshape(accumulator, (BLOCK_SIZE_M, 2, BLOCK_SIZE_N // 2))
-            acc = tl.permute(acc, (0, 2, 1))
-            acc0, acc1 = tl.split(acc)
+            acc_permuted = tl.permute(acc, (0, 2, 1))
+            acc0, acc1 = tl.split(acc_permuted)
             c0 = acc0.to(dtype)
             c_desc.store([offs_am_c, offs_bn_c], c0)
             c1 = acc1.to(dtype)

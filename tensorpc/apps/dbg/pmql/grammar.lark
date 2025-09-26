@@ -26,7 +26,7 @@
 // is isn't meanful for variable query.
 
 ?start: query_expr | module_var_query | module_stack_query | module_weight_query
-?mod_query_item: plain_item | type_item | double_glob | partial_glob
+?mod_query_item: plain_item | type_item | double_glob | partial_glob | identity_item
 
 plain_item: NAME
 type_item: "<" QUALNAME ">"
@@ -34,7 +34,7 @@ index_item: "[" (SIGNED_INT | STAR | ESCAPED_STRING) "]"
 double_glob: "**"
 partial_glob_strip: WORD_WITH_LOWER ("*" WORD_WITH_LOWER)*
 partial_glob:  STAR? partial_glob_strip STAR?
-
+identity_item: "$" // identity item, only match the current exact module.
 query_expr: mod_query_item (("." mod_query_item) | index_item)*
 module_variable_query_expr: VQ_LITERALS (("." mod_query_item) | index_item)*
 

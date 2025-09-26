@@ -36,7 +36,9 @@ def test_parse_pmql():
         "mod1.**.mod3@ret",
         "mod1.asd*.mod3@ret[0].key",
         "mod1.a*sd*.mod3!var_query_expr",
-        "mod1.asd*.mod3#weight"
+        "mod1.asd*.mod3#weight",
+        "$#weight",
+
     ]
     for q in queries:
         print(parse_pmql(q))
@@ -44,7 +46,7 @@ def test_parse_pmql():
 def test_pth_query():
     import torch
     from torch import nn 
-    tr = nn.Transformer(nhead=16)
+    tr = nn.Transformer(nhead=16).cuda()
     # queries = [
     #     # "**.<Linear>",
     #     # "encoder.**.linear*",
@@ -75,12 +77,13 @@ def test_pth_query():
     #     handle.remove()
     #     # print([x.fqn for x in res])
 
-    with module_query_context(tr, data="encoder.layers[*]!output") as ctx:
-        src = torch.rand((10, 32, 512))
-        tgt = torch.rand((20, 32, 512))
+    with module_query_context(tr, data="$@args") as ctx:
+        src = torch.rand((10, 32, 512)).cuda()
+        tgt = torch.rand((20, 32, 512)).cuda()
         out = tr(src, tgt)
 
-    print([x.data.shape for x in ctx.result["data"]])
+    print([x.fqn for x in ctx.result["data"]])
+    print(ctx.result["data"])
 
 if __name__ == "__main__":
     # test_parse_pmql()

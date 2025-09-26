@@ -22,7 +22,7 @@ import copy
 from functools import partial
 from typing_extensions import override
 
-from tensorpc.core.annolib import DataclassType
+from tensorpc.core.annolib import DataclassType, is_undefined
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import simple_chunk_call
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -1326,8 +1326,10 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
 class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
 
     def __init__(self, url: str, port: int, key: str, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None, 
-                 enable_fallback_layout: bool = True, relay_urls: Optional[list[str]] = None) -> None:
-        super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps, fail_callback, enable_fallback_layout)
+                 enable_fallback_layout: bool = True, relay_urls: Optional[list[str]] = None,
+                 fastrpc_timeout: int = 5) -> None:
+        super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps, fail_callback, enable_fallback_layout,
+            fastrpc_timeout=fastrpc_timeout)
         self._robj: Optional[AsyncRemoteManager] = None
         self._relay_urls = relay_urls
 
@@ -1652,7 +1654,8 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         assert isinstance(draft, DraftBase)
         # assert not isinstance(self.value,
         #                       Undefined), "must be controlled component"
-        return self._bind_field_with_change_event("value", draft, uncontrolled=True)
+        return self._bind_field_with_change_event("value", draft, uncontrolled=True, 
+            uncontrolled_prep=lambda x: "" if x is None else str(x))
 
 
 @dataclasses.dataclass
@@ -1735,6 +1738,15 @@ class MonacoEditorAction:
     contextMenuOrder: Optional[NumberType] = None
     userdata: Optional[Any] = None
 
+@dataclasses.dataclass
+class MonacoBreakpoint:
+    enabled: bool 
+    lineNumber: int
+
+    @model_validator(mode="after")
+    def _check_bkpt_valid(self) -> Self:
+        assert self.lineNumber > 0, "lineNumber must be greater than 0"
+        return self
 
 @dataclasses.dataclass
 class MonacoEditorProps(FlexComponentBaseProps, ContainerBaseProps):
@@ -1744,8 +1756,10 @@ class MonacoEditorProps(FlexComponentBaseProps, ContainerBaseProps):
     debounce: Union[NumberType, Undefined] = undefined
     lspPort: Union[int, Undefined] = undefined
     readOnly: Union[bool, Undefined] = undefined
-    actions: Union[List[MonacoEditorAction], Undefined] = undefined
-
+    actions: Union[list[MonacoEditorAction], Undefined] = undefined
+    # you need to enable glyphMargin to use breakpoints.
+    glyphMargin: Union[bool, Undefined] = undefined
+    bkpts: Union[list[MonacoBreakpoint], Undefined] = undefined
 
 class _MonacoEditorControlType(enum.IntEnum):
     SetLineNumber = 0
@@ -1875,6 +1889,7 @@ class MonacoActionEvent:
     selection: Optional[MonacoSelectionEvent]
     userdata: Optional[Any] = None
 
+
 _T = TypeVar("_T")
 
 class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
@@ -1920,6 +1935,7 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
             FrontendEventType.EditorInlayHintsQuery.value,
             FrontendEventType.EditorHoverQuery.value,
             FrontendEventType.EditorCodelensQuery.value,
+            FrontendEventType.EditorBreakpointChange.value,
         ]
         super().__init__(UIType.MonacoEditor, MonacoEditorProps, MonacoEditor.ChildDef(icomps or {}),
             allowed_events=all_evs)
@@ -1935,6 +1951,8 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                                     self._default_on_save_state)
         self.register_event_handler(FrontendEventType.EditorQueryState.value,
                                     self._default_on_query_state)
+        self.register_event_handler(FrontendEventType.EditorBreakpointChange.value,
+                                    self._default_on_bkpt_change)
 
         self.event_change = self._create_event_slot(FrontendEventType.Change)
         self.event_editor_save = self._create_event_slot(
@@ -1960,6 +1978,9 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         self.event_editor_decoration_change = self._create_event_slot(
             FrontendEventType.EditorDecorationsChange,
             converter=lambda x: MonacoDecorationChangeEvent(**x))
+        self.event_editor_breakpoint_change = self._create_event_slot(
+            FrontendEventType.EditorBreakpointChange,
+            converter=lambda x: [MonacoBreakpoint(**b) for b in x])
 
     @property
     def childs_complex(self):
@@ -1988,6 +2009,11 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         if self._save_version_id is not None:
             res["saveVersionId"] = self._save_version_id
         return res
+
+    def _default_on_bkpt_change(self, ev: list[MonacoBreakpoint]):
+        # don't send to frontend here, frontend prop only used
+        # to sync bkpts from backend to frontend.
+        self.props.bkpts = ev
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         if ev.type == FrontendEventType.EditorChange.value:
@@ -2042,6 +2068,13 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         }
         ev = self.create_comp_event(ev_dict)
         await self.send_and_wait(ev)
+
+    async def set_breakpoints(self, bkpts: list[MonacoBreakpoint]):
+        """set bkpt from backend.
+        this method won't trigger frontend event EditorBreakpointChange.
+        """
+        self.prop(bkpts=bkpts)
+        await self.send_and_wait(self.update_event(bkpts=bkpts))
 
     async def write(self,
                     content: str,
@@ -2211,7 +2244,8 @@ class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
         """
         # TODO validate type
         assert isinstance(draft, DraftBase)
-        return self._bind_field_with_change_event("value", draft, uncontrolled=True)
+        return self._bind_field_with_change_event("value", draft, uncontrolled=True,
+            uncontrolled_prep=lambda x: "" if x is None else str(x))
 
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):
@@ -2554,11 +2588,22 @@ class AutocompletePropsBase(MUIComponentBaseProps, SelectBaseProps):
     limitTags: Union[Undefined, int] = undefined
     addOption: Union[Undefined, bool] = undefined
     textFieldProps: Union[Undefined, TextFieldProps] = undefined
+    labelKey: Union[Undefined, str] = undefined
+    newValueKey: Union[Undefined, str] = undefined
 
 
 @dataclasses.dataclass
 class AutocompleteProps(AutocompletePropsBase):
     value: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _check_options(self):
+        if is_undefined(self.labelKey):
+            label_key = "label"
+        else:
+            label_key = self.labelKey
+        for op in self.options:
+            assert label_key in op, f"each option must contains {label_key} as unique id."
 
 
 class Autocomplete(MUIComponentBase[AutocompleteProps]):
@@ -2581,13 +2626,8 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
             FrontendEventType.Change.value,
             FrontendEventType.SelectNewItem.value
         ])
-        self.props.label = label
+        self.prop(label=label, options=options, value=None, size="small")
         self.callback = callback
-        # assert len(items) > 0
-        self.props.options = options
-        # item value must implement eq/ne
-        self.props.value = None
-        self.props.size = "small"
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -2773,59 +2813,98 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+_T_slider_base_value = TypeVar("_T_slider_base_value", NumberType, Tuple[NumberType, NumberType])
 
 @dataclasses.dataclass
-class SliderBaseProps(MUIComponentBaseProps):
+class _SliderBaseProps(MUIComponentBaseProps, Generic[_T_slider_base_value]):
+    # TODO remove ranges
+    ranges: Union[tuple[NumberType, NumberType, NumberType], Undefined] = undefined 
+    min: Union[Undefined, NumberType] = undefined
+    max: Union[Undefined, NumberType] = undefined
+    step: Union[Undefined, NumberType] = undefined
+    value: Union[Undefined, _T_slider_base_value] = undefined
+    defaultValue: Union[Undefined, _T_slider_base_value] = undefined
+
+@dataclasses.dataclass
+class _MUISliderBaseProps(_SliderBaseProps[_T_slider_base_value]):
     label: Union[Undefined, str] = undefined
-    ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
     vertical: Union[Undefined, bool] = undefined
     valueInput: Union[Undefined, bool] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     muiColor: Union[Undefined, Literal["primary", "secondary"]] = undefined
 
-
 @dataclasses.dataclass
-class SliderProps(SliderBaseProps):
-    value: Union[Undefined, NumberType] = undefined
-    defaultValue: Union[Undefined, NumberType] = undefined
+class SliderProps(_MUISliderBaseProps[NumberType]):
     marks: Union[Undefined, bool] = undefined
 
 
-class Slider(MUIComponentBase[SliderProps]):
+_T_slider_base_props = TypeVar("_T_slider_base_props",
+                                 bound=_SliderBaseProps)
 
+
+class _SliderBase(MUIComponentBase[_T_slider_base_props], Generic[_T_slider_base_props, _T_slider_base_value]):
     def __init__(self,
+                 base_type: UIType,
                  begin: NumberType,
                  end: NumberType,
-                 step: Optional[NumberType] = None,
-                 callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
-                 label: Union[Undefined, str] = undefined,
-                 init_value: Optional[NumberType] = None) -> None:
-        super().__init__(UIType.Slider, SliderProps,
+                 step: Optional[NumberType],
+                 prop_cls: Type[_T_slider_base_props],
+                 init_value: Optional[_T_slider_base_value] = None) -> None:
+        super().__init__(base_type, prop_cls,
                          [FrontendEventType.Change.value])
         if isinstance(begin, int) and isinstance(end, int):
             if step is None:
                 step = 1
         assert step is not None, "step must be specified for float type"
-        self.props.label = label
-        self.callback = callback
         assert end >= begin  #  and step <= end - begin
-        self.props.ranges = (begin, end, step)
-        if init_value is None:
-            init_value = begin
-        self.props.value = init_value
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
-        if callback is not None:
-            self.event_change.on(callback)
+        # self.props.ranges = (begin, end, step)
+        self.props.min = begin
+        self.props.max = end
+        self.props.step = step
+        if isinstance(init_value, tuple):
+            if init_value is not None:
+                self.props.value = init_value
+                assert init_value[0] <= init_value[1] and init_value[
+                    0] >= begin and init_value[1] <= end
+            else:
+                self.props.value = (begin, begin)
+        else:
+            if init_value is None:
+                self.props.value = begin
+            else:
+                self.props.value = init_value
 
-    @property
-    def value(self):
-        return self.props.value
+
+    def _get_ranges_with_default(self):
+        ranges = self.props.ranges
+        if isinstance(ranges, Undefined):
+            min_val = 0 if is_undefined(self.props.min) else self.props.min
+            max_val = 0 if is_undefined(self.props.max) else self.props.max
+            step_val = 1 if is_undefined(self.props.step) else self.props.step
+            ranges = (min_val, max_val, step_val)
+        return ranges
+
+    def validate_value(self, value: _T_slider_base_value):
+        ranges = self._get_ranges_with_default()
+        if isinstance(value, tuple):
+            return (value[0] >= ranges[0]
+                    and value[0] <= ranges[1]
+                    and value[1] >= ranges[0]
+                    and value[1] <= ranges[1] and value[0] <= value[1])
+        else:
+            return (value >= ranges[0]
+                    and value < ranges[1])
+
 
     def validate_props(self, props: Dict[str, Any]):
+        ranges = self._get_ranges_with_default()
         if "value" in props:
             value = props["value"]
-            return (value >= self.props.ranges[0]
-                    and value < self.props.ranges[1])
+            return self.validate_value(value)
+        return False
+
+    @property 
+    def is_inf_slider(self) -> bool:
         return False
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -2836,22 +2915,60 @@ class Slider(MUIComponentBase[SliderProps]):
     async def update_ranges(self,
                             begin: NumberType,
                             end: NumberType,
-                            step: Optional[NumberType] = None):
+                            step: Optional[NumberType] = None,
+                            value: Optional[_T_slider_base_value] = None):
+        ranges = self._get_ranges_with_default()
+
         if step is None:
-            step = self.props.ranges[2]
+            step = ranges[2]
         self.props.ranges = (begin, end, step)
+        self.props.min = begin 
+        self.props.max = end
+        self.props.step = step
         assert end >= begin and step <= end - begin
-        self.props.value = begin
+        if value is not None:
+            self.props.value = value
+        else:
+            if not isinstance(self.props.value, Undefined) and not self.is_inf_slider:
+                if isinstance(self.props.value, tuple):
+                    self.props.value = (begin, begin)
+                else:
+                    self.props.value = max(begin, min(end, self.props.value))
+
         await self.put_app_event(
             self.create_update_event({
                 "ranges": (begin, end, step),
-                "value": self.props.value
+                "value": self.props.value,
+                "min": begin,
+                "max": end,
+                "step": step,
             }))
 
-    async def update_value(self, value: NumberType):
-        assert value >= self.props.ranges[0] and value <= self.props.ranges[1]
+    async def update_value(self, value: _T_slider_base_value):
+        assert self.validate_value(value)
         await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
+
+class Slider(_SliderBase[SliderProps, NumberType]):
+
+    def __init__(self,
+                 begin: NumberType,
+                 end: NumberType,
+                 step: Optional[NumberType] = None,
+                 callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
+                 label: Union[Undefined, str] = undefined,
+                 init_value: Optional[NumberType] = None) -> None:
+        super().__init__(UIType.Slider, begin, end, step, SliderProps,
+                         init_value)
+        self.props.label = label
+        self.callback = callback
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
+
+    @property
+    def value(self):
+        return self.props.value
 
     def state_change_callback(
             self,
@@ -2885,14 +3002,11 @@ class Slider(MUIComponentBase[SliderProps]):
                               Undefined), "must be controlled component"
         return self._bind_field_with_change_event("value", draft)
 
-
 @dataclasses.dataclass
-class RangeSliderProps(SliderBaseProps):
-    value: Union[Undefined, Tuple[NumberType, NumberType]] = undefined
-    defaultValue: Union[Undefined, Tuple[NumberType, NumberType]] = undefined
+class RangeSliderProps(_MUISliderBaseProps[tuple[NumberType, NumberType]]):
+    pass 
 
-
-class RangeSlider(MUIComponentBase[RangeSliderProps]):
+class RangeSlider(_SliderBase[RangeSliderProps, tuple[NumberType, NumberType]]):
 
     def __init__(
             self,
@@ -2903,23 +3017,10 @@ class RangeSlider(MUIComponentBase[RangeSliderProps]):
             label: Union[Undefined, str] = undefined,
             init_value: Optional[Tuple[NumberType,
                                        NumberType]] = None) -> None:
-        super().__init__(UIType.Slider, RangeSliderProps,
-                         [FrontendEventType.Change.value])
-        if isinstance(begin, int) and isinstance(end, int):
-            if step is None:
-                step = 1
-        assert step is not None, "step must be specified for float type"
+        super().__init__(UIType.Slider, begin, end, step, RangeSliderProps,
+                         init_value)
         self.props.label = label
         self.callback = callback
-        assert end >= begin  #  and step <= end - begin
-        self.props.ranges = (begin, end, step)
-        if init_value is not None:
-            self.props.value = init_value
-            assert init_value[0] <= init_value[1] and init_value[
-                0] >= begin and init_value[1] <= end
-        else:
-            self.props.value = (begin, begin)
-
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -2928,44 +3029,6 @@ class RangeSlider(MUIComponentBase[RangeSliderProps]):
     @property
     def value(self):
         return self.props.value
-
-    def _validate_range_value(self, value: Tuple[NumberType, NumberType]):
-        return (value[0] >= self.props.ranges[0]
-                and value[0] <= self.props.ranges[1]
-                and value[1] >= self.props.ranges[0]
-                and value[1] <= self.props.ranges[1] and value[0] <= value[1])
-
-    def validate_props(self, props: Dict[str, Any]):
-        if "value" in props:
-            value = props["value"]
-
-            return self._validate_range_value(value)
-        return False
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["value"] = self.props.value
-        return res
-
-    async def update_ranges(self,
-                            begin: NumberType,
-                            end: NumberType,
-                            step: Optional[NumberType] = None):
-        if step is None:
-            step = self.props.ranges[2]
-        self.props.ranges = (begin, end, step)
-        assert end >= begin and step <= end - begin
-        self.props.value = (begin, begin)
-        await self.put_app_event(
-            self.create_update_event({
-                "ranges": (begin, end, step),
-                "value": self.props.value
-            }))
-
-    async def update_value(self, value: Tuple[NumberType, NumberType]):
-        assert self._validate_range_value(value)
-        await self.put_app_event(self.create_update_event({"value": value}))
-        self.props.value = value
 
     def state_change_callback(
             self,
@@ -2994,10 +3057,7 @@ class RangeSlider(MUIComponentBase[RangeSliderProps]):
 
 
 @dataclasses.dataclass
-class BlenderSliderProps(MUIComponentBaseProps):
-    ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
-    value: Union[Undefined, NumberType] = undefined
-    defaultValue: Union[Undefined, NumberType] = undefined
+class BlenderSliderProps(_SliderBaseProps[NumberType]):
     dragSpeed: Union[Undefined, NumberType] = undefined
     debounce: Union[Undefined, NumberType] = undefined
     infSlider: Union[Undefined, bool] = undefined
@@ -3017,7 +3077,7 @@ class BlenderSliderProps(MUIComponentBaseProps):
     alwaysShowButton: Union[Undefined, bool] = undefined
 
 
-class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
+class BlenderSlider(_SliderBase[BlenderSliderProps, NumberType]):
 
     def __init__(self,
                  begin: Optional[NumberType] = None,
@@ -3025,26 +3085,15 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
                  step: Optional[NumberType] = None,
                  callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
                  init_value: Optional[NumberType] = None) -> None:
-        super().__init__(UIType.BlenderSlider, BlenderSliderProps,
-                         [FrontendEventType.Change.value])
         is_inf_slider = begin is None or end is None
-        if not is_inf_slider:
-            assert end is not None and begin is not None
-            if isinstance(begin, int) and isinstance(end, int):
-                if step is None:
-                    step = 1
-            assert step is not None, "step must be specified for float type"
-            assert end >= begin  #  and step <= end - begin
-            self.props.ranges = (begin, end, step)
-            if init_value is None:
-                init_value = begin
-            self.props.value = init_value
-        else:
-            # inf slider
-            assert init_value is not None and step is not None, "you must specify `init_value` and `step` if you use infinite."
-            self.props.value = init_value
+        if is_inf_slider:
             self.props.infSlider = True
-            self.props.ranges = (0, 1, step)
+            begin = 0 
+            end = 0
+        else:
+            assert begin is not None and end is not None
+        super().__init__(UIType.BlenderSlider, begin, end, step, BlenderSliderProps,
+                         init_value)
 
         self.callback = callback
         if callback is not None:
@@ -3064,50 +3113,11 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
     def is_integer(self) -> bool:
         return self.props.isInteger == True
 
-    def validate_props(self, props: Dict[str, Any]):
-        if "value" in props:
-            value = props["value"]
-            return (value >= self.props.ranges[0]
-                    and value < self.props.ranges[1])
-        return False
 
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["value"] = self.props.value
-        return res
 
-    async def update_ranges(self,
-                            begin: NumberType,
-                            end: NumberType,
-                            step: Optional[NumberType] = None,
-                            value: Optional[NumberType] = None):
-        if step is None:
-            step = self.props.ranges[2]
-        self.props.ranges = (begin, end, step)
-        if self.is_integer():
-            assert isinstance(begin, int)
-            assert isinstance(end, int)
-            if step is not None:
-                assert isinstance(step, int)
-            if value is not None:
-                assert isinstance(value, int)
-        assert end >= begin, f"{begin}, {end}, {step}"
-        # clip value
-        if not isinstance(self.props.value, Undefined):
-            if value is not None:
-                self.props.value = value
-            if not self.props.infSlider:
-                self.props.value = max(begin, min(end , self.props.value))
-        await self.put_app_event(
-            self.create_update_event({
-                "ranges": (begin, end, step),
-                "value": self.props.value
-            }))
-
-    async def update_value(self, value: NumberType):
-        assert value >= self.props.ranges[0] and value <= self.props.ranges[1]
-        await self.put_app_event(self.create_update_event({"value": value}))
-        self.props.value = value
+    @property 
+    def is_inf_slider(self) -> bool:
+        return not is_undefined(self.props.infSlider) and self.props.infSlider == True
 
     def state_change_callback(
             self,
@@ -6217,7 +6227,7 @@ class VideoPlayerProps(MUIComponentBaseProps):
     src: Union[str, Undefined] = undefined
     title: Union[Undefined, str] = undefined
     thumbnails: Union[Undefined, str] = undefined
-
+    type: Union[Undefined, Literal["video/mp4", "video/webm", "video/3gp", "video/ogg", "video/avi", "video/mpeg", "video/object", "video/youtube"]] = undefined
 
 class VideoPlayer(MUIComponentBase[VideoPlayerProps]):
 
