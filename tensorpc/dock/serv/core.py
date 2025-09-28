@@ -73,13 +73,14 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType, ComponentEvent
                                         UIEvent, UISaveStateEvent,
                                         app_event_from_data)
 from tensorpc.dock.jsonlike import JsonLikeNode, JsonLikeType, parse_obj_to_jsonlike
-from tensorpc.dock.serv.common import APP_LOGGER
+from tensorpc.dock.loggers import APP_SERV_LOGGER
 from tensorpc.dock.serv_names import serv_names
 from tensorpc.dock.templates import get_all_app_templates
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
 from tensorpc.dock.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
+
 
 FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
 FLOW_MARKDOWN_DATA_PATH = FLOW_FOLDER_PATH / "markdown_nodes"
@@ -1811,10 +1812,10 @@ class Flow:
                                             ui_ev_dict,
                                             is_sync=is_sync)
         except aiohttp.client_exceptions.ServerDisconnectedError:
-            APP_LOGGER.info("Ignore ui event due to server disconnected.")
+            APP_SERV_LOGGER.info("Ignore ui event due to server disconnected.")
             return
         except Exception as e:
-            APP_LOGGER.error(f"run_ui_event {ui_ev_dict} failed: {e}")
+            APP_SERV_LOGGER.error(f"run_ui_event {ui_ev_dict} failed: {e}")
             raise e
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
@@ -2310,8 +2311,7 @@ class Flow:
                 raise ValueError("you need to assign a driver to node first",
                                  node.readable_id)
             driver = node_desp.driver
-            print("START", graph_id, node_id, node.is_session_started(),
-                  type(node), driver, node.driver_id)
+            APP_SERV_LOGGER.warning("start node", graph_id, node_id, driver, node.driver_id)
 
             if isinstance(driver, DirectSSHNode):
                 print("DRIVER", driver.url)

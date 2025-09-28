@@ -92,8 +92,7 @@ class ModuleVariableQueryExpr:
 @dataclasses.dataclass
 class ModuleVariableQuery:
     mod_query: SingleQuery
-    type: Literal["args", "kwargs", "ret"]
-    var_query: SingleQuery
+    var_queries: list[ModuleVariableQueryExpr]
 
 @dataclasses.dataclass
 class ModuleWeightQuery:
@@ -103,7 +102,7 @@ class ModuleWeightQuery:
 @dataclasses.dataclass
 class ModuleStackQuery:
     mod_query: SingleQuery
-    var_query: SingleQuery
+    var_queries: list[SingleQuery]
 
 
 class PMQLTransformer(Transformer):
@@ -168,15 +167,21 @@ class PMQLTransformer(Transformer):
 
     def module_variable_query_expr(self, items):
         return ModuleVariableQueryExpr(items[0], SingleQuery(items[1:]))
+    
+    def module_variable_query_exprs(self, items):
+        return items
 
     def query_expr(self, items):
         return SingleQuery(items)
+
+    def query_exprs(self, items):
+        return items
 
     def module_stack_query(self, items):
         return ModuleStackQuery(items[0], items[1])
 
     def module_var_query(self, items):
-        return ModuleVariableQuery(items[0], items[1].type, items[1].query)
+        return ModuleVariableQuery(items[0], items[1])
 
     def module_weight_query(self, items):
         return ModuleWeightQuery(items[0], items[1])

@@ -37,7 +37,7 @@ from .options import CommonOptions
 from tensorpc.autossh.scheduler import SchedulerClient
 
 _TASK_STATUS_TO_UI_TEXT_AND_COLOR: Dict[TaskStatus,
-                                        Tuple[str, mui._StdColorNoDefault]] = {
+                                        Tuple[str, mui.StdColorNoDefault]] = {
                                             TaskStatus.Pending:
                                             ("Pending", "secondary"),
                                             TaskStatus.Running: ("Running",

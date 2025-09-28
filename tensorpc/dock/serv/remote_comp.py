@@ -19,7 +19,7 @@ from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.core.distributed.ftgroup import FTGroupConfig, FTStateBase, FaultToleranceRPCGroup
 from tensorpc.core.prim import get_server_exposed_props, get_server_meta
 from tensorpc.core.server_core import ServerDistributedMeta
-from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceEventType
+from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceEventType, ServiceUnit
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.dock.components.mui import FlexBox
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP
@@ -33,7 +33,8 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType,
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.dock.coretypes import split_unique_node_id
 from tensorpc.dock.flowapp.app import App, EditableApp
-from tensorpc.dock.serv.common import handle_file_resource, REMOTE_APP_LOGGER
+from tensorpc.dock.serv.common import handle_file_resource
+from tensorpc.dock.loggers import REMOTE_APP_SERV_LOGGER
 from tensorpc.dock.serv_names import serv_names
 from urllib import parse
 
@@ -84,6 +85,11 @@ class RemoteComponentService:
 
         self._dist_call_tasks_dict: dict[str, asyncio.Task] = {}
 
+    @marker.mark_server_event(event_type=marker.ServiceEventType.AfterServerStart)
+    async def _after_start(self):
+        if self._ft_group is not None:
+            await self._ft_group.check_connection()
+
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init(self):
         dist_meta = get_server_exposed_props().dist_meta
@@ -133,31 +139,47 @@ class RemoteComponentService:
     
     async def _set_layout_object_internal(self, key: str, obj: Union[str, FlexBox, Any], raise_on_fail: bool, **app_create_kwargs):
         reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
+        disable_auto_reload = True
+        dynamic_app_cls: Optional[ReloadableDynamicClass] = None
+        app_su: Optional[ServiceUnit] = None
         if isinstance(obj, str):
-            REMOTE_APP_LOGGER.warning("%sCreate remote comp app %s from class %s", self._rank_prefix, key, obj)
+            # enable auto reload for regular app.
+            REMOTE_APP_SERV_LOGGER.warning("%sCreate remote comp app %s from class %s", self._rank_prefix, key, obj)
             dynamic_app_cls = ReloadableDynamicClass(obj, reload_mgr)
             static_creator = dynamic_app_cls.get_object_creator_if_exists()
+            module_id = obj
+
             if static_creator is not None:
                 obj = static_creator()
             else:
                 obj = dynamic_app_cls.obj_type(**app_create_kwargs)
+            disable_auto_reload = False
+            app_su = ServiceUnit(module_id, {})
+            app_su.init_service(obj)
+
         else:
-            REMOTE_APP_LOGGER.warning("%sCreate remote comp app %s", self._rank_prefix, key)
+            REMOTE_APP_SERV_LOGGER.warning("%sCreate remote comp app %s", self._rank_prefix, key)
 
         if isinstance(obj, FlexBox):
             # external root
             external_root = obj
             app: App = EditableApp(external_root=external_root,
                                    reload_manager=reload_mgr,
-                                   is_remote_component=True)
+                                   disable_auto_reload=disable_auto_reload,
+                                   is_remote_comp=True)
         else:
             # other object, must declare a tensorpc_flow_layout
             # external_root = flex_wrapper(obj)
             app: App = EditableApp(external_wrapped_obj=obj,
                                    reload_manager=reload_mgr,
-                                   is_remote_component=True)
+                                   disable_auto_reload=disable_auto_reload,
+                                   is_remote_comp=True)
             app._app_force_use_layout_function()
         app._flow_app_comp_core.reload_mgr = reload_mgr
+        if dynamic_app_cls is not None:
+            app._app_dynamic_cls = dynamic_app_cls
+        if app_su is not None:
+            app._app_service_unit = app_su
         send_loop_queue: "asyncio.Queue[AppEvent]" = app._queue
         app_obj = AppObject(app, send_loop_queue, asyncio.Event(),
                             asyncio.Event())
@@ -227,7 +249,7 @@ class RemoteComponentService:
             app_obj.mounted_app_meta.url_with_port)
         # gid, nid = split_unique_node_id(node_uid)
         # app_obj.app.app_storage.set_graph_node_id(gid, nid)
-        REMOTE_APP_LOGGER.warning("%sMount remote comp %s to %s", self._rank_prefix, key, app_obj.mounted_app_meta.url_with_port)
+        REMOTE_APP_SERV_LOGGER.warning("%sMount remote comp %s to %s", self._rank_prefix, key, app_obj.mounted_app_meta.url_with_port)
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompMount, app_obj.mounted_app_meta)
 
@@ -243,7 +265,7 @@ class RemoteComponentService:
                     await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
                 return
         if not is_local_call:
-            REMOTE_APP_LOGGER.warning("Unmount remote comp %s", key)
+            REMOTE_APP_SERV_LOGGER.warning("Unmount remote comp %s", key)
             # raise ValueError("app is mounted via remote generator, you can't call unmount")
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
@@ -271,7 +293,7 @@ class RemoteComponentService:
 
     async def mount_app_generator(self, key: str,
                         prefixes: List[str], url: str = "", port: int = -1):
-        REMOTE_APP_LOGGER.warning("Mount remote comp %s (Generator)", key)
+        REMOTE_APP_SERV_LOGGER.warning("Mount remote comp %s (Generator)", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         assert self._is_master
@@ -314,7 +336,7 @@ class RemoteComponentService:
                             await cancel_task(task)
                         break
                 except asyncio.CancelledError:
-                    REMOTE_APP_LOGGER.warning("Remote comp %s (Generator) cancelled", key)
+                    REMOTE_APP_SERV_LOGGER.warning("Remote comp %s (Generator) cancelled", key)
                     await cancel_task(wait_queue_task)
                     await cancel_task(shutdown_task)
                     break
@@ -322,7 +344,7 @@ class RemoteComponentService:
             traceback.print_exc()
             raise 
         finally:
-            REMOTE_APP_LOGGER.warning("Unmount remote comp %s (Generator)", key)
+            REMOTE_APP_SERV_LOGGER.warning("Unmount remote comp %s (Generator)", key)
             if self._ft_group is not None:
                 client_coro = await self._run_dist_call_get_coro(
                     key, RemoteComponentService.unmount_app.__name__, 

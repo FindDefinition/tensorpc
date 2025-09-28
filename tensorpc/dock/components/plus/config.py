@@ -499,7 +499,7 @@ class ConfigPanel(mui.SimpleControls):
     def __init__(self,
                  config_obj: Any,
                  callback: Optional[Callable[[str, Any],
-                                             mui._CORO_NONE]] = None,
+                                             mui.CORO_NONE]] = None,
                  ignored_field_names: Optional[Set[str]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
@@ -598,7 +598,7 @@ class ConfigDialogEvent(Generic[T]):
 
 
 class ConfigPanelDialog(mui.Dialog, Generic[T]):
-    def __init__(self, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+    def __init__(self, callback: Callable[[ConfigDialogEvent[T]], mui.CORO_NONE], children: Optional[mui.LayoutType] = None):
         self._content = mui.VBox([
 
         ]).prop(flex=1)
@@ -639,7 +639,7 @@ class ConfigPanelDialog(mui.Dialog, Generic[T]):
             await self.remove_childs_by_keys([self.__layout_key])
 
 class ConfigPanelDialogPersist(mui.Dialog, Generic[T]):
-    def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+    def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui.CORO_NONE], children: Optional[mui.LayoutType] = None):
         self._config = ConfigPanel(cfg)
         super().__init__([
             mui.HBox([

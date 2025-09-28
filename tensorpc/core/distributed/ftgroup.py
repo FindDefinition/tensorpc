@@ -375,6 +375,88 @@ class FaultToleranceRPCGroup:
             await self._master_state_check_is_ok()
             return self.state
 
+    async def _master_check_workers(self):
+        if self.state.status == FTStatus.OK:
+            res, exc_res, all_client_ok = await self.master_call_all_client("", set(), rpc_timeout=self._cfg.disconnect_rpc_check_timeout, rpc_is_health_check=True)
+            if not all_client_ok:
+                await self.event_heartbeat_ok_to_disconnect.emit_async()
+        else:
+            disconnected_ranks = self._client_ranks - set(self._client_robjs.keys())
+            if not self._has_discovery:
+                assert self._dist_url_with_ports is not None 
+
+                for rank in disconnected_ranks:
+                    robj_url = self._dist_url_with_ports[rank]
+                    new_robj = AsyncRemoteManager(robj_url)
+                    try:
+                        await new_robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout, wait_for_ready=True)
+                    except grpc.aio.AioRpcError as e:
+                        if e.code() == grpc.StatusCode.UNAVAILABLE:
+                            new_robj = None
+                        elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                            new_robj = None
+                        else:
+                            traceback.print_exc()
+                            new_robj = None
+                        LOGGER.warning(f"Worker {robj_url} still disconnected with grpc code {e.code()}")
+                    if new_robj is not None:
+                        self._client_robjs[rank] = new_robj
+                        self.client_states[rank].status = FTStatus.OK
+                        LOGGER.warning(f"Worker {rank}({robj_url}) reconnected.")
+                disconnected_ranks = self._client_ranks - set(self._client_robjs.keys())
+            if len(self._client_robjs) != self._world_size - 1:
+                # get current disconnected worker rank
+                self._disconnect_retry_count += 1
+                LOGGER.warning("master wait for all worker retry: %d/%d, disconnected ranks: %s", 
+                    self._disconnect_retry_count, self._cfg.disconnect_total_retry, str(disconnected_ranks))
+                if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
+                    LOGGER.warning("master wait for all worker timeout, exit.")
+                    return True
+            else:
+                self._disconnect_retry_count = 0
+                self.state.status = FTStatus.OK
+                await self.event_heartbeat_disconnect_to_ok.emit_async()
+        return False
+
+    async def _client_check_master(self):
+        if self.state.status == FTStatus.OK:
+            if self._master_robj is None:
+                robj = await self._query_master_robj()
+                if robj is None:
+                    LOGGER.warning(f"Master disconnected")
+                    self.state.status = FTStatus.MASTER_DISCONNECTED
+                    await self.event_heartbeat_ok_to_disconnect.emit_async()
+                    return False 
+                else:
+                    LOGGER.warning(f"Master {robj.url} connected")
+                    self._master_robj = robj
+            else:
+                robj = self._master_robj
+            await self._client_set_worker_state(handle_restart=True)
+        else:
+            robj = await self._query_master_robj()
+            if robj is None:
+                self._disconnect_retry_count += 1
+                LOGGER.warning("worker wait for master retry: %d/%d", self._disconnect_retry_count,
+                    self._cfg.disconnect_total_retry)
+                if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
+                    return True 
+            else:
+                LOGGER.warning(f"Master {robj.url} connected")
+
+                self._master_robj = robj
+                self._disconnect_retry_count = 0
+                self.state.status = FTStatus.OK
+                await self.event_heartbeat_disconnect_to_ok.emit_async()
+        return False 
+
+    async def check_connection(self):
+        async with self._state_lock:
+            if self._is_master:
+                return await self._master_check_workers()
+            else:
+                return await self._client_check_master()
+
 
     async def _heartbeat_loop(self):
         shutdown_ev = self._global_shutdown_event
@@ -400,48 +482,11 @@ class FaultToleranceRPCGroup:
                             self._fast_wakeup_event.wait(), name="heartbeat_fast_wakeup")
                     # LOGGER.warning("Master Heartbeat|status: %s.", self.state.status.name)
                     async with self._state_lock:
-
-                        if self.state.status == FTStatus.OK:
-                            res, exc_res, all_client_ok = await self.master_call_all_client("", set(), rpc_timeout=self._cfg.disconnect_rpc_check_timeout, rpc_is_health_check=True)
-                            if not all_client_ok:
-                                await self.event_heartbeat_ok_to_disconnect.emit_async()
-                        else:
-                            disconnected_ranks = self._client_ranks - set(self._client_robjs.keys())
-                            if not self._has_discovery:
-                                assert self._dist_url_with_ports is not None 
-
-                                for rank in disconnected_ranks:
-                                    robj_url = self._dist_url_with_ports[rank]
-                                    new_robj = AsyncRemoteManager(robj_url)
-                                    try:
-                                        await new_robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout, wait_for_ready=True)
-                                    except grpc.aio.AioRpcError as e:
-                                        if e.code() == grpc.StatusCode.UNAVAILABLE:
-                                            new_robj = None
-                                        elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-                                            new_robj = None
-                                        else:
-                                            traceback.print_exc()
-                                            new_robj = None
-                                        LOGGER.warning(f"Worker {robj_url} still disconnected with grpc code {e.code()}")
-                                    if new_robj is not None:
-                                        self._client_robjs[rank] = new_robj
-                                        self.client_states[rank].status = FTStatus.OK
-                                        LOGGER.warning(f"Worker {rank}({robj_url}) reconnected.")
-                                disconnected_ranks = self._client_ranks - set(self._client_robjs.keys())
-                            if len(self._client_robjs) != self._world_size - 1:
-                                # get current disconnected worker rank
-                                self._disconnect_retry_count += 1
-                                LOGGER.warning("master wait for all worker retry: %d/%d, disconnected ranks: %s", 
-                                    self._disconnect_retry_count, self._cfg.disconnect_total_retry, str(disconnected_ranks))
-                                if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
-                                    LOGGER.warning("master wait for all worker timeout, exit.")
-                                    shutdown_ev.set()
-                                    break
-                            else:
-                                self._disconnect_retry_count = 0
-                                self.state.status = FTStatus.OK
-                                await self.event_heartbeat_disconnect_to_ok.emit_async()
+                        should_exit = await self._master_check_workers()
+                        if should_exit:
+                            LOGGER.warning("master wait for all worker timeout, exit.")
+                            shutdown_ev.set()
+                            break
                         await self.event_heartbeat_step_end.emit_async()
             else:
                 while True:
@@ -455,37 +500,11 @@ class FaultToleranceRPCGroup:
                         break 
                     LOGGER.info("Worker Heartbeat|status: %s.", self.state.status.name)
                     async with self._state_lock:
-                        if self.state.status == FTStatus.OK:
-                            if self._master_robj is None:
-                                robj = await self._query_master_robj()
-                                if robj is None:
-                                    LOGGER.warning(f"Master disconnected")
-                                    self.state.status = FTStatus.MASTER_DISCONNECTED
-                                    await self.event_heartbeat_ok_to_disconnect.emit_async()
-                                    continue 
-                                else:
-                                    LOGGER.warning(f"Master {robj.url} connected")
-                                    self._master_robj = robj
-                            else:
-                                robj = self._master_robj
-                            await self._client_set_worker_state(handle_restart=True)
-                        else:
-                            robj = await self._query_master_robj()
-                            if robj is None:
-                                self._disconnect_retry_count += 1
-                                LOGGER.warning("worker wait for master retry: %d/%d", self._disconnect_retry_count,
-                                    self._cfg.disconnect_total_retry)
-                                if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
-                                    LOGGER.warning("worker wait for master timeout, exit.")
-                                    await self.event_exit.emit_async()
-                                    break
-                            else:
-                                LOGGER.warning(f"Master {robj.url} connected")
-
-                                self._master_robj = robj
-                                self._disconnect_retry_count = 0
-                                self.state.status = FTStatus.OK
-                                await self.event_heartbeat_disconnect_to_ok.emit_async()
+                        should_exit = await self._client_check_master()
+                        if should_exit:
+                            LOGGER.warning("worker wait for master timeout, exit.")
+                            await self.event_exit.emit_async()
+                            break
                         await self.event_heartbeat_step_end.emit_async()
 
         except:

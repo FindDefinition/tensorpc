@@ -107,6 +107,7 @@ from ..core.component import (AppComponentCore, AppEditorEvent, AppEditorEventTy
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
                    ValueType, component_dict_to_serializable_dict_async, undefined)
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
+from tensorpc.dock.loggers import APP_LOGGER
 
 ALL_APP_EVENTS = HashableRegistry()
 P = ParamSpec('P')
@@ -249,14 +250,15 @@ class App:
                  external_root: Optional[mui.FlexBox] = None,
                  external_wrapped_obj: Optional[Any] = None,
                  reload_manager: Optional[AppReloadManager] = None,
-                 is_remote_component: bool = False) -> None:
+                 disable_auto_reload: bool = False,
+                 is_remote_comp: bool = False) -> None:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
         if reload_manager is None:
             reload_manager = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
         # self._flow_reload_manager = reload_manager
-        self._is_remote_component = is_remote_component
+        self._disable_auto_reload = disable_auto_reload
         self._flow_app_comp_core = AppComponentCore(self._queue,
                                                     reload_manager)
         self._send_callback: Optional[Callable[[AppEvent],
@@ -318,7 +320,7 @@ class App:
 
         self.__flowapp_master_meta = MasterMeta()
         # self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
-        self.app_storage = AppStorage(self.__flowapp_master_meta, is_remote_component)
+        self.app_storage = AppStorage(self.__flowapp_master_meta, is_remote_comp)
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
         self._flowapp_vscode_storage: Optional[AppDataStorageForVscode] = None
@@ -399,7 +401,7 @@ class App:
 
     def register_app_simple_rpc_handler(self, type: str,
                                            handler: Callable[[Any],
-                                                             mui._CORO_NONE]):
+                                                             mui.CORO_NONE]):
         assert isinstance(type, AppSpecialEventType)
         self._flowapp_simple_rpc_handlers.on(type, handler)
 
@@ -408,13 +410,13 @@ class App:
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
                                            handler: Callable[[Any],
-                                                             mui._CORO_NONE]):
+                                                             mui.CORO_NONE]):
         assert isinstance(type, AppSpecialEventType)
         self._flowapp_special_eemitter.on(type, handler)
 
     def unregister_app_special_event_handler(
             self, type: AppSpecialEventType,
-            handler: Callable[[Any], mui._CORO_NONE]):
+            handler: Callable[[Any], mui.CORO_NONE]):
         assert isinstance(type, AppSpecialEventType)
         self._flowapp_special_eemitter.remove_listener(type, handler)
 
@@ -1165,13 +1167,15 @@ class EditableApp(App):
                  external_root: Optional[mui.FlexBox] = None,
                  external_wrapped_obj: Optional[Any] = None,
                  reload_manager: Optional[AppReloadManager] = None,
-                 is_remote_component: bool = False) -> None:
+                 disable_auto_reload: bool = False,
+                 is_remote_comp: bool = False) -> None:
         super().__init__(flex_flow,
                          maxqsize,
                          external_root=external_root,
                          external_wrapped_obj=external_wrapped_obj,
                          reload_manager=reload_manager,
-                         is_remote_component=is_remote_component)
+                         disable_auto_reload=disable_auto_reload,
+                         is_remote_comp=is_remote_comp)
         self._use_app_editor = use_app_editor
         if use_app_editor:
             obj = type(self._get_user_app_object())
@@ -1227,7 +1231,7 @@ class EditableApp(App):
         # obentry = _WatchDogWatchEntry(
         #     [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
         path = ""
-        if not self._is_remote_component:
+        if not self._disable_auto_reload:
             dcls = self._get_app_dynamic_cls()
             print("dcls.is_dynamic_code", dcls.is_dynamic_code)
             if not dcls.is_dynamic_code:
@@ -1377,7 +1381,7 @@ class EditableApp(App):
             except:
                 pass
             res.add(v_file)
-        if not self._is_remote_component:
+        if not self._disable_auto_reload:
             dcls = self._get_app_dynamic_cls()
             if not dcls.is_dynamic_code:
                 res.add(dcls.file_path)
@@ -1400,7 +1404,7 @@ class EditableApp(App):
         """
         assert self._flowapp_code_mgr is not None
         resolved_path = self._flowapp_code_mgr._resolve_path(path)
-        if self._use_app_editor and not self._is_remote_component:
+        if self._use_app_editor and not self._disable_auto_reload:
             dcls = self._get_app_dynamic_cls()
             resolved_app_path = self._flowapp_code_mgr._resolve_path(
                 dcls.file_path)
@@ -1416,7 +1420,7 @@ class EditableApp(App):
             return
         if changes is None:
             return
-        rprint(f"<watchdog> {path}")
+        APP_LOGGER.warning(f"[watchdog] Reload Path: {path}")
         new, change, _ = changes
         new_data = self._flowapp_code_mgr.get_code(resolved_path)
         is_reload = False
@@ -1490,7 +1494,7 @@ class EditableApp(App):
                                     )
                                     # self._get_app_dynamic_cls(
                                     # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
-                                    if not self._is_remote_component:
+                                    if not self._disable_auto_reload:
                                         self._get_app_service_unit().reload_metas(
                                             self._flow_reload_manager)
                             else:
@@ -1561,7 +1565,7 @@ class EditableApp(App):
                                     bind_and_reset_object_methods(
                                         changed_user_obj, changed_metas)
                                 if layout is self:
-                                    if not self._is_remote_component:
+                                    if not self._disable_auto_reload:
                                         self._get_app_dynamic_cls(
                                         ).module_dict = reload_res.module_entry.module_dict
                                         self._get_app_service_unit().reload_metas(
@@ -1658,7 +1662,7 @@ class EditableApp(App):
                         reload_res = self._flow_reload_manager.reload_type(
                             inspect.unwrap(cb_real))
                         for meta in callbacks_of_this_file:
-                            print("RELOAD CB", meta.cb_qualname)
+                            APP_LOGGER.warning(f"reload callback: {meta.cb_qualname}")
                             handler = meta.handler
                             cb = inspect.unwrap(handler.cb)
                             new_method, _ = reload_method(
@@ -1698,7 +1702,7 @@ class EditableApp(App):
         # 5. if autorun changed, run them
 
         if isinstance(ev, watchdog.events.FileModifiedEvent):
-            rprint("<watchdog>", ev)
+            # APP_LOGGER.warning(f"[watchdog] raw path: {ev.src_path}")
             with self._watch_lock:
                 if self._flowapp_code_mgr is None or self._loop is None:
                     return
@@ -1712,7 +1716,7 @@ class EditableApp(App):
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
-        if self._use_app_editor and not self._is_remote_component:
+        if self._use_app_editor and not self._disable_auto_reload:
             app_path = self._get_app_dynamic_cls().file_path
             if event.type == AppEditorFrontendEventType.Save:
                 with self._watch_lock:

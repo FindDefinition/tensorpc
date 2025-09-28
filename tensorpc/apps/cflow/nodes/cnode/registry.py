@@ -99,7 +99,7 @@ class ComputeNodeDesc:
     icon_cfg: Optional[mui.IconProps] = None
     box_props: Optional[mui.FlexBoxProps] = None
     resizer_props: Optional[flowui.NodeResizerProps] = None
-    layout_overflow: Optional[mui._OverflowType] = None
+    layout_overflow: Optional[mui.OverflowType] = None
     is_dynamic_cls: bool = False
     resource_desp: Optional[ResourceDesc] = None
     # static layout
@@ -176,7 +176,7 @@ class ComputeNodeRegistry:
                                                               int]]]] = None,
             box_props: Optional[mui.FlexBoxProps] = None,
             resizer_props: Optional[flowui.NodeResizerProps] = None,
-            layout_overflow: Optional[mui._OverflowType] = None,
+            layout_overflow: Optional[mui.OverflowType] = None,
             layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
             detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
             resource_desp: Optional[ResourceDesc] = None,
@@ -280,7 +280,7 @@ def register_compute_node(
                                            Optional[tuple[int, int]]]] = None,
         box_props: Optional[mui.FlexBoxProps] = None,
         resizer_props: Optional[flowui.NodeResizerProps] = None,
-        layout_overflow: Optional[mui._OverflowType] = None,
+        layout_overflow: Optional[mui.OverflowType] = None,
         layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
         detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
         resource_desp: Optional[ResourceDesc] = None,

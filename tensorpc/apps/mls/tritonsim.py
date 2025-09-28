@@ -832,7 +832,7 @@ class TritonSim:
                 .prop(tooltip="Check Triton Viewer", size="small", iconSize="small", muiColor="error", 
                       progressColor="primary"),
         ])
-        self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts, glyphMargin=True)
+        self.editor.prop(minWidth=0, minHeight=0, actions=editor_acts, options=mui.MonacoEditorOptions(glyphMargin=True))
         self.editor.event_editor_hover_query.on(self.hover_query)
         self.editor.event_editor_action.on(self._handle_editor_acts)
         self.editor.event_editor_inlay_hints_query.on(self.inlay_hint_query)

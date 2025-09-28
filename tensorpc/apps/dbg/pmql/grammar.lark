@@ -37,11 +37,12 @@ partial_glob:  STAR? partial_glob_strip STAR?
 identity_item: "$" // identity item, only match the current exact module.
 query_expr: mod_query_item (("." mod_query_item) | index_item)*
 module_variable_query_expr: VQ_LITERALS (("." mod_query_item) | index_item)*
-
+module_variable_query_exprs: module_variable_query_expr (("|" module_variable_query_expr))*
+query_exprs: query_expr ("|" query_expr)*
 module_weight_query: query_expr "#" QUALNAME
 
-module_var_query: query_expr "@" module_variable_query_expr
-module_stack_query: query_expr "!" query_expr
+module_var_query: query_expr "@" module_variable_query_exprs
+module_stack_query: query_expr "!" query_exprs
 
 %import common.CNAME -> NAME
 %import common.LETTER -> LETTER

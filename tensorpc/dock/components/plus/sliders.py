@@ -25,7 +25,7 @@ class ListSlider(mui.Slider, Generic[T]):
     """
 
     def __init__(self,
-                 callback: Callable[[T], mui._CORO_NONE],
+                 callback: Callable[[T], mui.CORO_NONE],
                  init: Optional[List[T]] = None,
                  label: Union[str, mui.Undefined] = mui.undefined) -> None:
         if init is None:
@@ -69,7 +69,7 @@ class BlenderListSlider(mui.BlenderSlider, Generic[T]):
     """
 
     def __init__(self,
-                 callback: Callable[[T], mui._CORO_NONE],
+                 callback: Callable[[T], mui.CORO_NONE],
                  init: Optional[List[T]] = None) -> None:
         if init is None:
             init = []

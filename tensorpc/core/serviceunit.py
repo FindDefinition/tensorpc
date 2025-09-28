@@ -34,7 +34,9 @@ from functools import wraps
 
 from tensorpc.constants import TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.rprint_dispatch import rprint
+from tensorpc.utils.rich_logging import get_logger
 
+LOGGER = get_logger("tensorpc.service")
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -707,7 +709,7 @@ class ObjectReloadManager:
         because we want to use importlib.import_module
         if possible instead of reload from raw path.
         """
-        rprint("<ObjectReloadManager> prepare load", type)
+        LOGGER.warning(f"prepare reload {type}")
         try:
             uid = self.get_type_unique_id(type)
         except:
@@ -736,7 +738,7 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
-        rprint("<ObjectReloadManager> do load", type)
+        LOGGER.warning(f"do load {type}")
         res = meta.get_reloaded_module(self.in_memory_fs)
         if res is None:
             raise ValueError("can't reload this type", type)

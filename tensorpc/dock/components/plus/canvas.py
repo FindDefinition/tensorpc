@@ -165,7 +165,7 @@ class SimpleCanvas(mui.FlexBox):
             self,
             camera: Optional[three.PerspectiveCamera] = None,
             screenshot_callback: Optional[Callable[[bytes, Any],
-                                                   mui._CORO_NONE]] = None,
+                                                   mui.CORO_NONE]] = None,
             transparent_canvas: bool = False,
             init_canvas_childs: Optional[List[
                 three.ThreeComponentType]] = None,

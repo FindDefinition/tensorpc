@@ -292,7 +292,7 @@ class DontSchedule:
 class WrapperConfig:
     boxProps: Optional[mui.FlexBoxProps] = None
     resizerProps: Optional[flowui.NodeResizerProps] = None
-    nodeMiddleLayoutOverflow: Optional[Union[mui.Undefined, mui._OverflowType]] = None
+    nodeMiddleLayoutOverflow: Optional[Union[mui.Undefined, mui.OverflowType]] = None
 
 
 T_cnode = TypeVar("T_cnode", bound="ComputeNode")

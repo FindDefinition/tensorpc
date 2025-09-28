@@ -1,7 +1,10 @@
-from .plotly import Plotly, Layout as PlotlyLayout, Trace as PlotlyTrace, Line as PlotlyLine
-
+from . import muichart, plotly
+from .muichart import (BarChart, BarItemIdentifier, BarSeries, ChartsAxisData,
+                       LineChart, LineItemIdentifier, LineSeries, ScatterChart,
+                       ScatterItemIdentifier, ScatterSeries, SparkLineChart,
+                       SparkLineClipAreaOffset, XAxis, YAxis, ZAxis)
 from .perfetto import Perfetto
-
-from .muichart import BarChart, LineChart, ScatterChart, BarSeries, LineSeries, ScatterSeries, XAxis, YAxis, ZAxis, LineItemIdentifier, ScatterItemIdentifier, BarItemIdentifier, ChartsAxisData
-
-from . import plotly, muichart
+from .plotly import Layout as PlotlyLayout
+from .plotly import Line as PlotlyLine
+from .plotly import Plotly
+from .plotly import Trace as PlotlyTrace

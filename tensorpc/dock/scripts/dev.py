@@ -84,7 +84,7 @@ if __name__ == "__main__":
     #     # if f.name == "b":
     #     print(f.type, get_origin(f.type), get_origin(f.type) is Union, get_origin(f.type) is Literal, type(get_origin(f.type)), _check_is_basic_type(f.type))
     # breakpoint()
-    l = chart.Layout(autosize=True,
+    l = chart.PlotlyLayout(autosize=True,
                       margin=chart.Margin(l=0, r=0, b=0, t=0),
                       xaxis=chart.Axis(automargin=True),
                       yaxis=chart.Axis(automargin=True))

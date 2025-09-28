@@ -37,6 +37,11 @@ class CommonSeriesType:
     id: Union[str, NumberType, Undefined] = undefined
     color: Union[str, Undefined] = undefined
     labelMarkType: Union[Literal["circle", "square", "square"], Undefined] = undefined
+    xAxisId: Union[str, Undefined] = undefined
+    yAxisId: Union[str, Undefined] = undefined
+    stack: Union[str, Undefined] = undefined
+    stackOffset: Union[Literal["none", "expand", "diverging", "silhouette", "wiggle"], Undefined] = undefined
+    stackOrder: Union[Literal["reverse", "none", "appearance", "ascending", "descending", "insideOut"], Undefined] = undefined
 
 @dataclasses.dataclass
 class BarSeries(CommonSeriesType):
@@ -60,7 +65,7 @@ class LineSeries(CommonSeriesType):
     connectNulls: Union[bool, Undefined] = undefined
     stackOffset: Union[Literal["none", "expand", "diverging", "silhouette", "wiggle"], Undefined] = undefined
     baseline: Union[NumberType, Literal["min", "max"], Undefined] = undefined
-
+    
 @dataclasses.dataclass
 class ScatterSeriesPreview:
     markerSize: Union[NumberType, Undefined] = undefined
@@ -130,11 +135,17 @@ class ChartsAxisProps:
     # tickLabelInterval: Union[Literal['auto'], Callable[[Any, NumberType], bool], Undefined] = undefined
     label: Union[str, Undefined] = undefined
     tickSize: Union[NumberType, Undefined] = undefined
+    scaleType: Union[Literal['time', 'utc', 'linear', 'sqrt', 'pow', 'log', 'symlog', 'point', 'band'], Undefined] = undefined
+
+    position: Union[Literal['top', 'bottom', 'left', 'right', 'none'], Undefined] = undefined
+    # only available when type is band (bar chart)
+    categoryGapRatio: Union[NumberType, Undefined] = undefined
+    barGapRatio: Union[NumberType, Undefined] = undefined
 
 @dataclasses.dataclass
 class XAxis(CommonAxisConfig, ChartsAxisProps):
     tickLabelMinGap: Union[NumberType, Undefined] = undefined
-
+    
 @dataclasses.dataclass
 class YAxis(CommonAxisConfig, ChartsAxisProps):
     pass
@@ -228,7 +239,6 @@ class SparkLineChartProps(BasicProps):
     skipAnimation: Union[bool, Undefined] = undefined
     xAxis: Union[Sequence[XAxis], Undefined] = undefined
     yAxis: Union[Sequence[YAxis], Undefined] = undefined
-    baseline: Union[NumberType, Literal["min", "max"], Undefined] = undefined
     clipAreaOffset: Union[SparkLineClipAreaOffset, Undefined] = undefined
     disableClipping: Union[bool, Undefined] = undefined
     disableVoronoi: Union[bool, Undefined] = undefined
@@ -236,6 +246,9 @@ class SparkLineChartProps(BasicProps):
     showHighlight: Union[bool, Undefined] = undefined
     showTooltip: Union[bool, Undefined] = undefined
     voronoiMaxRadius: Union[NumberType, Undefined] = undefined
+    # only available when plotType is line
+    curve: Union[Literal["linear", "step", "catmullRom", "monotoneX", "monotoneY", "natural", "stepBefore", "stepAfter", "bumpY", "bumpX"], Undefined] = undefined
+    baseline: Union[NumberType, Literal["min", "max"], Undefined] = undefined
     area: Union[bool, Undefined] = undefined
     lineWidth: Union[NumberType, Undefined] = undefined
 

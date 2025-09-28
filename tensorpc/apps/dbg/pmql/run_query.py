@@ -7,11 +7,11 @@ import inspect
 from pathlib import Path
 import time
 from types import FrameType
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, ContextManager, Optional, Union
 from typing_extensions import Literal
 
 from tensorpc.core.moduleid import get_qualname_of_type
-from .parser import DoubleGlob, IdentityItem, IndexItem, ModuleStackQuery, ModuleWeightQuery, PartialGlob, PlainItem, QueryItem, SingleQuery, ModuleVariableQuery, TypeItem, parse_pmql
+from .parser import DoubleGlob, IdentityItem, IndexItem, ModuleStackQuery, ModuleVariableQueryExpr, ModuleWeightQuery, PartialGlob, PlainItem, QueryItem, SingleQuery, ModuleVariableQuery, TypeItem, parse_pmql
 
 
 class SpecialModuleType(enum.IntEnum):
@@ -408,39 +408,51 @@ def simple_module_query(module: Any, query: Union[SingleQuery, ModuleWeightQuery
         res = [PthQueryResult(m["__fqn__"], m["__pth_module__"]) for m in found_items]
     return res
 
-def _fwd_hook_for_mvq(mod, args, kwargs, output, query_key: Literal["args", "kwargs", "ret"], query: SingleQuery, callback: Callable[[list[Any]], None], fqn: str):
-    if query_key == "args":
-        fqn = f"{fqn}@args"
-        query_data = args 
-    elif query_key == "kwargs":
-        fqn = f"{fqn}@kwargs"
-        query_data = kwargs
-    elif query_key == "ret":
-        fqn = f"{fqn}@ret"
-        query_data = output
-    else:
-        raise ValueError(f"Unknown query key: {query_key}")
-    query_res = _do_var_query(query_data, query)
-    query_res = [dataclasses.replace(r, fqn=f"{fqn}::{r.fqn}") for r in query_res]
-    callback(query_res)
-    del query_res
-    del query_data
+def _fwd_hook_for_mvq(mod, args, kwargs, output, queries: list[ModuleVariableQueryExpr], callback: Callable[[list[Any]], None], fqn: str):
+    query_res_all: list[Any] = []
+    for query in queries:
+        query_key = query.type
+        if query_key == "args":
+            fqn_item = f"{fqn}@args"
+            query_data = args 
+        elif query_key == "kwargs":
+            fqn_item = f"{fqn}@kwargs"
+            query_data = kwargs
+        elif query_key == "ret":
+            fqn_item = f"{fqn}@ret"
+            query_data = output
+        else:
+            raise ValueError(f"Unknown query key: {query_key}")
+        query_res = _do_var_query(query_data, query.query)
+        query_res = [dataclasses.replace(r, fqn=f"{fqn_item}::{r.fqn}" if r.fqn else fqn_item) for r in query_res]
+        query_res_all.extend(query_res)
+        del query_res
+        del query_data
+    callback(query_res_all)
+    del query_res_all
 
-def _bwd_hook_for_mvq(mod, args, output, query_key: Literal["args", "ret"], query: SingleQuery, callback: Callable[[list[Any]], None], fqn: str):
-    assert query_key != "kwargs", "backward hook does not support kwargs"
-    if query_key == "args":
-        fqn = f"{fqn}@grad_inputs"
-        query_data = args 
-    elif query_key == "ret":
-        fqn = f"{fqn}@grad_outputs"
-        query_data = output
-    else:
-        raise ValueError(f"Unknown query key: {query_key}")
-    query_res = _do_var_query(query_data, query)
-    query_res = [dataclasses.replace(r, fqn=f"{fqn}::{r.fqn}" if r.fqn else fqn) for r in query_res]
-    callback(query_res)
-    del query_res
-    del query_data
+def _bwd_hook_for_mvq(mod, args, output, queries: list[ModuleVariableQueryExpr], callback: Callable[[list[Any]], None], fqn: str):
+    query_res_all: list[Any] = []
+    for query in queries:
+        query_key = query.type
+
+        assert query_key != "kwargs", "backward hook does not support kwargs"
+        if query_key == "args":
+            fqn_item = f"{fqn}@grad_inputs"
+            query_data = args 
+        elif query_key == "ret":
+            fqn_item = f"{fqn}@grad_outputs"
+            query_data = output
+        else:
+            raise ValueError(f"Unknown query key: {query_key}")
+        query_res = _do_var_query(query_data, query.query)
+        query_res = [dataclasses.replace(r, fqn=f"{fqn_item}::{r.fqn}" if r.fqn else fqn_item) for r in query_res]
+        query_res_all.extend(query_res)
+
+        del query_res
+        del query_data
+    callback(query_res_all)
+    del query_res_all
 
 _PYTORCH_ROOT: Optional[Path] = None
 _PYTORCH_MODULE_ROOT: Optional[Path] = None
@@ -470,16 +482,19 @@ def _get_first_non_module_frame(frame: Optional[FrameType]):
         frame = frame.f_back
     return None  
 
-def _fwd_hook_for_msq(mod, args, output, query: SingleQuery, callback: Callable[[list[Any]], None], fqn: str):
+def _fwd_hook_for_msq(mod, args, output, queries: list[SingleQuery], callback: Callable[[list[Any]], None], fqn: str):
     cur_frame = inspect.currentframe()
     frame = _get_first_non_module_frame(cur_frame)
     if frame is None:
         return 
     query_data = frame.f_locals
-    query_res = _do_var_query(query_data, query)
-    query_res = [dataclasses.replace(r, fqn=f"{fqn}@caller::{r.fqn}") for r in query_res]
-    callback(query_res)
-    del query_res
+    query_res_all: list[Any] = []
+    for query in queries:
+        query_res = _do_var_query(query_data, query)
+        query_res = [dataclasses.replace(r, fqn=f"{fqn}@caller::{r.fqn}") for r in query_res]
+        query_res_all.extend(query_res)
+        del query_res
+    callback(query_res_all)
     del query_data
     del frame
     del cur_frame
@@ -503,14 +518,13 @@ def install_module_hook_query(module: Any, queries: list[tuple[Union[ModuleVaria
             with_kwargs = False
             if isinstance(query, ModuleVariableQuery):
                 hook = partial(_fwd_hook_for_mvq, 
-                            query_key=query.type,
-                            query=query.var_query,
+                            queries=query.var_queries,
                             callback=item[1],
                             fqn=mod_fqn)
                 with_kwargs = True
             else:
                 hook = partial(_fwd_hook_for_msq, 
-                            query=query.var_query,
+                            queries=query.var_queries,
                             callback=item[1],
                             fqn=mod_fqn)
             handle = mod_res.data.register_forward_hook(hook, with_kwargs=with_kwargs)
@@ -526,10 +540,10 @@ def install_module_bwd_hook_query(module: Any, queries: list[tuple[ModuleVariabl
         mods = simple_module_query(module, query.mod_query)
         for mod_res in mods:
             mod_fqn = mod_res.fqn
-            assert query.type != "kwargs", "backward hook does not support kwargs"
+            for qitem in query.var_queries:
+                assert qitem.type != "kwargs", "backward hook does not support kwargs"
             hook = partial(_bwd_hook_for_mvq, 
-                        query_key=query.type,
-                        query=query.var_query,
+                        queries=query.var_queries,
                         callback=item[1],
                         fqn=mod_fqn)
             assert isinstance(mod_res.data, torch.nn.Module)
@@ -541,19 +555,24 @@ class RuntimeQueryContext:
     def __init__(self):
         self.result: dict[str, list[PthQueryResult]] = {}
 
-    def handle_result(self, res: list[PthQueryResult], key: str, to_cpu: bool = True):
+    def handle_result(self, res: list[PthQueryResult], key: str, to_cpu: bool = True, to_cpu_ctx_creator: Optional[Callable[[], ContextManager]]=None):
         if key not in self.result:
             self.result[key] = []
         import torch
         from torch.utils import _pytree as pytree
         res_data = [r.data for r in res]
         if to_cpu:
-            res_data = pytree.tree_map(lambda x: x.detach().cpu() if isinstance(x, torch.Tensor) else x, res_data)
+            ctx = contextlib.nullcontext()
+            if to_cpu_ctx_creator is not None:
+                ctx = to_cpu_ctx_creator()
+            with ctx:
+                res_data = pytree.tree_map(lambda x: x.detach().cpu() if isinstance(x, torch.Tensor) else x, res_data)
         res = [dataclasses.replace(r, data=d) for r, d in zip(res, res_data)]
         self.result[key].extend(res)
 
 @contextlib.contextmanager
-def module_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, **queries: str):
+def module_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, 
+        to_cpu_ctx_creator: Optional[Callable[[], ContextManager]] = None, **queries: str):
     ctx = RuntimeQueryContext()
     if disabled:
         yield ctx 
@@ -562,7 +581,7 @@ def module_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = F
     for query_key, query_str in queries.items():
         query = parse_pmql(query_str) 
         assert isinstance(query, (ModuleVariableQuery, ModuleStackQuery)), "only support mvq and msq"
-        queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu)))
+        queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu, to_cpu_ctx_creator=to_cpu_ctx_creator)))
     handle = install_module_hook_query(module, queries_item_list)
     try:
         yield ctx 
@@ -570,7 +589,8 @@ def module_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = F
         handle.remove()
 
 @contextlib.contextmanager
-def module_bwd_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, **queries: str):
+def module_bwd_query_context(module: Any, /, to_cpu: bool = True, disabled: bool = False, 
+        to_cpu_ctx_creator: Optional[Callable[[], ContextManager]] = None, **queries: str):
     ctx = RuntimeQueryContext()
     if disabled:
         yield ctx 
@@ -579,21 +599,20 @@ def module_bwd_query_context(module: Any, /, to_cpu: bool = True, disabled: bool
     for query_key, query_str in queries.items():
         query = parse_pmql(query_str) 
         assert isinstance(query,  ModuleVariableQuery), "only support mvq"
-        queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu)))
+        queries_item_list.append((query, partial(ctx.handle_result, key=query_key, to_cpu=to_cpu, to_cpu_ctx_creator=to_cpu_ctx_creator)))
     handle = install_module_bwd_hook_query(module, queries_item_list)
     try:
         yield ctx 
     finally:
         handle.remove()
 
-def _analysis_result(res: list[PthQueryResult], handler: Callable[[str, Any], None]):
+def _analysis_result(res: list[PthQueryResult], handler: Callable[[list[PthQueryResult]], None]):
     import torch
     with torch.no_grad():
-        for r in res:
-            handler(r.fqn, r.data)
+        handler(res)
 
 @contextlib.contextmanager
-def module_analysis_context(module: Any, handler: Callable[[str, Any], None], /, **queries: str):
+def module_analysis_context(module: Any, handler: Callable[[list[PthQueryResult]], None], /, **queries: str):
     queries_item_list: list[tuple[Union[ModuleVariableQuery, ModuleStackQuery], Callable[[list[Any]], None]]] = []
     for query_key, query_str in queries.items():
         query = parse_pmql(query_str) 
