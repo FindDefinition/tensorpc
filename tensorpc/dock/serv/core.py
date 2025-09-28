@@ -2311,7 +2311,7 @@ class Flow:
                 raise ValueError("you need to assign a driver to node first",
                                  node.readable_id)
             driver = node_desp.driver
-            APP_SERV_LOGGER.warning("start node", graph_id, node_id, driver, node.driver_id)
+            APP_SERV_LOGGER.warning(f"start node {graph_id}, {node_id}, {driver}, {node.driver_id}")
 
             if isinstance(driver, DirectSSHNode):
                 print("DRIVER", driver.url)
