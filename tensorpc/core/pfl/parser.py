@@ -96,7 +96,7 @@ _ALLOWED_SPEC_AST_TYPES = set([PFLASTType.ARRAY, PFLASTType.TUPLE])
 
 class PFLLibrary:
 
-    def __init__(self, modules: dict[str, PFLModule]):
+    def __init__(self, modules: dict[str, PFLModule], check_empty: bool = True):
         all_compiled_units: dict[str, Union[PFLFunc, PFLClass]] = {}
         all_func_uid_to_specs: dict[str, list[PFLFunc]] = {}
         all_func_uid_to_cls_specs: dict[str, list[PFLClass]] = {}
@@ -120,7 +120,8 @@ class PFLLibrary:
                         all_func_uid_to_cls_specs[k1_parts[0]] = []
                     all_func_uid_to_cls_specs[k1_parts[0]].append(v1)
                 all_compiled_units[k1] = v1
-        assert modules and all_compiled_units
+        if check_empty:
+            assert modules and all_compiled_units
         self._stmt_finder: Optional[dict[str, PFLTreeNodeFinder]] = None
         self._modules = modules
         self._path_to_modules = {m.compile_info.path: m for m in modules.values()}
@@ -314,8 +315,9 @@ class MapAstNodeToConstant(ast.NodeVisitor):
             self.visit(stmt)
         if node.returns is not None:
             self.visit(node.returns)
-        for tp in node.type_params:
-            self.visit(tp)
+        if hasattr(node, "type_params"):
+            for tp in getattr(node, "type_params"):
+                self.visit(tp)
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         # visit annassign without annotation
@@ -353,7 +355,8 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 else:
                     return self.generic_visit(node)
             else:
-                if not has_std_parent and (
+                cur_obj_is_cls_or_fn = inspect.isclass(cur_obj) or inspect.isfunction(cur_obj) or inspect.ismodule(cur_obj)
+                if not has_std_parent and cur_obj_is_cls_or_fn and (
                         cur_obj,
                         self.backend) in STD_REGISTRY._type_backend_to_item:
                     has_std_parent = True
@@ -361,10 +364,19 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                     cur_obj = getattr(cur_obj, part)
                 else:
                     return self.generic_visit(node)
-        cur_is_std = (cur_obj,
+        cur_obj_is_cls_or_fn = inspect.isclass(cur_obj) or inspect.isfunction(cur_obj) or inspect.ismodule(cur_obj)
+
+        cur_is_std = cur_obj_is_cls_or_fn and (cur_obj,
                       self.backend) in STD_REGISTRY._type_backend_to_item
         if has_std_parent and not cur_is_std:
             return self.generic_visit(node)
+        res_constant = self.preproc_var_to_constant(cur_obj)
+        if res_constant is None:
+            return self.generic_visit(node)
+        self._node_to_compile_constant[node] = res_constant
+        return node
+
+    def preproc_var_to_constant(self, cur_obj: Any):
         bound_self = None
         if inspect.ismethod(cur_obj):
             # method will never be stdlib.
@@ -377,7 +389,7 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         prep_res = self.var_preproc(cur_obj)
         cur_obj = prep_res.value 
         if cur_obj is partial:
-            return self.generic_visit(node)
+            return None
 
         is_stdlib = False
         # TODO detect classmethod and reject it.
@@ -415,13 +427,13 @@ class MapAstNodeToConstant(ast.NodeVisitor):
             # validate by PFLConstant.
             PFLExprInfo.from_value(cur_obj)
             const_type = PFLCompileConstantType.BUILTIN_VALUE
-        self._node_to_compile_constant[node] = PFLCompileConstant(
+        return PFLCompileConstant(
             value=cur_obj,
             type=const_type,
             is_stdlib=is_stdlib,
             bound_self=bound_self,
             var_meta=prep_res)
-        return node
+
 
     def visit_Name(self, node: ast.Name):
         return self._visit_Attribute_or_name(node)
@@ -459,15 +471,12 @@ class PFLParser:
                  module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
                  var_preproc: Optional[Callable[[Any], Any]] = None,
                 anno_transform: Optional[Callable[[PFLExprInfo, Any, Union[Undefined, Any]],
-                                PFLExprInfo]] = None,
-                get_compilable_meta_fn: Optional[Callable[[Callable], Optional[PFLCompileFuncMeta]]] = None):
+                                PFLExprInfo]] = None):
         self._backend = backend
         if parse_cfg is None:
             assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
             parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
         self._parse_cfg = parse_cfg
-        if get_compilable_meta_fn is None:
-            get_compilable_meta_fn = get_compilable_meta
         if func_code_getter is None:
             func_code_getter = inspect.getsourcelines
         if module_code_path_getter is None:
@@ -488,7 +497,6 @@ class PFLParser:
         self.func_node_to_meta: dict[ast.AST, PFLCompileFuncMeta] = {}
 
         self._cache_fn_precompile_info: dict[Callable, _CompileFuncCache] = {}
-        self._get_compilable_meta_fn = get_compilable_meta_fn
 
     def _parse_expr_to_pfl_notype(self, expr: ast.expr) -> PFLExpr:
         """Parse an expression to PFLExpr without type inference.
@@ -607,9 +615,13 @@ class PFLParser:
                 else:
                     if isinstance(expr, ast.Name):
                         if expr.id not in scope:
-                            raise PFLAstParseError(f"undefined name {expr.id}",
-                                                   expr)
-                        st = scope[expr.id]
+                            if not ctx.cfg.allow_partial_type_infer:
+                                raise PFLAstParseError(f"undefined name {expr.id}",
+                                                    expr)
+                            else:
+                                st = PFLExprInfo(PFLExprType.UNKNOWN)
+                        else:
+                            st = scope[expr.id]
                         res = PFLName(PFLASTType.NAME,
                                       source_loc,
                                       id=expr.id,
@@ -754,6 +766,9 @@ class PFLParser:
                 # TODO support template func here.
                 # we need to assign a unique id for each specialized function
                 func = self._parse_expr_to_pfl(expr.func, scope)
+                if ctx.cfg.allow_partial_type_infer:
+                    assert func.st.type != PFLExprType.UNKNOWN, f"function \"{unparse_pfl_expr(func)}\" in call can't be unknown in partial type infer."
+
                 if func.st.delayed_compile_req is not None:
                     req = func.st.delayed_compile_req
                     assert isinstance(req, PFLCompileReq)
@@ -1397,8 +1412,8 @@ class PFLParser:
             stmt.name,
             ret_sts[0],
             finfo_args,
-            is_method=is_method,
         )
+        func_node_finfo.is_method = is_method
         func_node_st = PFLExprInfo(type=PFLExprType.FUNCTION,
                                    func_info=func_node_finfo)
         func_node = PFLFunc(PFLASTType.FUNC,
@@ -1432,6 +1447,47 @@ class PFLParser:
         # always clear return info when func is end
         # TODO add function to scope
         return func_node
+
+    def parse_expr_string_to_pfl_ast(self,
+            expr_str: str, constants: dict[str, Any],
+            init_scope_types: dict[str, Any],
+            partial_type_infer: bool = False):
+        expr_str_ast = ast.parse(expr_str)
+        assert len(expr_str_ast.body) == 1, "only expr is allowed."
+        stmt = expr_str_ast.body[0]
+        assert isinstance(stmt, ast.Expr)
+        expr_node = stmt.value
+        func_code_lines = expr_str.splitlines()
+        transformer = MapAstNodeToConstant(
+            constants,
+            PFLErrorFormatContext(func_code_lines),
+            backend=self._backend,
+            var_preproc=self._var_preproc)
+        # use MapAstNodeToConstant to preprocess scope.
+        transformer.visit(expr_node)
+        parse_cfg = self._parse_cfg
+        backend = self._backend
+        if partial_type_infer:
+            parse_cfg = dataclasses.replace(parse_cfg, 
+                allow_partial_type_infer=True)
+        parse_ctx = PFLParseContext(
+            func_code_lines,
+            {},
+            self._var_preproc,
+            cfg=parse_cfg,
+            backend=backend,
+            node_to_constants=transformer._node_to_compile_constant,
+            compile_req=None,
+            allow_inline_expand=False)
+        with enter_parse_context(parse_ctx) as ctx:
+            # scope is used as constant.
+            init_scope = {}
+            for k, v in init_scope_types.items():
+                init_scope[k] = PFLExprInfo.from_annotype(
+                    parse_type_may_optional_undefined(v), is_type=True)
+
+            pfl_node = self._parse_expr_to_pfl(expr_node, init_scope)
+        return pfl_node
 
     def parse_func_compile_req_to_pfl_ast(
             self,
@@ -1610,13 +1666,13 @@ class PFLParser:
                 # parse 
                 dcls_info = dcls_type.get_dcls_info_checked()
                 for field in dcls_info.args:
-                    assert field.is_type_parsed, f"you must set all fields in init fn when your dcls is template, got {field.arg_name} missing."
+                    assert field.is_type_parsed, f"you must set all fields in init fn when your dcls is template, got {field.name} missing."
                 cls_node.init_uid = compiled_func.uid
                 # use func_info to store init function info
                 dcls_type.func_info = compiled_func.st.get_func_info_checked()
                 if req.meta.constexpr_args:
                     for field in dcls_info.args:
-                        if field.arg_name not in req.meta.constexpr_args:
+                        if field.name not in req.meta.constexpr_args:
                             field.type._constexpr_data = undefined
             else:
                 new_st = parse_cache.cached_parse_func(fn,
@@ -1647,7 +1703,7 @@ class PFLParser:
                         field_info.is_type_parsed = True
                     else:
                         assert not is_undefined(field_info.default_type), \
-                            f"field {field_info.arg_name} default type must be defined"
+                            f"field {field_info.name} default type must be defined"
                         field_info.type = field_info.default_type
                         field_info.is_type_parsed = True
                 dcls_type.func_info = dataclasses.replace(dcls_info)
@@ -1828,56 +1884,6 @@ class PFLParser:
             all_modules[module_id].body.append(v)
         return PFLLibrary(all_modules)
 
-    def parse_expr_to_df_ast(
-        self,
-        expr_str: str,
-        var_scope: Optional[dict[str, Any]] = None,
-    ) -> tuple[PFLExpr, dict[str, Any]]:
-        parse_cfg = self._parse_cfg
-        backend = self._backend
-
-        if parse_cfg is None:
-            assert backend in BACKEND_CONFIG_REGISTRY, "you must register backend config first if parse_cfg isn't provided."
-            parse_cfg = BACKEND_CONFIG_REGISTRY[backend]
-        expr_str_lines = expr_str.split("\n")
-        tree = ast.parse(expr_str, mode="eval")
-        node_to_constants = {}
-        if var_scope is not None:
-            transformer = MapAstNodeToConstant(
-                var_scope,
-                PFLErrorFormatContext(expr_str_lines),
-                backend=backend,
-                var_preproc=self._var_preproc)
-            transformer.visit(tree)
-            node_to_constants = transformer._node_to_compile_constant
-        assert isinstance(tree, ast.Expression)
-        tree_expr = tree.body
-        # find funcdef
-        with enter_parse_context(
-                PFLParseContext(expr_str_lines, {},
-                                self._var_preproc,
-                                cfg=parse_cfg,
-                                backend=backend,
-                                node_to_constants=node_to_constants)) as ctx:
-            init_scope: dict[str, PFLExprInfo] = {}
-            if var_scope is None:
-                scope = init_scope.copy()
-            else:
-                scope = init_scope.copy()
-                for k, v in var_scope.items():
-                    scope[k] = PFLExprInfo.from_annotype(
-                        parse_type_may_optional_undefined(type(v)),
-                        is_type=False)
-            try:
-                res = self._parse_expr_to_pfl(tree_expr, scope)
-            except PFLAstParseError as e:
-                error_line = get_parse_context_checked(
-                ).format_error_from_lines_node(e.node)
-                print(error_line)
-                raise e
-        return res, scope
-
-
 def parse_func_to_pfl_ast(
         func: Callable,
         scope: Optional[dict[str, PFLExprInfo]] = None,
@@ -1924,75 +1930,93 @@ def parse_func_to_pfl_library(
     parser.parse_func_to_pfl_ast(func, scope, external_anno, constexpr_args)
     return parser._all_compiled_to_pfl_library(parser._all_compiled)
 
-
-def parse_expr_to_df_ast(
-    expr_str: str,
-    var_scope: Optional[dict[str, Any]] = None,
+def parse_expr_string_to_pfl_ast(
+    expr_str: str, 
+    constants: dict[str, Any],
+    init_scope_types: dict[str, Any],
+    partial_type_infer: bool = False,
     backend: str = "js",
     parse_cfg: Optional[PFLParseConfig] = None
-) -> tuple[PFLExpr, dict[str, Any]]:
+) -> PFLExpr:
     """Parse a expression string to PFL AST.
     """
     parser = PFLParser(backend, parse_cfg)
-    return parser.parse_expr_to_df_ast(expr_str, var_scope)
+    return parser.parse_expr_string_to_pfl_ast(
+        expr_str, constants, init_scope_types, partial_type_infer
+    )
+
+class _AstAsDict:
+    def __init__(self, exclude_fields: Optional[set[str]] = None, ignore_dcls_info: bool = False, ignore_func_info: bool = False):
+        if exclude_fields is None:
+            exclude_fields = set()
+        exclude_fields.update([
+            "compile_info", "source_loc"
+        ])
+        self.exclude_fields = exclude_fields
+        self._ignore_dcls_info = ignore_dcls_info
+        self._ignore_func_info = ignore_func_info
+
+    def _ast_as_dict(self, obj):
+        if isinstance(obj, PFLAstNodeBase):
+            result = []
+            for f in dataclasses.fields(obj):
+                if f.name in self.exclude_fields:
+                    continue
+                value = self._ast_as_dict(getattr(obj, f.name))
+                if not isinstance(value, Undefined):
+                    result.append((f.name, value))
+            return dict(result)
+        elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
+            return type(obj)(*[self._ast_as_dict(v) for v in obj])
+        elif isinstance(obj, (list, tuple)):
+            # Assume we can create an object of this type by passing in a
+            # generator (which is not true for namedtuples, handled
+            # above).
+            return type(obj)(self._ast_as_dict(v) for v in obj)
+        elif isinstance(obj, dict):
+            return type(obj)(
+                (self._ast_as_dict(k), self._ast_as_dict(v)) for k, v in obj.items())
+        else:
+            if isinstance(obj, PFLExprInfo):
+                res = obj.to_dict()
+                if "dcls_info" in res and self._ignore_dcls_info:
+                    res.pop("dcls_info")
+                if "func_info" in res and self._ignore_func_info:
+                    res.pop("func_info")
+                return res 
+            return obj
 
 
-def _ast_as_dict(obj):
-    if isinstance(obj, PFLAstNodeBase):
-        result = []
-        for f in dataclasses.fields(obj):
-            if f.name == "compile_info" or f.name == "source_loc":
-                continue
-            value = _ast_as_dict(getattr(obj, f.name))
-            if not isinstance(value, Undefined):
-                result.append((f.name, value))
-        return dict(result)
-    elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
-        return type(obj)(*[_ast_as_dict(v) for v in obj])
-    elif isinstance(obj, (list, tuple)):
-        # Assume we can create an object of this type by passing in a
-        # generator (which is not true for namedtuples, handled
-        # above).
-        return type(obj)(_ast_as_dict(v) for v in obj)
-    elif isinstance(obj, dict):
-        return type(obj)(
-            (_ast_as_dict(k), _ast_as_dict(v)) for k, v in obj.items())
-    else:
-        if isinstance(obj, PFLExprInfo):
-            return obj.to_dict()
-        return obj
-
-
-def _ast_as_dict_for_dump(obj):
-    if isinstance(obj, PFLAstNodeBase):
-        result = []
-        for f in dataclasses.fields(obj):
-            # FIXME: better way to remove code field in PFLFunc
-            if f.name == "compile_info" or f.name == "source_loc":
-                continue
-            value = _ast_as_dict_for_dump(getattr(obj, f.name))
-            if not isinstance(value, Undefined):
-                result.append((f.name, value))
-        return dict(result)
-    elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
-        return type(obj)(*[_ast_as_dict_for_dump(v) for v in obj])
-    elif isinstance(obj, (list, tuple)):
-        # Assume we can create an object of this type by passing in a
-        # generator (which is not true for namedtuples, handled
-        # above).
-        return type(obj)(_ast_as_dict_for_dump(v) for v in obj)
-    elif isinstance(obj, dict):
-        return type(obj)((_ast_as_dict_for_dump(k), _ast_as_dict_for_dump(v))
-                         for k, v in obj.items())
-    else:
-        if isinstance(obj, PFLExprInfo):
-            return str(obj)
-        return obj
+    def _ast_as_dict_for_dump(self, obj):
+        if isinstance(obj, PFLAstNodeBase):
+            result = []
+            for f in dataclasses.fields(obj):
+                # FIXME: better way to remove code field in PFLFunc
+                if f.name in self.exclude_fields:
+                    continue
+                value = self._ast_as_dict_for_dump(getattr(obj, f.name))
+                if not isinstance(value, Undefined):
+                    result.append((f.name, value))
+            return dict(result)
+        elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
+            return type(obj)(*[self._ast_as_dict_for_dump(v) for v in obj])
+        elif isinstance(obj, (list, tuple)):
+            # Assume we can create an object of this type by passing in a
+            # generator (which is not true for namedtuples, handled
+            # above).
+            return type(obj)(self._ast_as_dict_for_dump(v) for v in obj)
+        elif isinstance(obj, dict):
+            return type(obj)((self._ast_as_dict_for_dump(k), self._ast_as_dict_for_dump(v))
+                            for k, v in obj.items())
+        else:
+            if isinstance(obj, PFLExprInfo):
+                return str(obj)
+            return obj
 
 
 def pfl_ast_to_dict(node: PFLAstNodeBase):
-    return _ast_as_dict(node)
+    return _AstAsDict()._ast_as_dict(node)
 
 
 def ast_dump(node: PFLAstNodeBase):
-    return _ast_as_dict_for_dump(node)
+    return _AstAsDict()._ast_as_dict_for_dump(node)

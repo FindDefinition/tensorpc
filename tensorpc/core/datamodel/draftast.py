@@ -5,7 +5,7 @@ import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.utils.uniquename import UniqueNamePool
-
+from tensorpc.core import pfl 
 T = TypeVar("T")
 
 # currently jmespath don't support ast to code, so we use a simple ast here.
@@ -23,10 +23,10 @@ class DraftASTType(enum.IntEnum):
 
 
 class DraftASTFuncType(enum.Enum):
-    GET_ITEM = "getitem"
-    GET_ATTR = "getattr"
+    GET_ITEM = "getItem"
+    GET_ATTR = "getAttr"
     CFORMAT = "cformat"
-    GET_ITEM_PATH = "getitem_path"
+    GET_ITEM_PATH = "getItemPath"
     NOT_NULL = "not_null"
     WHERE = "where"
     CREATE_ARRAY = "array"
@@ -60,6 +60,12 @@ class DraftASTNode:
             return self.value if self.value != "" else "$"
         return _draft_ast_to_jmes_path_recursive(self)
 
+    def get_pfl_path(self) -> str:
+        res = _draft_ast_to_pfl_path_recursive(self)
+        if res == "":
+            res = "getRoot()"
+        return res
+
     def iter_child_nodes(self):
         for child in self.children:
             yield child
@@ -77,7 +83,6 @@ class DraftASTNode:
         yield self
         for child in self.children:
             yield from child.walk()
-
 
     def __repr__(self):
         return self.get_jmes_path()
@@ -138,6 +143,48 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     elif node.type == DraftASTType.UNARY_OP:
         op = node.value
         return f"{op}{_draft_ast_to_jmes_path_recursive(node.children[0])}"
+    
+    else:
+        raise NotImplementedError(f"node type {node.type} not implemented")
+
+def _draft_ast_to_pfl_path_recursive(node: DraftASTNode) -> str:
+    if node.type == DraftASTType.NAME:
+        return "getRoot()" if node.value == "$" else node.value
+    elif node.type == DraftASTType.JSON_LITERAL:
+        if isinstance(node.value, (int, float)):
+            return f"{node.value}"
+        else:
+            return f"{json.dumps(node.value)}"
+    elif node.type == DraftASTType.STRING_LITERAL:
+        return f"'{node.value}'"
+    elif node.type in _GET_ITEMS:
+        child_value = _draft_ast_to_pfl_path_recursive(node.children[0])
+        is_root = child_value == ""
+        if node.type == DraftASTType.GET_ATTR:
+            if is_root:
+                return f"{node.value}"
+            else:
+                return f"{child_value}[{node.value}]"
+        elif node.type == DraftASTType.ARRAY_GET_ITEM:
+            return f"{child_value}[{node.value}]"
+        else:
+            return f"{child_value}[{node.value}]"
+    elif node.type == DraftASTType.FUNC_CALL:
+        assert node.value in _FRONTEND_SUPPORTED_FUNCS, f"unsupported func {node.value}, only support {_FRONTEND_SUPPORTED_FUNCS}"
+        return f"{node.value}(" + ",".join([
+            _draft_ast_to_pfl_path_recursive(child) for child in node.children
+        ]) + ")"
+    
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        if op == "&&":
+            op = "and"
+        elif op == "||":
+            op = "or"
+        return f"({_draft_ast_to_pfl_path_recursive(node.children[0])}{op}{_draft_ast_to_pfl_path_recursive(node.children[1])})"
+    elif node.type == DraftASTType.UNARY_OP:
+        op = node.value
+        return f"{op}{_draft_ast_to_pfl_path_recursive(node.children[0])}"
     
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
@@ -213,7 +260,7 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
-        if node.value == "getitem":
+        if node.value == "getItem":
             k = evaluate_draft_ast(node.children[1], obj)
             return evaluate_draft_ast(node.children[0], obj)[k]
         elif node.value == "getattr":
@@ -225,7 +272,7 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
                 evaluate_draft_ast(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args)
-        elif node.value == "getitem_path":
+        elif node.value == "getItemPath":
             target = evaluate_draft_ast(node.children[0], obj)
             path_list = evaluate_draft_ast(node.children[1], obj)
             assert isinstance(path_list, list)
@@ -323,7 +370,7 @@ class DraftASTCompiler:
             x = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
             res = f"({op}({x}))"
         elif node.type == DraftASTType.FUNC_CALL:
-            if node.value == "getitem":
+            if node.value == "getItem":
                 res = f"{self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}[{self._compile_draft_ast_to_py_expr(node.children[1], first_pass)}]"
             elif node.value == "getattr":
                 res =  f"{self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}.{self._compile_draft_ast_to_py_expr(node.children[1], first_pass)}"
@@ -333,10 +380,10 @@ class DraftASTCompiler:
                     self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children[1:]
                 ]
                 res =  f"({fmt} % ({','.join(args)}))"
-            elif node.value == "getitem_path":
+            elif node.value == "getItemPath":
                 target = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
                 path_list = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
-                res =  f"getitem_path({target}, {path_list})"
+                res =  f"getItemPath({target}, {path_list})"
             elif node.value == "not_null":
                 res =  f"not_null({','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])})"
             elif node.value == "where":
@@ -382,7 +429,7 @@ def _draft_ast_func(obj):
         print(code_func)
         raise
     globals_container = {
-        "getitem_path": _impl_get_itempath,
+        "getItemPath": _impl_get_itempath,
         "not_null": _impl_not_null
     }
     exec(func_code_obj, globals_container)
@@ -460,7 +507,7 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
-        if node.value == "getitem":
+        if node.value == "getItem":
             target, obj_id_trace = evaluate_draft_ast_with_obj_id_trace(
                 node.children[0], obj)
             k, _ = evaluate_draft_ast_with_obj_id_trace(node.children[1], obj)
@@ -478,7 +525,7 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
                 evaluate_draft_ast(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args), []
-        elif node.value == "getitem_path":
+        elif node.value == "getItemPath":
             target = evaluate_draft_ast(node.children[0], obj)
             path_list = evaluate_draft_ast(node.children[1], obj)
             assert isinstance(path_list, list)
@@ -568,7 +615,7 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
         else:
             raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
-        if node.value == "getitem":
+        if node.value == "getItem":
             k = evaluate_draft_ast_json(node.children[1], obj)
             return evaluate_draft_ast_json(node.children[0], obj)[k]
         elif node.value == "getattr":
@@ -581,7 +628,7 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
                 evaluate_draft_ast_json(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args)
-        elif node.value == "getitem_path":
+        elif node.value == "getItemPath":
             target = evaluate_draft_ast_json(node.children[0], obj)
             path_list = evaluate_draft_ast_json(node.children[1], obj)
             assert isinstance(path_list, list)

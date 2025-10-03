@@ -79,9 +79,9 @@ class ComputeNodeWrapper(BaseNodeWrapper):
 
         self.bind_fields(
             borderColor=
-            f"matchcase({node_model_draft.node.status}, {D.literal_val(status_to_border_color)})",
+            f"matchCase({node_model_draft.node.status}, {D.literal_val(status_to_border_color)})",
             boxShadow=
-            f"matchcase({node_model_draft.node.status}, {D.literal_val(status_to_border_shadow)})",
+            f"matchCase({node_model_draft.node.status}, {D.literal_val(status_to_border_shadow)})",
         )
         self._ctx = ComputeFlowNodeContext(node_id, node_state, node_model_draft.node_state)
         self.set_flow_event_context_creator(

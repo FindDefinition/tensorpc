@@ -2,6 +2,7 @@ import ast
 from collections.abc import Mapping, Sequence
 import contextlib
 import contextvars
+from dataclasses import is_dataclass
 import enum
 from functools import partial
 import inspect
@@ -196,6 +197,9 @@ class PFLParseConfig:
     # not created yet.
     tuple_assign_must_be_homogeneous: bool = False
     allow_custom_class: bool = False
+    # enable partial type infer, for string expr parsing.
+    # WARNING: unknown attr call isn't allowed.
+    allow_partial_type_infer: bool = False
 
 @dataclasses.dataclass
 class StaticEvalConfig:
@@ -554,36 +558,87 @@ def has_parse_context():
     ctx = _PFLPARSE_CONTEXT.get()
     return ctx is not None
 
+class PFLFuncArgFlag(enum.IntEnum):
+    IS_VAARGS = 1 << 0
+    IS_KW_VAARGS = 1 << 1
+    IS_TYPE_PARSED = 1 << 2
+    IS_TEMPLATE_FN_ARG_SPEC = 1 << 3
 
 @dataclasses.dataclass(eq=False)
 class PFLExprFuncArgInfo:
-    arg_name: str
+    name: str
     type: 'PFLExprInfo'
     default: Union[Undefined, Any] = undefined
     default_type: Union[Undefined, "PFLExprInfo"] = undefined
-
-    is_vaargs: bool = False
-    # for lazy-parsed dcls field.
-    is_type_parsed: bool = True
-    is_kw_vaargs: bool = False
-    is_template_fn_arg_spec: bool = False 
+    flag: int = int(PFLFuncArgFlag.IS_TYPE_PARSED)
+    # is_vaargs: bool = False
+    # # for lazy-parsed dcls field.
+    # is_type_parsed: bool = True
+    # is_kw_vaargs: bool = False
+    # is_template_fn_arg_spec: bool = False 
     template_fn_arg_spec_idx: Optional[int] = None
+
+    @property 
+    def is_vaargs(self) -> bool:
+        return (self.flag & PFLFuncArgFlag.IS_VAARGS) != 0
+
+    @is_vaargs.setter
+    def is_vaargs(self, val: bool):
+        if val:
+            self.flag |= PFLFuncArgFlag.IS_VAARGS
+        else:
+            self.flag &= ~PFLFuncArgFlag.IS_VAARGS
+
+    @property
+    def is_kw_vaargs(self) -> bool:
+        return (self.flag & PFLFuncArgFlag.IS_KW_VAARGS) != 0
+
+    @is_kw_vaargs.setter
+    def is_kw_vaargs(self, val: bool):
+        if val:
+            self.flag |= PFLFuncArgFlag.IS_KW_VAARGS
+        else:
+            self.flag &= ~PFLFuncArgFlag.IS_KW_VAARGS
+
+    @property
+    def is_type_parsed(self) -> bool:
+        return (self.flag & PFLFuncArgFlag.IS_TYPE_PARSED) != 0
+
+    @is_type_parsed.setter
+    def is_type_parsed(self, val: bool):
+        if val:
+            self.flag |= PFLFuncArgFlag.IS_TYPE_PARSED
+        else:
+            self.flag &= ~PFLFuncArgFlag.IS_TYPE_PARSED
+
+    @property
+    def is_template_fn_arg_spec(self) -> bool:
+        return (self.flag & PFLFuncArgFlag.IS_TEMPLATE_FN_ARG_SPEC) != 0
+
+    @is_template_fn_arg_spec.setter
+    def is_template_fn_arg_spec(self, val: bool):
+        if val:
+            self.flag |= PFLFuncArgFlag.IS_TEMPLATE_FN_ARG_SPEC
+        else:
+            self.flag &= ~PFLFuncArgFlag.IS_TEMPLATE_FN_ARG_SPEC
+
     def typevar_substitution(self, typevar_map: Mapping[TypeVar, "PFLExprInfo"]) -> Self:
         # we assume new type don't contains typevar.
         return dataclasses.replace(self, type=self.type.typevar_substitution(typevar_map))
 
     def __repr__(self) -> str:
         if not is_undefined(self.default):
-            return f"{self.arg_name}:{self.type}={self.default}"
-        return f"{self.arg_name}:{self.type}"
+            return f"{self.name}:{self.type}={self.default}"
+        return f"{self.name}:{self.type}"
 
     def to_dict(self):
-        return {
-            "arg_name": self.arg_name,
+        res = {
+            "name": self.name,
             "type": self.type.to_dict(),
-            "is_vaargs": self.is_vaargs,
-            "is_kw_vaargs": self.is_kw_vaargs,
         }
+        if self.flag > 0:
+            res["flag"] = self.flag
+        return res 
 
 _T = TypeVar("_T")
 
@@ -601,13 +656,21 @@ class FuncMatchResult(Generic[_T]):
         if self.var_kwarg is not None:
             assert self.var_kwarg[0].is_kw_vaargs, "var_kwarg should be kw vaargs"
 
+class PFLFuncInfoFlag(enum.IntEnum):
+    IS_METHOD = 1 << 0
+    IS_PROPERTY = 1 << 1
+    IS_DCLS = 1 << 2
+    IS_USER_DCLS = 1 << 3
+
+
 @dataclasses.dataclass(eq=False)
 class PFLExprFuncInfo:
     name: str
     return_type: "PFLExprInfo"
     args: list[PFLExprFuncArgInfo] = dataclasses.field(default_factory=list)
-    is_method: bool = False
-    is_property: bool = False
+    # is_method: bool = False
+    # is_property: bool = False
+    flag: int = 0
     raw_func: Optional[Callable] = None
     # overload: when you define a function with overloads, the signature of origin function
     # will be ignored, and the overloads will be used instead.
@@ -617,17 +680,61 @@ class PFLExprFuncInfo:
 
     compilable_meta: Optional["PFLCompileFuncMeta"] = None
     func_uid: str = ""
-    is_dcls: bool = False
-    is_user_dcls: bool = False
+    # is_dcls: bool = False
+    # is_user_dcls: bool = False
     # when some function is called as a bound method, this field is set to the type of the 'Self'.
     bound_self_type: Optional["PFLExprInfo"] = None
     has_template_fn_spec: bool = False
     _arg_name_to_idx: dict[str, int] = dataclasses.field(default_factory=dict)
     _vararg_pos: int = -1
 
+    @property
+    def is_method(self) -> bool:
+        return (self.flag & PFLFuncInfoFlag.IS_METHOD) != 0    
+
+    @is_method.setter
+    def is_method(self, val: bool):
+        if val:
+            self.flag |= PFLFuncInfoFlag.IS_METHOD
+        else:
+            self.flag &= ~PFLFuncInfoFlag.IS_METHOD
+
+    @property
+    def is_property(self) -> bool:
+        return (self.flag & PFLFuncInfoFlag.IS_PROPERTY) != 0
+
+    @is_property.setter
+    def is_property(self, val: bool):
+        if val:
+            self.flag |= PFLFuncInfoFlag.IS_PROPERTY
+        else:
+            self.flag &= ~PFLFuncInfoFlag.IS_PROPERTY
+
+    @property
+    def is_dcls(self) -> bool:
+        return (self.flag & PFLFuncInfoFlag.IS_DCLS) != 0
+
+    @is_dcls.setter
+    def is_dcls(self, val: bool):
+        if val:
+            self.flag |= PFLFuncInfoFlag.IS_DCLS
+        else:
+            self.flag &= ~PFLFuncInfoFlag.IS_DCLS
+
+    @property
+    def is_user_dcls(self) -> bool:
+        return (self.flag & PFLFuncInfoFlag.IS_USER_DCLS) != 0
+
+    @is_user_dcls.setter
+    def is_user_dcls(self, val: bool):
+        if val:
+            self.flag |= PFLFuncInfoFlag.IS_USER_DCLS
+        else:
+            self.flag &= ~PFLFuncInfoFlag.IS_USER_DCLS
+
     def __post_init__(self):
         for i, a in enumerate(self.args):
-            self._arg_name_to_idx[a.arg_name] = i
+            self._arg_name_to_idx[a.name] = i
             if a.is_vaargs:
                 self._vararg_pos = i
     
@@ -642,7 +749,7 @@ class PFLExprFuncInfo:
                 else:
                     prefix = str(arg.type)
                 if self.is_dcls:
-                    prefix = f"{arg.arg_name}:{prefix}"
+                    prefix = f"{arg.name}:{prefix}"
                 if not isinstance(arg.type._constexpr_data, Undefined):
                     args_str.append(f"{prefix}={arg.type._constexpr_data}")
                 else:
@@ -658,10 +765,15 @@ class PFLExprFuncInfo:
         args = [arg.to_dict() for arg in self.args]
         res: dict[str, Any] = {
             "args": args,
-            "is_method": self.is_method,
-            "is_property": self.is_property,
-            "is_user_dcls": self.is_user_dcls,
         }
+        if self.flag > 0:
+            res["flag"] = self.flag
+        # if self.is_method:
+        #     res["is_method"] = True
+        # if self.is_property:
+        #     res["is_property"] = True
+        # if self.is_user_dcls:
+        #     res["is_user_dcls"] = True
         if not self.is_dcls:
             # FIXME
             res.update({
@@ -721,7 +833,7 @@ class PFLExprFuncInfo:
                 raise ValueError(f"field({field_name}) must be set by delayed_init_set_field_type before get attr.")
             assert self.raw_func is not None 
             type_hints = get_type_hints_with_cache(self.raw_func, include_extras=True)
-            anno = type_hints[field.arg_name]
+            anno = type_hints[field.name]
             annotype = parse_type_may_optional_undefined(anno)
             arg_type = PFLExprInfo.from_annotype(annotype,
                                             is_type=False,
@@ -776,7 +888,9 @@ class PFLExprFuncInfo:
         else:
             preproc_res = parse_cache._var_preproc(dcls)
             meta = preproc_res.compilable_meta
-        res = cls(name=dcls.__name__, is_user_dcls=True, is_dcls=True, args=args, raw_func=dcls, return_type=return_type, compilable_meta=meta)
+        res = cls(name=dcls.__name__, args=args, raw_func=dcls, return_type=return_type, compilable_meta=meta)
+        res.is_user_dcls = True
+        res.is_dcls = True
         res.func_uid = get_module_id_of_type(dcls)
         return_type.dcls_info = res
         return res 
@@ -854,8 +968,9 @@ class PFLExprFuncInfo:
                 return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
         else:
             return_type = PFLExprInfo(PFLExprType.NONE_TYPE)
-        res = cls(name=name, args=args, raw_func=raw_func, return_type=return_type, is_method=is_method,
+        res = cls(name=name, args=args, raw_func=raw_func, return_type=return_type,
             has_template_fn_spec=len(template_spec_meta_idx) > 0)
+        res.is_method = is_method
         if overload_sigs is not None:
             res.overloads = [cls.from_signature(
                 name, s, is_bound_method=is_bound_method, self_type=self_type) for s in overload_sigs]
@@ -914,12 +1029,18 @@ class PFLExprFuncInfo:
             new_ovs = [o.get_bounded_type(bound_self) for o in self.overloads]
         return dataclasses.replace(self, bound_self_type=bound_self, overloads=new_ovs)
 
+class PFLExprInfoFlags(enum.IntEnum):
+    HAS_OPTIONAL = 1 << 0
+    HAS_UNDEFINED = 1 << 1
+    IS_STD_LIB = 1 << 2
+
 @dataclasses.dataclass(eq=False)
 class PFLExprInfo:
     type: PFLExprType
     childs: list['PFLExprInfo'] = dataclasses.field(default_factory=list)
-    has_optional: bool = False
-    has_undefined: bool = False
+    flag: int = 0
+    # has_optional: bool = False
+    # has_undefined: bool = False
     proxy_dcls: Optional[Any] = None
     disable_dcls_ctor: bool = False
     # for custom dataclass
@@ -938,7 +1059,7 @@ class PFLExprInfo:
     additional_compiled_uid: Optional[str] = None
     delayed_compile_req: Optional[Any] = None
     # for dataclass in function arg
-    is_stdlib: bool = False
+    # is_stdlib: bool = False
     # for meta call (type validation, shape inference, etc)
     # TODO should it be sent to frontend?
     _metadata: Union[Undefined, Any] = undefined
@@ -946,6 +1067,40 @@ class PFLExprInfo:
     _force_meta_infer: bool = False
     _static_type_infer: Optional[Callable[..., Any]] = None
     _constexpr_data: Union[Undefined, Any] = undefined
+
+    @property 
+    def has_optional(self) -> bool:
+        return (self.flag & PFLExprInfoFlags.HAS_OPTIONAL) != 0
+
+    @has_optional.setter
+    def has_optional(self, val: bool):
+        if val:
+            self.flag |= PFLExprInfoFlags.HAS_OPTIONAL
+        else:
+            self.flag &= ~PFLExprInfoFlags.HAS_OPTIONAL
+
+    @property
+    def has_undefined(self) -> bool:
+        return (self.flag & PFLExprInfoFlags.HAS_UNDEFINED) != 0
+
+    @has_undefined.setter
+    def has_undefined(self, val: bool):
+        if val:
+            self.flag |= PFLExprInfoFlags.HAS_UNDEFINED
+        else:
+            self.flag &= ~PFLExprInfoFlags.HAS_UNDEFINED
+
+    @property
+    def is_stdlib(self) -> bool:
+        return (self.flag & PFLExprInfoFlags.IS_STD_LIB) != 0
+
+    @is_stdlib.setter
+    def is_stdlib(self, val: bool):
+        if val:
+            self.flag |= PFLExprInfoFlags.IS_STD_LIB
+        else:
+            self.flag &= ~PFLExprInfoFlags.IS_STD_LIB
+
     def to_dict(self):
         childs = [c.to_dict() for c in self.childs]
         res: dict[str, Any] = {
@@ -957,10 +1112,8 @@ class PFLExprInfo:
             res["additional_compiled_uid"] = self.additional_compiled_uid
         if self.childs:
             res["childs"] = childs
-        if self.has_optional:
-            res["has_optional"] = self.has_optional
-        if self.has_undefined:
-            res["has_undefined"] = self.has_undefined
+        if self.flag != 0:
+            res["flag"] = self.flag
         if self.mapped:
             res["mapped"] = self.mapped
         if not isinstance(self.metadata, Undefined):
@@ -969,9 +1122,6 @@ class PFLExprInfo:
             res["func_info"] = self.func_info.to_dict()
         if self.dcls_info is not None:
             res["dcls_info"] = self.dcls_info.to_dict()
-
-        if self.is_stdlib:
-            res["is_stdlib"] = self.is_stdlib
         return res
 
     def __repr__(self) -> str:
@@ -1190,6 +1340,9 @@ class PFLExprInfo:
             st = cls(PFLExprType.UNDEFINED_TYPE)
         elif isinstance(value, tuple):
             st = cls(PFLExprType.TUPLE, [cls.from_value(v) for v in value])
+        elif dataclasses.is_dataclass(value) and not inspect.isclass(value):
+            # TODO check dcls don't have typevar
+            st = cls.from_dcls_type(type(value))
         else:
             raise ValueError(f"Unsupported constant value type: {type(value)}")
         st.annotype = parse_type_may_optional_undefined(type(value))
@@ -1322,6 +1475,8 @@ class PFLExprInfo:
         return self.type in _TYPE_SUPPORT_BINARY_OP
 
     def is_convertable(self, tgt: "PFLExprInfo"):
+        assert self.type != PFLExprType.UNKNOWN, "source type is UNKNOWN"
+        assert tgt.type != PFLExprType.UNKNOWN, "target type is UNKNOWN"
         if tgt.type == PFLExprType.ANY:
             return True
         if not tgt.is_optional() and self.is_optional():
@@ -1731,7 +1886,9 @@ class PFLCompileConstantType(enum.IntEnum):
     # global (qual) function, maybe stdlib
     FUNCTION = 1
     # dataclass, maybe stdlib
-    DATACLASS_TYPE = 32
+    DATACLASS_TYPE = 2
+    # global value, must be dataclass instalce
+    GLOBAL_VALUE = 3
 
 @dataclasses.dataclass
 class PFLProcessedVarMeta:

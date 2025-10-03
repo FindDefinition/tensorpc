@@ -15,7 +15,7 @@ register_backend("js", PFLParseConfig(
     allow_var_union=False,
     allow_kw=False,
     allow_nd_slice=False,
-    allow_slice=False,
+    allow_slice=True,
     allow_new_var_after_if=True,
     tuple_assign_must_be_homogeneous=True,
     allow_custom_class=False,
@@ -241,9 +241,9 @@ class BinpackResult:
     height: float 
     fill: float
 
-@register_pfl_std(mapped_name="PerformanceUtil", backend="js", mapped=time)
+@register_pfl_std(mapped_name="PerfUtil", backend="js", mapped=time)
 @dataclasses.dataclass
-class PerformanceUtil:
+class PerfUtil:
     @staticmethod
     def time() -> float: ...
 
@@ -374,3 +374,4 @@ def mark_js_compilable(fn: Optional[Any] = None, *, is_template: bool = False,
         always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None) -> Union[Any, Callable[[Any], Any]]:
     return mark_pfl_compilable(fn, backends=["js"], is_template=is_template,
         always_inline=always_inline, meta=meta)
+

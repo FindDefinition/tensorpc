@@ -76,7 +76,7 @@ MAX_MATRIX_SIZE = 10000 # enough for 720P 16x16 downsampled video.
 class AttnFramePanel(three.Group):
     def __init__(self, draft: FrameAttnModel, downsample_stride_hw: tuple[int, int]):
         image = three.Image().prop(cached=False)
-        image.bind_fields(image=f"getitem({draft.video_jpegs}, {draft.sub_frame_idx})", scale=f"{draft.video_shape[1]}")
+        image.bind_fields(image=f"getItem({draft.video_jpegs}, {draft.sub_frame_idx})", scale=f"{draft.video_shape[1]}")
         text = three.Text("").prop(position=(0, 0, int(Layers.TEXT)), color="green", 
             fillOpacity=0.9, anchorX="left", anchorY="top")
         text.bind_fields(value=f"cformat('%d|%s', {draft.token_frame_idx}, {draft.frame_desc})",
@@ -85,7 +85,7 @@ class AttnFramePanel(three.Group):
             "position-x": f"{draft.textOffsetX}",
             "position-y": f"{draft.textOffsetY}",
         })
-        # text.bind_fields(value=f"console_log($)")
+        # text.bind_fields(value=f"printForward($)")
         trs_empty = np.zeros((0, 2), dtype=np.float32)
         lines_empty = np.zeros((0, 2), dtype=np.float32)
 
@@ -279,7 +279,7 @@ class VideoAttentionViewer(mui.FlexBox):
             hover_line_cond,
             select_line_cond,
         ]).prop(position=(0, 0, 0))
-        image.bind_fields(image=f"getitem({draft.video_jpegs}, {draft.cur_frame_idx})", scale=draft.preview_minimap.height)
+        image.bind_fields(image=f"getItem({draft.video_jpegs}, {draft.cur_frame_idx})", scale=draft.preview_minimap.height)
         # image.bind_fields(image=f"console.log(draft.video)", scale=draft.preview_minimap.height)
 
         preview_minimap = plus.hud.MiniMap(draft.preview_minimap, [

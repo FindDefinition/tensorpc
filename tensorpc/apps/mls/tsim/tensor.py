@@ -41,7 +41,7 @@ class SimTensorStorage:
     def __post_init__(self):
         assert not isinstance(self.data, np.number)
 
-    def getitem(self, inds: Any) -> Self:
+    def getItem(self, inds: Any) -> Self:
         new_data = self.data[inds]
         if isinstance(new_data, np.number):
             new_data = np.array(new_data)
@@ -329,7 +329,7 @@ class SimTensorBase:
             res = dataclasses.replace(self, shape=res_shape)
             return res 
         else:
-            new_storage = self.storage.getitem(inds) 
+            new_storage = self.storage.getItem(inds) 
             res = dataclasses.replace(self, shape=list(map(int, new_storage.data.shape)))
             res.storage = new_storage
             return res 

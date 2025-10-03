@@ -2203,7 +2203,7 @@ class TritonInlineRunEnv(PFLInlineRunEnv):
     raw_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-class TritonKernelRunner(pfl.PFLAsyncRunnerV2):
+class TritonKernelRunner(pfl.PFLAsyncRunner):
 
     def __init__(self, library: pfl.PFLLibrary, inline_env: PFLInlineRunEnv):
         super().__init__(library)
@@ -2727,7 +2727,7 @@ class TritonRuntimeRunnerNested:
         if do_meta_eval:
             evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib, assign_check=_tt_assign_check)
             evaluator.eval_total_tree(self.fn.fn, meta_args)
-        runner = pfl.PFLAsyncRunnerV2(lib)
+        runner = pfl.PFLAsyncRunner(lib)
         fn_no_jit = _may_triton_func(self.fn.fn)
         lib = runner._library
         jkl_arr_tuple = np.meshgrid(

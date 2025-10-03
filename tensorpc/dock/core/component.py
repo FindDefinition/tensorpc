@@ -16,69 +16,75 @@ import abc
 import asyncio
 import builtins
 import collections.abc
-from contextlib import nullcontext
-import json
-import time
-from typing import TYPE_CHECKING, Mapping, Sequence, cast
 import copy
 import dataclasses
 import enum
-from functools import partial
 import inspect
 import io
+import json
 import re
 import sys
 import threading
+import time
 import traceback
+from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
-from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Generator,
-                    Generic, Iterable, Optional, Set, Type, Union)
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
+                    Awaitable, Callable, Coroutine, Generator, Generic,
+                    Iterable, Mapping, Optional, Sequence, Set, Type, Union,
+                    cast)
 
 import grpc
-from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
-from tensorpc.core import pfl
-from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.funcid import clean_source_code, remove_common_indent_from_code
-from tensorpc.core.datamodel.events import DraftChangeEvent
-import tensorpc.core.datamodel.jmes as jmespath
-from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
-from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
-from pydantic import (
-    BaseModel,
-    GetCoreSchemaHandler,
-    GetJsonSchemaHandler,
-    TypeAdapter,
-    ValidationError,
-)
+from pydantic import (BaseModel, GetCoreSchemaHandler, GetJsonSchemaHandler,
+                      TypeAdapter, ValidationError)
 from pydantic_core import PydanticCustomError, core_schema
-from tensorpc.dock.client import AppLocalMeta, MasterMeta
-from tensorpc.dock.core.uitypes import ALL_KEY_CODES
-from tensorpc.dock.serv_names import serv_names
+from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
+                               Self, TypeAlias, TypeVar)
 
+import tensorpc.core.datamodel.jmes as jmespath
+from tensorpc.core import dataclass_dispatch as dataclasses_strict
+from tensorpc.core import pfl, prim
+from tensorpc.core.annolib import DataclassType
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.core_io import JsonSpecialData
+from tensorpc.core.datamodel.asdict import (DataClassWithUndefined,
+                                            as_dict_no_undefined_with_exclude,
+                                            asdict_no_deepcopy,
+                                            asdict_no_deepcopy_with_field)
+from tensorpc.core.datamodel.draft import (DraftASTType, DraftBase,
+                                           DraftObject, DraftUpdateOp,
+                                           capture_draft_update, create_draft,
+                                           get_draft_jmespath,
+                                           get_draft_pflpath,
+                                           insert_assign_draft_op)
+from tensorpc.core.datamodel.events import DraftChangeEvent
+from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
-from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
+from tensorpc.core.tree_id import (UniqueTreeId, UniqueTreeIdForComp,
+                                   UniqueTreeIdForTree)
 from tensorpc.dock import appctx, marker
-from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
-
-from tensorpc.dock.core.appcore import EventHandler, EventHandlers, enter_batch_event_context
+from tensorpc.dock.constants import (TENSORPC_APP_ROOT_COMP,
+                                     TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT,
+                                     TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+from tensorpc.dock.core.appcore import (EventHandler, EventHandlers,
+                                        enter_batch_event_context)
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.dock.core.uitypes import ALL_KEY_CODES
+from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
+from tensorpc.dock.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
+from tensorpc.utils.rich_logging import get_logger
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from tensorpc.core import dataclass_dispatch as dataclasses_strict, prim
-from tensorpc.core.annolib import DataclassType
-from tensorpc.utils.wait_tools import get_primary_ip
-from tensorpc.core.datamodel.asdict import DataClassWithUndefined, asdict_no_deepcopy, as_dict_no_undefined_with_exclude, asdict_no_deepcopy_with_field, undefined_dict_factory_with_field
-from ..jsonlike import (BackendOnlyProp, Undefined,
-                        as_dict_no_undefined,
+from ..jsonlike import (BackendOnlyProp, Undefined, as_dict_no_undefined,
                         camel_to_snake, snake_to_camel,
-                        split_props_to_undefined, undefined,
-                        undefined_dict_factory)
-from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
-from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT
-from tensorpc.utils.rich_logging import get_logger
+                        split_props_to_undefined, undefined)
+from .appcore import (Event, EventDataType, NumberType, RemoteCompEvent,
+                      SimpleEventType, ValueType, enter_event_handling_conetxt,
+                      get_app, get_event_handling_context)
+
 if TYPE_CHECKING:
     from .datamodel import DataModel
 LOGGER = get_logger("tensorpc.ui", log_time_format="%X|")
@@ -1297,6 +1303,7 @@ class _EventSlotBase(Generic[TEventData]):
                 targetPath=target_draft_str,
                 targetComp=target_comp,
                 srcPath=src_draft_str,
+                isPFLPath=self.comp._use_pfl_path
             ))
         return self
 
@@ -1492,6 +1499,7 @@ class EventFrontendUpdateOp:
     dontUseImmer: Union[Undefined, bool] = undefined
     partialTailArgs: Union[Undefined, list[Any]] = undefined
     pflFuncUid: Union[Undefined, str] = undefined
+    isPFLPath: Union[Undefined, bool] = undefined
 
 T_child_structure = TypeVar("T_child_structure",
                             default=Any,
@@ -1603,6 +1611,9 @@ class Component(Generic[T_base_props, T_child]):
         # before and after unmount.
         # self.event_after_unmount = self._create_emitter_event_slot_noarg(
         #     FrontendEventType.AfterUnmount)
+
+        # TODO debug only
+        self._use_pfl_path: bool = False
 
     def use_effect(self,
                    effect: Callable[[],
@@ -1956,25 +1967,45 @@ class Component(Generic[T_base_props, T_child]):
     def bind_fields_unchecked_dict(self, kwargs: dict[str, Union[str, tuple["Component", Union[str, Any]], Any]]):
         new_kwargs: dict[str, Union[str, tuple["Component", str]]] = {}
         for k, v_may_draft in kwargs.items():
-            # validate expr
-            if isinstance(v_may_draft, DraftBase):
-                v = get_draft_jmespath(v_may_draft)
-            else:
-                v = v_may_draft
-            if isinstance(v, str):
-                jmespath.compile(v)
-                new_kwargs[k] = v
-            else:
-                assert isinstance(v, tuple) and len(v) == 2
-                assert isinstance(v[0], Component)
-                vv = v[1] 
-                if isinstance(vv, DraftBase):
-                    vp = get_draft_jmespath(vv)
-                    jmespath.compile(vp)
-                    new_kwargs[k] =  (v[0], vp)
+            if not self._use_pfl_path:
+                # validate expr
+                if isinstance(v_may_draft, DraftBase):
+                    v = get_draft_jmespath(v_may_draft)
                 else:
-                    jmespath.compile(vv)
-                    new_kwargs[k] = (v[0], vv)
+                    v = v_may_draft
+                if isinstance(v, str):
+                    jmespath.compile(v)
+                    new_kwargs[k] = v
+                else:
+                    assert isinstance(v, tuple) and len(v) == 2
+                    assert isinstance(v[0], Component)
+                    vv = v[1] 
+                    if isinstance(vv, DraftBase):
+                        vp = get_draft_jmespath(vv)
+                        jmespath.compile(vp)
+                        new_kwargs[k] =  (v[0], vp)
+                    else:
+                        jmespath.compile(vv)
+                        new_kwargs[k] = (v[0], vv)
+            else:
+                if isinstance(v_may_draft, DraftBase):
+                    v = get_draft_pflpath(v_may_draft)
+                else:
+                    v = v_may_draft
+                if isinstance(v, str):
+                    new_kwargs[k] = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(v)), separators=(',', ':'))
+                else:
+                    assert isinstance(v, tuple) and len(v) == 2
+                    assert isinstance(v[0], Component)
+                    vv = v[1] 
+                    if isinstance(vv, DraftBase):
+                        vp = get_draft_pflpath(vv)
+                        vp = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(vp)), separators=(',', ':'))
+                        new_kwargs[k] =  (v[0], vp)
+                    else:
+                        vp = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(vv)), separators=(',', ':'))
+                        new_kwargs[k] = (v[0], vp)
+
         self._flow_data_model_paths.update(new_kwargs)
         return self
 
@@ -2477,7 +2508,7 @@ class Component(Generic[T_base_props, T_child]):
         assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
         comp: DataModel = cast(Any, draft._tensorpc_draft_attr_userdata.component)
         if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
-            raise ValueError("can't bind field with getitem or getattr result")
+            raise ValueError("can't bind field with getItem or getAttr result")
         assert FrontendEventType.Change.value in self._flow_allowed_events
         if not uncontrolled:
             self.bind_fields(**{field_name: draft})

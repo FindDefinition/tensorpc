@@ -31,7 +31,7 @@ draft.dic.clear()
 
 * Main Path: for a draft ast expr, all nodes that can be assigned constructs a main path.
 
-e.g. when you use a dynamic `getitem`, the target of `getitem` is a main path node, the key isn't a main path node
+e.g. when you use a dynamic `getItem`, the target of `getItem` is a main path node, the key isn't a main path node
 
 Our draft change detection only check main path nodes, other node will be treated as constant in a draft expr.
 
@@ -55,7 +55,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
 from .draftast import DraftASTFuncType, DraftASTNode, evaluate_draft_ast, evaluate_draft_ast_json, evaluate_draft_ast_with_obj_id_trace, evaluate_draft_ast_noexcept, DraftASTType
-
+from tensorpc.core.pfl import pflpath
 
 T = TypeVar("T")
 
@@ -113,6 +113,14 @@ class JMESPathOp:
     def to_dict(self):
         return {"path": self.path, "op": int(self.op), "opData": self.opData}
 
+@dataclasses.dataclass
+class PFLPathOp:
+    path: str
+    op: JMESPathOpType
+    opData: Any
+
+    def to_dict(self):
+        return {"path": self.path, "op": int(self.op), "opData": self.opData}
 
 @dataclasses.dataclass(kw_only=True)
 class DraftFieldMeta:
@@ -164,6 +172,10 @@ class DraftUpdateOp:
         # app internal will handle non-dict data in self.opData.
         return JMESPathOp(self.node.get_jmes_path(), self.op, self.opData)
 
+    def to_pfl_path_op(self) -> PFLPathOp:
+        # app internal will handle non-dict data in self.opData.
+        return PFLPathOp(self.node.get_pfl_path(), self.op, self.opData)
+
     def to_userdata_removed(self) -> "DraftUpdateOp":
         return dataclasses.replace(self, userdata=None, node=self.node.to_userdata_removed())
 
@@ -181,7 +193,7 @@ class DraftUpdateOp:
                                    field_id=None)
 
     def has_dynamic_node_in_main_path(self):
-        # has `getattr` or `getitem_path` or `where` func call node
+        # has `getattr` or `getItemPath` or `where` func call node
         for node in self.node.get_child_nodes_in_main_path():
             if node.type == DraftASTType.FUNC_CALL:
                 if node.value in _DYNAMIC_FUNC_TYPES:
@@ -222,9 +234,10 @@ _DRAGT_UPDATE_PROC_CONTEXT: contextvars.ContextVar[
 
 class DraftUpdateContext:
 
-    def __init__(self, prevent_inner_draft: bool = False):
+    def __init__(self, prevent_inner_draft: bool = False, use_jmes_path: bool = True):
         self._ops: list[DraftUpdateOp] = []
         self._prevent_inner_draft = prevent_inner_draft
+        self._use_jmes_path = use_jmes_path
 
     def add_op(self, op: DraftUpdateOp):
         assert not self._prevent_inner_draft, "Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler."
@@ -248,11 +261,11 @@ def prevent_draft_update():
         _DRAGT_UPDATE_CONTEXT.reset(token)
 
 @contextlib.contextmanager
-def capture_draft_update(allow_nested: bool = True):
+def capture_draft_update(allow_nested: bool = True, use_jmes_path: bool = True):
     cur_ctx = _DRAGT_UPDATE_CONTEXT.get()
     if cur_ctx is not None and not allow_nested:
         raise RuntimeError("Nested DraftUpdateContext is not allowed")
-    ctx = DraftUpdateContext()
+    ctx = DraftUpdateContext(use_jmes_path=use_jmes_path)
     token = _DRAGT_UPDATE_CONTEXT.set(ctx)
     try:
         yield ctx
@@ -626,7 +639,7 @@ class DraftSequence(DraftBase):
             ast_node = DraftASTNode(DraftASTType.FUNC_CALL, [
                 self._tensorpc_draft_attr_cur_node,
                 index._tensorpc_draft_attr_cur_node
-            ], "getitem")
+            ], "getItem")
             if self._tensorpc_draft_attr_anno_state.is_type_only:
                 assert anno_type is not None
                 return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
@@ -658,13 +671,15 @@ class DraftSequence(DraftBase):
                     return
         _assert_not_draft(value)
         if isinstance(index, DraftBase):
+            if ctx._use_jmes_path:
+                path = index._tensorpc_draft_attr_cur_node.get_jmes_path()
+            else:
+                path = index._tensorpc_draft_attr_cur_node.get_pfl_path()
             ctx.add_op(
                 self._tensorpc_draft_get_update_op(
                     JMESPathOpType.Assign, {
-                        "keyPath":
-                        index._tensorpc_draft_attr_cur_node.get_jmes_path(),
-                        "value":
-                        value
+                        "keyPath": path,
+                        "value": value
                     },
                     addi_nodes=[index._tensorpc_draft_attr_cur_node]))
             return
@@ -771,7 +786,7 @@ class DraftDict(DraftBase):
                 DraftASTType.FUNC_CALL, [
                     self._tensorpc_draft_attr_cur_node,
                     key._tensorpc_draft_attr_cur_node
-                ], "getitem", self._tensorpc_draft_attr_anno_state.anno_type)
+                ], "getItem", self._tensorpc_draft_attr_anno_state.anno_type)
             if self._tensorpc_draft_attr_anno_state.is_type_only:
                 assert anno_type is not None
                 return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
@@ -1192,11 +1207,15 @@ def apply_draft_update_ops_to_json_with_root(obj: Any, ops: list[DraftUpdateOp])
         _apply_draft_update_op_to_json(cur_obj, op, dynamic_key)
     return is_root_changed, obj
 
-def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
+def apply_draft_path_ops(obj: dict, ops: list[Union[JMESPathOp, PFLPathOp]]):
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     for op in ops:
-        cur_obj = jmespath.search(op.path, obj)
+        is_jmes_op = isinstance(op, JMESPathOp)
+        if is_jmes_op:
+            cur_obj = jmespath.search(op.path, obj)
+        else:
+            cur_obj = pflpath.search(op.path, obj)
         # new cur_obj is target, apply op.
         if op.op == JMESPathOpType.SetAttr:
             for k, v in op.opData["items"]:
@@ -1225,7 +1244,10 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
             for k, v in op.opData["items"].items():
                 cur_obj[k] = v
         elif op.op == JMESPathOpType.Assign:
-            key = jmespath.search(op.opData["keyPath"], obj)
+            if is_jmes_op:
+                key = jmespath.search(op.opData["keyPath"], obj)
+            else:
+                key = pflpath.search(op.opData["keyPath"], obj)
             cur_obj[key] = op.opData["value"]
         elif op.op == JMESPathOpType.ScalarInplaceOp:
             key = op.opData["key"]
@@ -1245,6 +1267,8 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
 def get_draft_jmespath(draft: DraftBase) -> str:
     return draft._tensorpc_draft_attr_cur_node.get_jmes_path()
 
+def get_draft_pflpath(draft: DraftBase) -> str:
+    return draft._tensorpc_draft_attr_cur_node.get_pfl_path()
 
 def create_draft(obj: T, userdata: Any = None, obj_type: Optional[type[T]] = None) -> T:
     if obj_type is None:
@@ -1408,7 +1432,7 @@ def insert_assign_draft_op(draft: Any, value: Any):
     assert isinstance(draft, DraftBase), "draft should be a Draft object"
     ctx = get_draft_update_context()
     cur_node = draft._tensorpc_draft_attr_cur_node
-    assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getitem/getattr object"
+    assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getItem/getattr object"
     anno_state = draft._tensorpc_draft_attr_anno_state
     assert anno_state.can_assign and anno_state.can_direct_assign, "assign to this draft is disabled."
     node_prev = cur_node.children[0]
@@ -1482,7 +1506,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
         else:
             raise NotImplementedError(f"op {op} not implemented")
     elif node.type == DraftASTType.FUNC_CALL:
-        if node.value == "getitem":
+        if node.value == "getItem":
             # for dynamic ops, we need real model value as key.
             k = evaluate_draft_ast(node.children[1], model)
             draft_target = _rebuild_draft_expr_recursive(node.children[0], root_draft, model)
@@ -1498,7 +1522,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
             ]
             assert isinstance(fmt, DraftImmutableString)
             return fmt % tuple(args)
-        elif node.value == "getitem_path":
+        elif node.value == "getItemPath":
             target_node = node.children[0]
             draft_expr = _rebuild_draft_expr_recursive(target_node, root_draft, model)
             path_items = evaluate_draft_ast(node.children[1], model)
@@ -1536,7 +1560,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
 
 
 def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, model: Any):
-    """Rebuild draft expr from node, all dynamic op (getattr, getitem_path, where) will be converted to static.
+    """Rebuild draft expr from node, all dynamic op (getattr, getItemPath, where) will be converted to static.
     Note: this function must be called in runtime because it depends on real model value.
     """
     assert isinstance(node, DraftASTNode)
@@ -1547,9 +1571,9 @@ def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, 
 
 
 def stabilize_getitem_path_in_op_main_path(op: DraftUpdateOp, root_model_draft: Any, model: Any):
-    """Convert dynamic ops `getattr` and `getitem_path(tgt, [...])` to static draft expr.
+    """Convert dynamic ops `getattr` and `getItemPath(tgt, [...])` to static draft expr.
 
-    `getitem_path` is usually used in nested data structure. If your draft
+    `getItemPath` is usually used in nested data structure. If your draft
     expr contains dynamic path, we can't do static type analysis on it. So we need
     to convert it to static draft expr from real model.
 

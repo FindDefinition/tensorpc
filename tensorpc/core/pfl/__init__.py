@@ -19,9 +19,8 @@ from .core import (PFLCompileFuncMeta, PFLExprInfo, PFLExprType,
                    mark_pfl_compilable, register_backend, get_compilable_meta,
                    PFLTemplateFnSpecMeta, PFLTemplateFnSpecArgsMeta)
 from .evaluator import (PFLAsyncRunner, PFLRunnerStateType,
-                        PFLStaticEvaluator, consteval_expr,
-                        PFLAsyncRunnerV2)
-from .parser import (ast_dump, iter_child_nodes, parse_expr_to_df_ast,
+                        PFLStaticEvaluator, consteval_expr)
+from .parser import (ast_dump, iter_child_nodes, parse_expr_string_to_pfl_ast,
                      parse_func_to_pfl_ast, parse_func_to_pfl_library,
                      pfl_ast_to_dict, default_pfl_var_proc, 
                      PFLParser, PFLLibrary)
@@ -38,3 +37,4 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
                       register_pfl_std, register_pfl_builtin_proxy,
                       compiler_remove_optional)
+from .pflpath import PFLPathEvaluator, compile_pflpath, dump_pflpath

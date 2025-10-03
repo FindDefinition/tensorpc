@@ -17,11 +17,11 @@ class FrontendReservedKeys(enum.Enum):
 
 class _JMESCustomFunctions(functions.Functions):
     @functions.signature({'types': ['object']}, {'types': ['string']})
-    def _func_getattr(self, obj, attr):
+    def _func_getAttr(self, obj, attr):
         return getattr(obj, attr)
 
     @functions.signature({'types': ['array']}, {'types': ['number']})
-    def _func_getitem(self, obj, attr):
+    def _func_getItem(self, obj, attr):
         return obj[attr]
 
     @functions.signature({'types': ['string']}, {'types': ['string', 'number'], 'variadic': True})
@@ -32,7 +32,7 @@ class _JMESCustomFunctions(functions.Functions):
         return obj % attrs
 
     @functions.signature({'types': ['object']}, {'types': ['array']})
-    def _func_getitem_path(self, obj, *attrs):
+    def _func_getItemPath(self, obj, *attrs):
         for attr in attrs:
             obj = obj[attr]
         return obj
@@ -122,7 +122,7 @@ class _JMESCustomFunctions(functions.Functions):
         return max(a, min(x, b))
 
     @functions.signature({'types': [], 'variadic': True})
-    def _func_console_log(self, x):
+    def _func_printForward(self, x):
         print(*x)
         return x[0]
 
@@ -178,6 +178,6 @@ def compile(expression: str) -> ParsedResult:
 def search(expression: Union[str, ParsedResult], data: dict) -> Any:
     if isinstance(expression, ParsedResult):
         return expression.search(data, options=_JMES_EXTEND_OPTIONS)
-    return compile(expression, _JMES_EXTEND_OPTIONS).search(data, options=_JMES_EXTEND_OPTIONS)
+    return jmespath.compile(expression, _JMES_EXTEND_OPTIONS).search(data, options=_JMES_EXTEND_OPTIONS)
 
     # return jmespath.search(expression, data, options=_JMES_EXTEND_OPTIONS)

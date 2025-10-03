@@ -320,7 +320,7 @@ class PerfMonitor(mui.FlexBox):
         dm = mui.DataModel(empty_model, [])
         draft = dm.get_draft()
         dm.install_draft_change_handler(draft.clickInstanceId, self._on_click_instance_id_change)
-        boxmesh.event_move.add_frontend_draft_change(draft, "hoverData", r"{offset: offset, instanceId: instanceId, dur: ndarray_getitem(__TARGET__.durations, not_null(instanceId, `0`)), info: getitem(__TARGET__.infos, ndarray_getitem(__TARGET__.info_idxes, not_null(instanceId, `0`))) }")
+        boxmesh.event_move.add_frontend_draft_change(draft, "hoverData", r"{offset: offset, instanceId: instanceId, dur: ndarrayGetItem(__TARGET__.durations, not_null(instanceId, `0`)), info: getItem(__TARGET__.infos, ndarrayGetItem(__TARGET__.info_idxes, not_null(instanceId, `0`))) }")
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "hoverData")
         boxmesh.event_click.on_standard(self._on_click)
         perf_event_plane.bind_fields_unchecked_dict({
@@ -346,14 +346,14 @@ class PerfMonitor(mui.FlexBox):
         label_box = mui.VBox([
             mui.Typography("")
                 .prop(variant="caption")
-                .bind_fields(value="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarray_getitem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)"),
-            # mui.JsonViewer().bind_fields(data="getitem($.infos, ndarray_getitem($.info_idxes, not_null($.hoverData.instanceId, `0`)))"),
+                .bind_fields(value="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)"),
+            # mui.JsonViewer().bind_fields(data="getItem($.infos, ndarrayGetItem($.info_idxes, not_null($.hoverData.instanceId, `0`)))"),
         ]).prop(width="300px", position="absolute", backgroundColor="rgba(255, 255, 255, 0.5)", pointerEvents="none", zIndex=1)
         label_box.bind_fields(top="not_null($.hoverData.offset[1], `0`) + `5`", left="not_null($.hoverData.offset[0], `0`) + `5`")
         label = mui.MatchCase.binary_selection(True, label_box)
         label.bind_fields(condition="$.hoverData != `null`")
-        line.bind_fields(points="array(ndarray_getitem($.trs, not_null($.hoverData.instanceId, `0`)))", 
-                         aabbSizes="ndarray_getitem($.scales, not_null($.hoverData.instanceId, `0`))")
+        line.bind_fields(points="array(ndarrayGetItem($.trs, not_null($.hoverData.instanceId, `0`)))", 
+                         aabbSizes="ndarrayGetItem($.scales, not_null($.hoverData.instanceId, `0`))")
         viewport_group.bind_fields(childWidthScale="scaleX", childHeight=f"height * scaleY", scrollValueY="scrollValueY", scrollValueX="scrollValueX")
         # scrollbar_group.bind_fields(childHeight=f"not_null(layout.scrollFactorY, `1`)")
         scrollbar.bind_fields_unchecked_dict({
@@ -375,8 +375,8 @@ class PerfMonitor(mui.FlexBox):
         line_select_samename_cond.bind_fields(condition="$.clickClusterPoints != `null`")
 
 
-        line_select.bind_fields(points="array(ndarray_getitem($.trs, not_null(clickInstanceId, `0`)))", 
-                         aabbSizes="ndarray_getitem($.scales, not_null(clickInstanceId, `0`))")
+        line_select.bind_fields(points="array(ndarrayGetItem($.trs, not_null(clickInstanceId, `0`)))", 
+                         aabbSizes="ndarrayGetItem($.scales, not_null(clickInstanceId, `0`))")
         line_select_cond.bind_fields(condition="$.clickInstanceId != `null`")
 
         line_start.bind_fields(points="hoverData.info.left_line")
@@ -403,7 +403,7 @@ class PerfMonitor(mui.FlexBox):
                 overflow="hidden",
                 flex=1,
                 followCursor=True)
-        canvas_container_with_tooltip.bind_fields(title="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarray_getitem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)")
+        canvas_container_with_tooltip.bind_fields(title="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)")
         dm.init_add_layout([
             mui.VBox([
                 mui.HBox([

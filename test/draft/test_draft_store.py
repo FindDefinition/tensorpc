@@ -9,7 +9,7 @@ from deepdiff.diff import DeepDiff
 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftFieldMeta, DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
+    DraftFieldMeta, DraftObject, apply_draft_path_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
@@ -64,7 +64,7 @@ def _b64encode(key: str):
     return base64.b64encode(key.encode()).decode()
 
 def test_splitted_draft(type_only_draft: bool = True):
-    _, field_meta_dict = analysis_model_store_meta(SplittedModel)
+    _, field_meta_dict = analysis_model_store_meta(SplittedModel, set())
     model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])}, e={})
     model_ref = copy.deepcopy(model)
     if type_only_draft:
@@ -87,7 +87,7 @@ def test_splitted_draft(type_only_draft: bool = True):
     assert f"root/d_split/{_b64encode('a')}/e_split/{_b64encode('b')}" in first_group
 
     apply_draft_update_ops(model, ctx._ops)
-    apply_draft_jmes_ops(model_for_jpath_dict, [op.to_jmes_path_op() for op in ctx._ops])
+    apply_draft_path_ops(model_for_jpath_dict, [op.to_jmes_path_op() for op in ctx._ops])
 
     ddiff = DeepDiff(dataclasses.asdict(model), dataclasses.asdict(model_ref), ignore_order=True)
     assert not ddiff, str(ddiff)
@@ -99,7 +99,7 @@ def test_splitted_draft(type_only_draft: bool = True):
 async def test_splitted_draft_store(type_only_draft: bool = True):
     store_backend = DraftFileStoreBackendInMemory()
     another_store_backend = DraftFileStoreBackendInMemory()
-    _, field_store_metas = analysis_model_store_meta(SplittedModel)
+    _, field_store_metas = analysis_model_store_meta(SplittedModel, set())
     model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])}, e={})
     model_ref = copy.deepcopy(model)
     backend_dict = {
@@ -177,7 +177,7 @@ async def test_nested_model():
 
     ddiff = DeepDiff(dataclasses.asdict(res1), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)
-    assert get_draft_ast_node(expr_getitempath).get_jmes_path() == "getitem_path($.model,$.path)"
+    assert get_draft_ast_node(expr_getitempath).get_jmes_path() == "getItemPath($.model,$.path)"
     expr_getitempath_stable = rebuild_and_stabilize_draft_expr(get_draft_ast_node(expr_getitempath), draft, model)
     expr_getitempath_stable_node = get_draft_ast_node(expr_getitempath_stable)
     assert expr_getitempath_stable_node.get_jmes_path() == "$.model.nodes.\"a\".models.\"b\".nodes.\"c\""

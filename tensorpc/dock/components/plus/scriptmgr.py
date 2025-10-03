@@ -587,7 +587,7 @@ class ScriptManagerV2(mui.FlexBox):
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
         ]))
 
-        self.code_editor_container.bind_fields(visibles="[getitem(states, language).is_editor_visible, getitem(states, language).is_app_visible]")
+        self.code_editor_container.bind_fields(visibles="[getItem(states, language).is_editor_visible, getItem(states, language).is_app_visible]")
         self._scripts_select = mui.Autocomplete(
             "Scripts",
             [],
@@ -623,22 +623,22 @@ class ScriptManagerV2(mui.FlexBox):
             btn.bind_fields(disabled="cur_script_idx == `-1`")
         self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
-        self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
+        self._show_editor_btn.bind_fields(selected="getItem(states, language).is_editor_visible")
         self.dm = mui.DataModel(init_model, [
             mui.HBox([
                 self._scripts_select.prop(flex=1).bind_fields(
                     options=r"scripts[*].{label: label}", 
-                    value=r"getitem(scripts, cur_script_idx).{label: label}"),
+                    value=r"getItem(scripts, cur_script_idx).{label: label}"),
                 self.langs.bind_fields(disabled="cur_script_idx == `-1`"),
                 self._save_and_run_btn,
                 # self._enable_save_watch,
                 self._delete_button,
                 *ext_buttons,
-                mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+                mui.DataSubQuery("getItem(scripts, cur_script_idx)", [
                     self._show_editor_btn,
                 ]).bind_fields(enable="cur_script_idx != `-1`"),
             ]).prop(alignItems="center"),
-            mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+            mui.DataSubQuery("getItem(scripts, cur_script_idx)", [
                 self.code_editor_container,
             ]).bind_fields(enable="cur_script_idx != `-1`"),
         ])

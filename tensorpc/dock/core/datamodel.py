@@ -282,7 +282,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         for k, v in draft.items():
             assert isinstance(v, DraftBase)
             node = get_draft_ast_node(v)
-            path = node.get_jmes_path()
+            if self._use_pfl_path:
+                path = node.get_pfl_path()
+            else:
+                path = node.get_jmes_path()
             paths.append(path)
             draft_expr_dict[k] = node
         user_eval_vars_dict: Optional[dict[str, DraftASTNode]] = None
@@ -334,7 +337,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     def debug_print_draft_change(self, draft: Union[Any, dict[str, Any]]):
         if not isinstance(draft, dict):
             draft = {"": draft}
-        draft_expr_str_dict = {k: get_draft_ast_node(v).get_jmes_path() for k, v in draft.items()}
+        if self._use_pfl_path:
+            draft_expr_str_dict = {k: get_draft_ast_node(v).get_pfl_path() for k, v in draft.items()}
+        else:
+            draft_expr_str_dict = {k: get_draft_ast_node(v).get_jmes_path() for k, v in draft.items()}
         return self.install_draft_change_handler(draft, partial(_print_draft_change_event, draft_expr_str_dict=draft_expr_str_dict))
 
     def _lazy_get_mashumaro_coder(self):
@@ -552,7 +558,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         ops = await self._update_with_jmes_ops_backend(backend_ops)
         if need_freeze:
             frontend_ops = [op.freeze_assign_data(is_json_only) for op in frontend_ops]
-        frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
+        if self._use_pfl_path:
+            frontend_ops = [op.to_pfl_path_op().to_dict() for op in frontend_ops]
+        else:
+            frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({
                 "type": 0,
@@ -761,7 +770,7 @@ class DataSubQueryProps(ContainerBaseProps):
     def jmes_query_validator(cls, v: Union[str, Undefined]):
         assert isinstance(v, str), "query must be string"
         # compile test
-        jmespath.compile(v)
+        # jmespath.compile(v)
 
 
 class DataSubQuery(ContainerBase[DataSubQueryProps, Component]):
@@ -773,13 +782,16 @@ class DataSubQuery(ContainerBase[DataSubQueryProps, Component]):
                                  Mapping[str, Component]]] = None
     ) -> None:
         # compile test
-        jmespath.compile(query)
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.DataSubQuery,
                          DataSubQueryProps,
                          children,
                          allowed_events=[])
+        if self._use_pfl_path:
+            pfl.compile_pflpath(query)
+        else:
+            jmespath.compile(query)
         self.prop(query=query)
 
     @property
