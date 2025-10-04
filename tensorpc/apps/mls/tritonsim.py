@@ -628,7 +628,7 @@ class TritonKernelManager:
         self.state.watchdog_observer = prev_state.watchdog_observer
         self.state.watchdog_watcher = prev_state.watchdog_watcher
         
-    async def run_to(self, grid_idxes: Sequence[int], lineno: int, thread_id: Optional[str] = None):
+    def run_to_use_task(self, grid_idxes: Sequence[int], lineno: int, thread_id: Optional[str] = None):
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
         stmt = self.state.lib.find_stmt_by_path_lineno(self.state.lib.get_module_by_func(unwrapped_fn).uid, lineno)
         if stmt is not None:
@@ -1096,7 +1096,7 @@ class TritonSim:
             for j in range(len(cur_grid_idxes)):
                 cur_grid_idxes[j] = max(cur_grid_idxes[j], 0)
                 cur_grid_idxes[j] = min(cur_grid_idxes[j], self._runner.grid_size[j] - 1)
-            await self._runner.run_to(cur_grid_idxes, bkpt_lineno)
+            self._runner.run_to_use_task(cur_grid_idxes, bkpt_lineno)
 
         if self._cur_traced_expr is not None:
             # rerun trace
@@ -1215,7 +1215,7 @@ class TritonSim:
                     cur_bkpt_lineno = cur_thread.get_cur_bkpt_checked().node.source_loc[0]
             await self._runner.stop_run()
             if cur_bkpt_lineno is not None:
-                await self._runner.run_to(old_value, cur_bkpt_lineno)
+                self._runner.run_to_use_task(old_value, cur_bkpt_lineno)
             else:
                 await self._runner.run_single_block(old_value)
         else:
@@ -1284,7 +1284,8 @@ class TritonSim:
             assert self._block_run_backend_state is not None 
             for op in io_ops:
                 # accumulate and unique the indices
-                assert op.name in self._block_run_backend_state.global_access_indices
+                msg = f"Global memory {op.name} not found in backend state {self._block_run_backend_state.global_access_indices.keys()}"
+                assert op.name in self._block_run_backend_state.global_access_indices, msg
                 old_inds = self._block_run_backend_state.global_access_indices[op.name]
                 cnt = self._block_run_backend_state.global_access_cnt[op.name]
 
@@ -1587,7 +1588,7 @@ class TritonSim:
             if act.selection is not None:
                 self._validate_editor_has_unsave()
                 lineno = act.selection.selections[0].startLineNumber
-                inline_env = await self._runner.run_to(self._get_cur_grid_idxes(), lineno)
+                inline_env = self._runner.run_to_use_task(self._get_cur_grid_idxes(), lineno)
                 if inline_env is not None:
                     sim_info = inline_env.get_userdata_typed(tritonstd.TritonSimInfo)
                     gmem = sim_info.global_mem
@@ -1596,6 +1597,7 @@ class TritonSim:
                     for k, block in gmem.memory_blocks.items():
                         mat_dict[k] = block.get_data_view_checked()
                     await self._global_mem.set_matrix_dict(mat_dict, sim_info.vis_layout)
+
         if act.action == EditorActions.EXPR_TRACE.value:
             if act.selection is not None:
 

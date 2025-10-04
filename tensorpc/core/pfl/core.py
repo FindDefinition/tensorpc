@@ -1188,7 +1188,9 @@ class PFLExprInfo:
         annotype = self.annotype
         if annotype is not None:
             annotype = annotype.get_optional_undefined_removed()
-        res = dataclasses.replace(self, annotype=annotype, has_optional=False, has_undefined=False)
+        res = dataclasses.replace(self, annotype=annotype)
+        res.has_optional = False
+        res.has_undefined = False
         return res
 
     @property 

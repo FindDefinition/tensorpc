@@ -593,9 +593,6 @@ class GlobalMemContainer(mui.FlexBox):
 
         async with self._dm.draft_update():
             self._draft.matrices = {}
-
-        async with self._dm.draft_update():
-            self._draft.matrices = {}
             for k, v in gmatrices.items():
                 self._draft.matrices[k] = v
                 matrixe_panels[k] = MatrixPanel(self._draft.matrices[k])

@@ -1352,6 +1352,9 @@ class _EventSlotBase(Generic[TEventData]):
         
         func_specs = dm._pfl_library.get_compiled_unit_specs(func)
         assert len(func_specs) == 1, "func can't be template"
+        if targetPath != "":
+            targetPath = _draft_expr_or_str_to_str(targetPath)
+
         op = EventFrontendUpdateOp(
             attr="",
             targetPath=targetPath,

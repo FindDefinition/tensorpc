@@ -883,7 +883,7 @@ class PFLAsyncThread:
             frame.scope = scope
             for stmt in block_body:
                 frame.cur_stmt = stmt
-                if self._shared_state.breakpoints or self._state.pause_next_line:
+                if self._shared_state.breakpoints or self._state.pause_next_line or self._state.temp_bkpt_loc[1] != -1:
                     await self._check_enter_breakpoint(stmt, scope)
                 # print("RUN STMT", unparse_pfl_ast(stmt))
                 try:
@@ -1319,7 +1319,7 @@ class PFLAsyncRunner:
                         exc = task.exception()
                         if exc is not None:
                             # shutdown all thread if some thread error.
-                            PFL_LOGGER.error(f"Thread {thread.thread_id} Error. shutdown all.\n{str(task.exception())}")
+                            PFL_LOGGER.error(f"Thread {thread.thread_id} Error. shutdown all.\n{str(task.exception())}", exc_info=exc)
                             for task in pending:
                                 await cancel_task(task)
                             raise exc
@@ -1341,8 +1341,10 @@ class PFLAsyncRunner:
 
     async def run_until(self, lineno: int, func_uid: str, scope: Optional[dict[str, Any]] = None, exit_event: Optional[asyncio.Event] = None,
             external_inline_env: Optional[PFLInlineRunEnv] = None):
+        fn_uid_no_spec = self._library.extract_fn_uid_nospec(func_uid)
+        func_node = self._library.get_compiled_func_by_uid(func_uid)
         return await self.run_func(func_uid, scope, external_inline_env, exit_event,
-            pause_loc_map={self._library.extract_fn_uid_nospec(func_uid): (func_uid, lineno)})
+            pause_loc_map={fn_uid_no_spec: (func_node.compile_info.path, lineno)})
     
     def get_current_pause_loc_map(self) -> dict[str, tuple[str, int]]:
         res: dict[str, tuple[str, int]] = {} # fn_uid_no_spec -> (path, lineno)
