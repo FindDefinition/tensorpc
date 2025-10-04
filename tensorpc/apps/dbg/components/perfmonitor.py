@@ -9,7 +9,7 @@ from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout
 import dataclasses
-from typing import Any, Optional 
+from typing import Any, Optional, cast 
 from typing_extensions import Annotated
 import numpy as np
 import tensorpc.core.datamodel as D
@@ -147,6 +147,31 @@ class VisModel(VisInfo):
         return VisModel(trs_empty, colors_empty, scales_empty, indexes_empty, 
             indexes_empty, durs_empty, 0, 0, 0, 0, [])
 
+    @pfl.mark_pfl_compilable
+    def _box_event_move(self, data: three.PointerEvent):
+        insatance_id = cast(int, data.instanceId if data.instanceId else 0)
+        dur = pfl.js.MathUtil.getTypedArray(self.durations)
+        info_idxes_arr = pfl.js.MathUtil.getTypedArray(self.info_idxes)[insatance_id]
+        self.hoverData = {
+            "offset": data.offset,
+            "instanceId": data.instanceId,
+            "dur": dur[insatance_id],
+            "info": self.infos[int(info_idxes_arr)]
+        }
+
+    @pfl.mark_pfl_compilable
+    def _wheel_change(self, event: three.PointerEvent):
+        self.scrollValueY = MathUtil.clamp(self.scrollValueY - event.wheel.deltaY * 0.001 * self.layout.scrollFactorY, 0.0, 1.0)
+
+
+    @pfl.mark_pfl_compilable
+    def _scrollbar_pos_change(self, data: three.PoseChangeEvent):
+        self.scrollValueY = MathUtil.clamp(-data.positionLocal[1] / (Math.max(1 - self.scrollValueY, 0.0001)) + 0.5, 0.0, 1.0)
+
+    @pfl.mark_pfl_compilable
+    def _scrollbar_bottom_pos_change(self, data: three.PoseChangeEvent):
+        self.scrollValueX = MathUtil.clamp(data.positionLocal[0] / (Math.max(1 - self.scrollValueX, 0.0001)) + 0.5, 0.0, 1.0)
+
 
 def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: float, 
         min_ts: int, depth_padding: float, height: float) -> tuple[VisInfo, Any]:
@@ -199,10 +224,10 @@ def _get_vis_data_from_duration_events(duration_events: list[dict], dur_scale: f
         trs_namecnt = trs_arr[indexes_arr]
         name_cnt_to_polygons[cluster_name] = (trs_namecnt, scales_namecnt)
     # print("1.3", time.time() - t)
-
+    colors_arr = np.array(colors, dtype=np.uint8)
     return VisInfo(
         trs=trs_arr,
-        colors=np.array(colors, dtype=np.uint8),
+        colors=colors_arr,
         scales=scales_arr,
         info_idxes=info_idxes_arr,
         rank_ids=np.array([event["rank"] for event in duration_events], dtype=np.int32),
@@ -320,7 +345,7 @@ class PerfMonitor(mui.FlexBox):
         dm = mui.DataModel(empty_model, [])
         draft = dm.get_draft()
         dm.install_draft_change_handler(draft.clickInstanceId, self._on_click_instance_id_change)
-        boxmesh.event_move.add_frontend_draft_change(draft, "hoverData", r"{offset: offset, instanceId: instanceId, dur: ndarrayGetItem(__TARGET__.durations, not_null(instanceId, `0`)), info: getItem(__TARGET__.infos, ndarrayGetItem(__TARGET__.info_idxes, not_null(instanceId, `0`))) }")
+        boxmesh.event_move.add_frontend_handler(dm, VisModel._box_event_move, use_immer=False)
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "hoverData")
         boxmesh.event_click.on_standard(self._on_click)
         perf_event_plane.bind_fields_unchecked_dict({
@@ -330,61 +355,64 @@ class PerfMonitor(mui.FlexBox):
         perf_event_plane.event_move.add_frontend_draft_change(draft, "perfHover")
         perf_event_plane.event_leave.add_frontend_draft_set_none(draft, "perfHover")
 
-        viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout", r"{innerSizeX: innerSizeX, innerSizeY: innerSizeY, scrollFactorX: scrollFactorX, scrollFactorY: scrollFactorY}")
-        scrollbar_event_plane.event_wheel.add_frontend_draft_change(draft, "scrollValueY", f"clamp(__PREV_VALUE__ + wheel.deltaY * `0.001`, `0`, `1`)")
+        viewport_group.event_hud_layout_change.add_frontend_draft_change(draft, "layout")
+        # scrollbar_event_plane.event_wheel.add_frontend_draft_change(draft, "scrollValueY", f"clamp(__PREV_VALUE__ + wheel.deltaY * `0.001`, `0`, `1`)")
+        scrollbar_event_plane.event_wheel.add_frontend_handler(dm, VisModel._wheel_change, use_immer=False)
         # scrollbar_event_plane.event_wheel.on(lambda e: print(e)).configure(debounce=300)
-        scrollbar.event_pose_change.add_frontend_draft_change(draft, "scrollValueY", f"clamp(-positionLocal[1] / maximum(`1` - __TARGET__.layout.scrollFactorY, `0.0001`) + `0.5`, `0`, `1`)")
-        scrollbar_bottom.event_pose_change.add_frontend_draft_change(draft, "scrollValueX", f"clamp(positionLocal[0] / maximum(`1` - __TARGET__.layout.scrollFactorX, `0.0001`) + `0.5`, `0`, `1`)")
-
+        # scrollbar.event_pose_change.add_frontend_draft_change(draft, "scrollValueY", f"clamp(-positionLocal[1] / maximum(`1` - __TARGET__.layout.scrollFactorY, `0.0001`) + `0.5`, `0`, `1`)")
+        # scrollbar_bottom.event_pose_change.add_frontend_draft_change(draft, "scrollValueX", f"clamp(positionLocal[0] / maximum(`1` - __TARGET__.layout.scrollFactorX, `0.0001`) + `0.5`, `0`, `1`)")
+        scrollbar.event_pose_change.add_frontend_handler(dm, VisModel._scrollbar_pos_change, use_immer=False)
+        scrollbar_bottom.event_pose_change.add_frontend_handler(dm, VisModel._scrollbar_bottom_pos_change, use_immer=False)
         canvas.event_viewport_change.add_frontend_draft_change(draft, "viewport")
 
         canvas.event_keyboard_hold.configure(key_codes=["KeyW", "KeyS", "KeyA", "KeyD"])
         canvas.event_keyboard_hold.add_frontend_handler(dm, VisModel._keyhold_handler_pfl, use_immer=False)
-        boxmesh.bind_fields(transforms="$.trs", colors="$.colors", scales="$.scales")
+        boxmesh.bind_fields(transforms="trs", colors="colors", scales="scales")
         # VisModel.bind_scale_xy(perf_group)
-        # devmesh.bind_fields(scale="$.whole_scales")
+        # devmesh.bind_fields(scale="whole_scales")
         label_box = mui.VBox([
             mui.Typography("")
                 .prop(variant="caption")
-                .bind_fields(value="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)"),
-            # mui.JsonViewer().bind_fields(data="getItem($.infos, ndarrayGetItem($.info_idxes, not_null($.hoverData.instanceId, `0`)))"),
+                .bind_fields(value="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem(rank_ids, not_null(hoverData.instanceId, 0)), hoverData.dur, hoverData.info.duration)"),
+            # mui.JsonViewer().bind_fields(data="getItem(infos, ndarrayGetItem(info_idxes, not_null(hoverData.instanceId, `0`)))"),
         ]).prop(width="300px", position="absolute", backgroundColor="rgba(255, 255, 255, 0.5)", pointerEvents="none", zIndex=1)
-        label_box.bind_fields(top="not_null($.hoverData.offset[1], `0`) + `5`", left="not_null($.hoverData.offset[0], `0`) + `5`")
+        label_box.bind_fields(top="not_null(hoverData.offset[1], 0) + 5", left="not_null(hoverData.offset[0], 0) + 5")
         label = mui.MatchCase.binary_selection(True, label_box)
-        label.bind_fields(condition="$.hoverData != `null`")
-        line.bind_fields(points="array(ndarrayGetItem($.trs, not_null($.hoverData.instanceId, `0`)))", 
-                         aabbSizes="ndarrayGetItem($.scales, not_null($.hoverData.instanceId, `0`))")
+        label.bind_fields(condition="hoverData is not None")
+        line.bind_fields(points="[ndarrayGetItem(trs, not_null(hoverData.instanceId, 0))]", 
+                         aabbSizes="ndarrayGetItem(scales, not_null(hoverData.instanceId, 0))")
         viewport_group.bind_fields(childWidthScale="scaleX", childHeight=f"height * scaleY", scrollValueY="scrollValueY", scrollValueX="scrollValueX")
         # scrollbar_group.bind_fields(childHeight=f"not_null(layout.scrollFactorY, `1`)")
         scrollbar.bind_fields_unchecked_dict({
-            "position-y": "-(scrollValueY - `0.5`) * (`1` - layout.scrollFactorY)",
+            "position-y": "-(scrollValueY - 0.5) * (1 - layout.scrollFactorY)",
             "scale-y": "layout.scrollFactorY",
         })
         scrollbar_bottom.bind_fields_unchecked_dict({
-            "position-x": "(scrollValueX - `0.5`) * (`1` - layout.scrollFactorX)",
+            "position-x": "(scrollValueX - 0.5) * (1 - layout.scrollFactorX)",
             "scale-x": "layout.scrollFactorX",
         })
 
         perf_group.bind_fields_unchecked_dict({
-            "scale-x": "scaleX * layout.innerSizeX / (where(width == `0`, layout.innerSizeX, width))",
+            "scale-x": "scaleX * layout.innerSizeX / (layout.innerSizeX if width == 0 else width)",
+
             "scale-y": "scaleY",
         })
-        line_cond.bind_fields(condition="$.hoverData != `null`")
+        line_cond.bind_fields(condition="hoverData is not None")
 
         line_select_samename.bind_fields(points="clickClusterPoints", aabbSizes="clickClusterAABBSizes")
-        line_select_samename_cond.bind_fields(condition="$.clickClusterPoints != `null`")
+        line_select_samename_cond.bind_fields(condition="clickClusterPoints is not None")
 
 
-        line_select.bind_fields(points="array(ndarrayGetItem($.trs, not_null(clickInstanceId, `0`)))", 
-                         aabbSizes="ndarrayGetItem($.scales, not_null(clickInstanceId, `0`))")
-        line_select_cond.bind_fields(condition="$.clickInstanceId != `null`")
+        line_select.bind_fields(points="[ndarrayGetItem(trs, not_null(clickInstanceId, 0))]", 
+                         aabbSizes="ndarrayGetItem(scales, not_null(clickInstanceId, 0))")
+        line_select_cond.bind_fields(condition="clickInstanceId is not None")
 
         line_start.bind_fields(points="hoverData.info.left_line")
 
-        line_start_cond.bind_fields(condition="$.hoverData != `null`")
+        line_start_cond.bind_fields(condition="hoverData is not None")
         line_end.bind_fields(points="hoverData.info.right_line")
 
-        line_end_cond.bind_fields(condition="$.hoverData != `null`")
+        line_end_cond.bind_fields(condition="hoverData is not None")
         header = mui.Typography().prop(variant="caption")
         self.history: list[VisModel] = []
         slider = mui.BlenderSlider(0, 0, 1, self._select_vis_model)
@@ -403,7 +431,7 @@ class PerfMonitor(mui.FlexBox):
                 overflow="hidden",
                 flex=1,
                 followCursor=True)
-        canvas_container_with_tooltip.bind_fields(title="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem($.rank_ids, not_null($.hoverData.instanceId, `0`)), hoverData.dur, hoverData.info.duration)")
+        canvas_container_with_tooltip.bind_fields(title="cformat('%s[%d](dur=%.3fs, alldur=%.3fs)', hoverData.info.name, ndarrayGetItem(rank_ids, not_null(hoverData.instanceId, 0)), hoverData.dur, hoverData.info.duration)")
         dm.init_add_layout([
             mui.VBox([
                 mui.HBox([
@@ -524,7 +552,8 @@ class PerfMonitor(mui.FlexBox):
             prev_index = self.history_slider.int() - dropped_cnt
 
             if prev_index + dropped_cnt < loc - 1 and prev_index >= 0:
-                await self.history_slider.update_ranges(0, len(self.history) - 1, value=prev_index)
+                hist_len = max(0, len(self.history) - 1)
+                await self.history_slider.update_ranges(0, hist_len, value=prev_index)
             else:
                 await self._sync_history_select()
 
@@ -532,6 +561,8 @@ class PerfMonitor(mui.FlexBox):
         # await self._sync_history_select()
 
     async def _sync_history_select(self):
+        hist_len = max(0, len(self.history) - 1)
+        print("self.history", len(self.history))
         if not self.history:
             await self.history_slider.update_ranges(0, 0, 1, value=0)
         else:

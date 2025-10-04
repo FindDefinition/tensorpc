@@ -1283,7 +1283,7 @@ class DataGridApp:
                                    cell=cbox),
             mui.DataGrid.ColumnDef("btn", cell=btn),
         ]
-        master_detail = mui.JsonViewer().bind_fields(data="$")
+        master_detail = mui.JsonViewer().bind_fields(data="getRoot()")
         master_detail = mui.VBox([
             mui.Typography("Master Detail").prop(variant="h4"),
             mui.DataGrid([

@@ -46,7 +46,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLTreeNodeFinder, PFLTuple, PFLUnaryOp, PFLWhile,
                       UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk)
 from .pfl_reg import (ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem,
-                      compiler_isinstance, compiler_print_metadata,
+                      compiler_isinstance, compiler_cast,
                       compiler_print_type, compiler_remove_optional)
 
 _ALL_SUPPORTED_AST_TYPES = {
@@ -746,141 +746,155 @@ class PFLParser:
                                  right=right)
                 res.check_and_infer_type()
             elif isinstance(expr, ast.Call):
-                args = [
-                    self._parse_expr_to_pfl(arg, scope) for arg in expr.args
-                ]
-                kw_keys: list[str] = []
-                vals: list[PFLExpr] = []
-                for arg in expr.args:
-                    assert not isinstance(
-                        arg, ast.Starred), "don't support *arg for now"
-                kw_sts: dict[str, PFLExprInfo] = {}
-                for kw in expr.keywords:
-                    assert kw.arg is not None, "don't support **kw"
-                    kw_keys.append(kw.arg)
-                    val_expr = self._parse_expr_to_pfl(kw.value, scope)
-                    vals.append(val_expr)
-                    kw_sts[kw.arg] = val_expr.st
-                arg_infos_from_call = ([a.st for a in args], kw_sts)
                 ctx = get_parse_context_checked()
                 # TODO support template func here.
                 # we need to assign a unique id for each specialized function
                 func = self._parse_expr_to_pfl(expr.func, scope)
                 if ctx.cfg.allow_partial_type_infer:
                     assert func.st.type != PFLExprType.UNKNOWN, f"function \"{unparse_pfl_expr(func)}\" in call can't be unknown in partial type infer."
-
-                if func.st.delayed_compile_req is not None:
-                    req = func.st.delayed_compile_req
-                    assert isinstance(req, PFLCompileReq)
-                    req = dataclasses.replace(
-                        req,
-                        args_from_call=arg_infos_from_call)
-                    # only template and inline function allow inline expand
-                    # print(req.get_func_compile_uid())
-                    PFL_LOGGER.warning("%s",
-                                       str(func.st.delayed_compile_req))
-                    compiled_func = self.parse_compile_req_to_pfl_ast(
-                        req, allow_inline_expand=True)
-                    func.st = dataclasses.replace(compiled_func.st)
-                # check is compile-time function
                 raw_func = None
                 if func.st.func_info is not None:
                     raw_func = func.st.func_info.raw_func
-                if raw_func in ALL_COMPILE_TIME_FUNCS:
-                    if raw_func is compiler_print_type:
-                        assert len(args) == 1 and len(
-                            kw_keys
-                        ) == 0, "compiler_print_type only support one argument"
-                        args_str = ", ".join(str(a.st) for a in args)
-                        PFL_LOGGER.warning(args_str)
-                        res = args[0]
-                        expr = expr.args[0]
-                    elif raw_func is compiler_isinstance:
-                        # TODO currently int and float are treated as function.
-                        if not ctx.cfg.allow_isinstance:
-                            raise PFLAstParseError(
-                                "isinstance is disabled in config, you need to enable it in parse config.",
-                                expr)
-                        type_to_check = args[0].st
-                        type_candidates_expr = args[1]
-                        if type_candidates_expr.st.type == PFLExprType.TUPLE:
-                            type_candidates = type_candidates_expr.st.childs
-                            assert len(
-                                type_candidates
-                            ) > 0, "type_candidates must not be empty"
-                        else:
-                            type_candidates = [type_candidates_expr.st]
-                        compare_res: list[bool] = []
-                        # TODO better compare
-                        if type_to_check.proxy_dcls is not None:
-                            for c in type_candidates:
-                                if c.proxy_dcls is not None:
-                                    compare_res.append(
-                                        issubclass(type_to_check.proxy_dcls,
-                                                   c.proxy_dcls))
-                                else:
-                                    compare_res.append(False)
-                        else:
-                            for c in type_candidates:
-                                assert c.type == PFLExprType.DATACLASS_TYPE
-                                if type_to_check.type == PFLExprType.DATACLASS_OBJECT:
-                                    compare_res.append(
-                                        issubclass(
-                                            type_to_check.
-                                            get_origin_type_checked(),
-                                            c.get_origin_type_checked()))
-                                else:
-                                    compare_res.append(False)
-                        res = PFLConstant(PFLASTType.CONSTANT,
-                                          source_loc,
-                                          value=any(compare_res))
-                        res.check_and_infer_type()
-                    elif raw_func is compiler_remove_optional:
-                        assert len(args) == 1
-                        res_st = dataclasses.replace(args[0].st).get_optional_undefined_removed()
-                        res = dataclasses.replace(
-                            args[0],
-                            st=res_st)
+                if raw_func is compiler_cast:
+                    arg_val = self._parse_expr_to_pfl(expr.args[1], scope)
+                    assert len(expr.args) == 2
+                    anno_in_ast = evaluate_annotation_expr(expr.args[0])
+                    assert anno_in_ast is not None, "annotation must be evaluated to a valid type"
+                    if self._anno_transform is not None:
+                        anno_st = self._anno_transform(
+                            arg_val.st, anno_in_ast, undefined)
                     else:
-                        raise NotImplementedError(
-                            f"compile-time function {raw_func} not implemented"
-                        )
+                        anno_st = PFLExprInfo.from_annotype(
+                            parse_type_may_optional_undefined(anno_in_ast))
+                    res = dataclasses.replace(
+                        arg_val,
+                        st=anno_st)
                 else:
-                    parse_cfg = get_parse_context_checked().cfg
-                    if not parse_cfg.allow_kw:
-                        assert not expr.keywords, f"kwargs is disabled, you need to enable it in parse config."
-                    res = PFLCall(PFLASTType.CALL,
-                                  source_loc,
-                                  func=func,
-                                  args=args,
-                                  keys=kw_keys if kw_keys else undefined,
-                                  vals=vals if vals else undefined)
-                    match_res, overload_info = res.check_and_infer_type_with_overload()
-                    # handle template fn spec
-                    if overload_info.has_template_fn_spec:
-                        for arg_info, arg_expr in match_res.args:
-                            if arg_info.template_fn_arg_spec_idx is not None:
-                                assert not is_undefined(arg_expr), "template fn spec can't use default."
-                                _, arg_spec_expr_info = match_res.args[arg_info.template_fn_arg_spec_idx]
-                                assert not is_undefined(arg_spec_expr_info), "arg spec can't use default."
-                                assert isinstance(arg_spec_expr_info, (PFLArray, PFLTuple)), "arg spec must be array or tuple"
-                                # for fn spec, we only support PFLName or list/tuple of PFLName.
-                                if isinstance(arg_expr, PFLName):
-                                    elts = [arg_expr]
-                                else:
-                                    assert isinstance(arg_expr, (PFLArray, PFLTuple)), "arg expr must be name, array or tuple"
-                                    elts = arg_expr.elts
-                                # compile template func via args in arg spec
-                                for elt in elts:
-                                    assert elt.st.type == PFLExprType.FUNCTION
-                                    req = elt.st.delayed_compile_req
-                                    assert isinstance(req, PFLCompileReq), f"fn {elt.st} don't have compile req (not template)"
-                                    req = dataclasses.replace(
-                                        req,
-                                        args_from_call=((x.st for x in arg_spec_expr_info.elts), {}))
-                                    compiled_func = self.parse_compile_req_to_pfl_ast(
-                                        req, allow_inline_expand=True)
-                                    elt.st = dataclasses.replace(compiled_func.st)
+                    args = [
+                        self._parse_expr_to_pfl(arg, scope) for arg in expr.args
+                    ]
+                    kw_keys: list[str] = []
+                    vals: list[PFLExpr] = []
+                    for arg in expr.args:
+                        assert not isinstance(
+                            arg, ast.Starred), "don't support *arg for now"
+                    kw_sts: dict[str, PFLExprInfo] = {}
+                    for kw in expr.keywords:
+                        assert kw.arg is not None, "don't support **kw"
+                        kw_keys.append(kw.arg)
+                        val_expr = self._parse_expr_to_pfl(kw.value, scope)
+                        vals.append(val_expr)
+                        kw_sts[kw.arg] = val_expr.st
+                    arg_infos_from_call = ([a.st for a in args], kw_sts)
+                    if func.st.delayed_compile_req is not None:
+                        req = func.st.delayed_compile_req
+                        assert isinstance(req, PFLCompileReq)
+                        req = dataclasses.replace(
+                            req,
+                            args_from_call=arg_infos_from_call)
+                        # only template and inline function allow inline expand
+                        # print(req.get_func_compile_uid())
+                        PFL_LOGGER.warning("%s",
+                                        str(func.st.delayed_compile_req))
+                        compiled_func = self.parse_compile_req_to_pfl_ast(
+                            req, allow_inline_expand=True)
+                        func.st = dataclasses.replace(compiled_func.st)
+                    # check is compile-time function
+                    if raw_func in ALL_COMPILE_TIME_FUNCS:
+                        if raw_func is compiler_print_type:
+                            assert len(args) == 1 and len(
+                                kw_keys
+                            ) == 0, "compiler_print_type only support one argument"
+                            args_str = ", ".join(str(a.st) for a in args)
+                            PFL_LOGGER.warning(args_str)
+                            res = args[0]
+                            expr = expr.args[0]
+                        elif raw_func is compiler_isinstance:
+                            # TODO currently int and float are treated as function.
+                            if not ctx.cfg.allow_isinstance:
+                                raise PFLAstParseError(
+                                    "isinstance is disabled in config, you need to enable it in parse config.",
+                                    expr)
+                            type_to_check = args[0].st
+                            type_candidates_expr = args[1]
+                            if type_candidates_expr.st.type == PFLExprType.TUPLE:
+                                type_candidates = type_candidates_expr.st.childs
+                                assert len(
+                                    type_candidates
+                                ) > 0, "type_candidates must not be empty"
+                            else:
+                                type_candidates = [type_candidates_expr.st]
+                            compare_res: list[bool] = []
+                            # TODO better compare
+                            if type_to_check.proxy_dcls is not None:
+                                for c in type_candidates:
+                                    if c.proxy_dcls is not None:
+                                        compare_res.append(
+                                            issubclass(type_to_check.proxy_dcls,
+                                                    c.proxy_dcls))
+                                    else:
+                                        compare_res.append(False)
+                            else:
+                                for c in type_candidates:
+                                    assert c.type == PFLExprType.DATACLASS_TYPE
+                                    if type_to_check.type == PFLExprType.DATACLASS_OBJECT:
+                                        compare_res.append(
+                                            issubclass(
+                                                type_to_check.
+                                                get_origin_type_checked(),
+                                                c.get_origin_type_checked()))
+                                    else:
+                                        compare_res.append(False)
+                            res = PFLConstant(PFLASTType.CONSTANT,
+                                            source_loc,
+                                            value=any(compare_res))
+                            res.check_and_infer_type()
+                        elif raw_func is compiler_remove_optional:
+                            assert len(args) == 1
+                            res_st = dataclasses.replace(args[0].st).get_optional_undefined_removed()
+                            res = dataclasses.replace(
+                                args[0],
+                                st=res_st)
+                        else:
+                            raise NotImplementedError(
+                                f"compile-time function {raw_func} not implemented"
+                            )
+                    else:
+                        parse_cfg = get_parse_context_checked().cfg
+                        if not parse_cfg.allow_kw:
+                            assert not expr.keywords, f"kwargs is disabled, you need to enable it in parse config."
+                        res = PFLCall(PFLASTType.CALL,
+                                    source_loc,
+                                    func=func,
+                                    args=args,
+                                    keys=kw_keys if kw_keys else undefined,
+                                    vals=vals if vals else undefined)
+                        match_res, overload_info = res.check_and_infer_type_with_overload()
+                        # handle template fn spec
+                        if overload_info.has_template_fn_spec:
+                            for arg_info, arg_expr in match_res.args:
+                                if arg_info.template_fn_arg_spec_idx is not None:
+                                    assert not is_undefined(arg_expr), "template fn spec can't use default."
+                                    _, arg_spec_expr_info = match_res.args[arg_info.template_fn_arg_spec_idx]
+                                    assert not is_undefined(arg_spec_expr_info), "arg spec can't use default."
+                                    assert isinstance(arg_spec_expr_info, (PFLArray, PFLTuple)), "arg spec must be array or tuple"
+                                    # for fn spec, we only support PFLName or list/tuple of PFLName.
+                                    if isinstance(arg_expr, PFLName):
+                                        elts = [arg_expr]
+                                    else:
+                                        assert isinstance(arg_expr, (PFLArray, PFLTuple)), "arg expr must be name, array or tuple"
+                                        elts = arg_expr.elts
+                                    # compile template func via args in arg spec
+                                    for elt in elts:
+                                        assert elt.st.type == PFLExprType.FUNCTION
+                                        req = elt.st.delayed_compile_req
+                                        assert isinstance(req, PFLCompileReq), f"fn {elt.st} don't have compile req (not template)"
+                                        req = dataclasses.replace(
+                                            req,
+                                            args_from_call=((x.st for x in arg_spec_expr_info.elts), {}))
+                                        compiled_func = self.parse_compile_req_to_pfl_ast(
+                                            req, allow_inline_expand=True)
+                                        elt.st = dataclasses.replace(compiled_func.st)
             elif isinstance(expr, ast.IfExp):
                 res = PFLIfExp(
                     PFLASTType.IF_EXP,
@@ -1625,6 +1639,7 @@ class PFLParser:
                     func_pfl_node = cast(PFLFunc, self._all_compiled[func_compile_uid])
 
             except PFLAstParseError as e:
+                print(f"In parsing function {func.__name__} at {module_path}:{first_lineno}")
                 error_line = get_parse_context_checked(
                 ).format_error_from_lines_node(e.node)
                 print(error_line)

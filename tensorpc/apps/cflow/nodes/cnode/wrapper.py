@@ -127,7 +127,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             ])
         cached_icon = mui.Icon(mui.IconType.Cached).prop(iconSize="small")
         # print(str(node_model_draft.node.isCached))
-        cached_icon.bind_fields(muiColor=f"where(not_null({node_model_draft.node.isCached}, `true`), 'success', 'disabled')")
+        cached_icon.bind_fields(muiColor=f"'success' if not_null({node_model_draft.node.isCached}, True) else 'disabled'")
         header_icons = mui.HBox(
             [
                 cached_icon,

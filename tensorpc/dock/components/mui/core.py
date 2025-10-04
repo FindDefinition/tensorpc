@@ -2465,7 +2465,7 @@ class _SliderBase(MUIComponentBase[_T_slider_base_props], Generic[_T_slider_base
         self.props.min = begin 
         self.props.max = end
         self.props.step = step
-        assert end >= begin and step <= end - begin
+        assert end >= begin and step != 0
         if value is not None:
             self.props.value = value
         else:
@@ -4883,14 +4883,23 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                 apply_draft_update_ops(obj, updates)
             else:
                 apply_draft_update_ops_to_json(obj, updates)
+        if not self._use_pfl_path:
+            updates = [{
+                "index": x,
+                "ops": [op.to_jmes_path_op().to_dict() for op in ops]
+            } for x, ops in ctx._update_list]
+        else:
+            updates = [{
+                "index": x,
+                "ops": [op.to_pfl_path_op().to_dict() for op in ops]
+            } for x, ops in ctx._update_list]
+
         await self.send_and_wait(
             self.create_comp_event({
                 "type":
                 DataListControlType.OperateData.value,
-                "updates": [{
-                    "index": x,
-                    "ops": [op.to_jmes_path_op().to_dict() for op in ops]
-                } for x, ops in ctx._update_list],
+                "updates": updates,
+                "isPFLPath": self._use_pfl_path,
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
@@ -5267,14 +5276,23 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                 apply_draft_update_ops(obj, updates)
             else:
                 apply_draft_update_ops_to_json(obj, updates)
+        if not self._use_pfl_path:
+            updates = [{
+                "index": x,
+                "ops": [op.to_jmes_path_op().to_dict() for op in ops]
+            } for x, ops in ctx._update_list]
+        else:
+            updates = [{
+                "index": x,
+                "ops": [op.to_pfl_path_op().to_dict() for op in ops]
+            } for x, ops in ctx._update_list]
+
         await self.send_and_wait(
             self.create_comp_event({
                 "type":
                 DataListControlType.OperateData.value,
-                "updates": [{
-                    "index": x,
-                    "ops": [op.to_jmes_path_op().to_dict() for op in ops]
-                } for x, ops in ctx._update_list],
+                "updates": updates,
+                "isPFLPath": self._use_pfl_path,
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):

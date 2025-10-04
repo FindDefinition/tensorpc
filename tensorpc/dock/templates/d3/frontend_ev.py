@@ -38,12 +38,12 @@ class App:
         boxmesh.event_move.add_frontend_draft_change(draft, "data")
         boxmesh.event_leave.add_frontend_draft_set_none(draft, "data")
         label_box = mui.VBox([
-            mui.JsonViewer().bind_fields(data="$.data.pointer"),
+            mui.JsonViewer().bind_fields(data="data.pointer"),
             # mui.Markdown("### Hello!")
         ]).prop(width="300px", position="absolute", backgroundColor="rgba(255, 255, 255, 0.5)", pointerEvents="none")
-        label_box.bind_fields(top="not_null($.data.offset[1], `0`) + `5`", left="not_null($.data.offset[0], `0`) + `5`")
+        label_box.bind_fields(top="not_null(data.offset[1], 0) + 5", left="not_null(data.offset[0], 0) + 5")
         label = mui.MatchCase.binary_selection(True, label_box)
-        label.bind_fields(condition="$.data != `null`")
+        label.bind_fields(condition="data is not None")
         dm.init_add_layout([
             canvas.prop(flex=2, shadows=True),
             mui.HBox([
@@ -51,7 +51,7 @@ class App:
             ]).prop(flex=1, overflow="auto"),
             label,
         ])
-        jv.bind_fields(data="$.data.offset")
+        jv.bind_fields(data="data.offset")
         return mui.HBox([
             dm
         ]).prop(minHeight=0,

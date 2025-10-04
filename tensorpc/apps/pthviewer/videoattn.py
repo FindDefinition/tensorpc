@@ -255,8 +255,8 @@ class VideoAttentionViewer(mui.FlexBox):
             three.Line([(0.0, 0.0, 0.0), ]).prop(color="red", lineWidth=2, variant="aabb", aabbSizes=(1, 1, 1))
         ]).prop(position=(0, 0, 0.1))
         select_line_cond = mui.MatchCase.binary_selection(True, select_line)
-        hover_line_cond.bind_fields(condition="$.hoverlinePosX != `null`")
-        select_line_cond.bind_fields(condition="$.sellinePosX != `null`")
+        hover_line_cond.bind_fields(condition="hoverlinePosX is not None")
+        select_line_cond.bind_fields(condition="sellinePosX is not None")
         hover_line.bind_fields(scale=draft.downsample_stride[2])
         select_line.bind_fields(scale=draft.downsample_stride[2])
         image.event_move.add_frontend_handler(self.dm, VideoAttnAnalysisState._img_move_pfl)
@@ -295,27 +295,27 @@ class VideoAttentionViewer(mui.FlexBox):
         preview_minimap.install_canvas_events(draft.preview_minimap, preview_view)
 
         frame_slider = mui.Slider(0, 0, 1, label="frame").bind_draft_change(draft.cur_frame_idx)
-        frame_slider.bind_fields(max=f"{draft.video_shape}[0] - `1`")
+        frame_slider.bind_fields(max=f"{draft.video_shape}[0] - 1")
         frame_slider.event_change.on(self._on_frame_slider_change)
         frame_slider.prop(valueInput=True)
 
         step_slider = mui.Slider(0, 0, 1, label="step").bind_draft_change(draft.cur_step)
-        step_slider.bind_fields(max=f"{draft.num_steps} - `1`")
+        step_slider.bind_fields(max=f"{draft.num_steps} - 1")
         step_slider.prop(valueInput=True)
         step_slider.event_change.on(self._on_step_slider_change)
 
         layer_slider = mui.Slider(0, 0, 1, label="layer").bind_draft_change(draft.cur_layer)
-        layer_slider.bind_fields(max=f"{draft.num_layers} - `1`")
+        layer_slider.bind_fields(max=f"{draft.num_layers} - 1")
         layer_slider.prop(valueInput=True)
         layer_slider.event_change.on(self._on_layer_slider_change)
 
         head_slider = mui.Slider(0, 0, 1, label="head").bind_draft_change(draft.cur_head)
-        head_slider.bind_fields(max=f"{draft.num_heads} - `1`")
+        head_slider.bind_fields(max=f"{draft.num_heads} - 1")
         head_slider.prop(valueInput=True)
         head_slider.event_change.on(self._on_head_slider_change)
 
         analysis_slider = mui.Slider(0, 0, 1, label="Attn Item").bind_draft_change(draft.cur_analysis_idx)
-        analysis_slider.bind_fields(max=f"{draft.num_analysis} - `1`")
+        analysis_slider.bind_fields(max=f"{draft.num_analysis} - 1")
         analysis_slider.prop(valueInput=True)
         analysis_slider.event_change.on(self._on_attn_item_change)
 

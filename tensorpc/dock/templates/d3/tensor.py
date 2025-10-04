@@ -78,7 +78,7 @@ class TensorPanel(mui.FlexBox):
             "position-x": "linePosX",
             "position-y": "linePosY",
         })
-        line_cond.bind_fields(condition="$.linePosX != `null`")
+        line_cond.bind_fields(condition="linePosX is not None")
 
         dm.init_add_layout([
             canvas.prop(flex=1),

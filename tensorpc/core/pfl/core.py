@@ -201,6 +201,8 @@ class PFLParseConfig:
     # WARNING: unknown attr call isn't allowed.
     allow_partial_type_infer: bool = False
 
+    allow_dynamic_container_literal: bool = False
+
 @dataclasses.dataclass
 class StaticEvalConfig:
     # meta eval support two feature: custom infer function and partial run.

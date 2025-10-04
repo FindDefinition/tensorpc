@@ -77,6 +77,7 @@ from tensorpc.dock.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc.utils.uniquename import UniqueNamePool
+from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
 from ..jsonlike import (BackendOnlyProp, Undefined, as_dict_no_undefined,
                         camel_to_snake, snake_to_camel,
@@ -1238,12 +1239,19 @@ class DraftOpUserData:
 TEventData = TypeVar("TEventData")
 
 def _draft_expr_or_str_to_str(draft_expr: Any) -> str:
-    if isinstance(draft_expr, DraftBase):
-        draft_expr_str = get_draft_jmespath(draft_expr)
+    if TENSORPC_DEV_USE_PFL_PATH:
+        if isinstance(draft_expr, DraftBase):
+            draft_expr_str = get_draft_pflpath(draft_expr)
+        else:
+            draft_expr_str = draft_expr
+        return pfl.compile_pflpath_to_compact_str(draft_expr_str)
     else:
-        draft_expr_str = draft_expr
-    jmespath.compile(draft_expr_str)
-    return draft_expr_str
+        if isinstance(draft_expr, DraftBase):
+            draft_expr_str = get_draft_jmespath(draft_expr)
+        else:
+            draft_expr_str = draft_expr
+        jmespath.compile(draft_expr_str)
+        return draft_expr_str
 
 class _EventSlotBase(Generic[TEventData]):
 
@@ -1348,7 +1356,8 @@ class _EventSlotBase(Generic[TEventData]):
             attr="",
             targetPath=targetPath,
             partialTailArgs=tail_args,
-            pflFuncUid=func_specs[0].uid
+            pflFuncUid=func_specs[0].uid,
+            isPFLPath=self.comp._use_pfl_path,
         )
         if not use_immer:
             op.dontUseImmer = True
@@ -1368,6 +1377,7 @@ class _EventSlotBase(Generic[TEventData]):
                 targetPath=target_draft_str,
                 targetComp=target_comp,
                 srcPath=None,
+                isPFLPath=self.comp._use_pfl_path,
             ))
         return self
 
@@ -1613,7 +1623,7 @@ class Component(Generic[T_base_props, T_child]):
         #     FrontendEventType.AfterUnmount)
 
         # TODO debug only
-        self._use_pfl_path: bool = False
+        self._use_pfl_path: bool = TENSORPC_DEV_USE_PFL_PATH
 
     def use_effect(self,
                    effect: Callable[[],
@@ -1876,6 +1886,7 @@ class Component(Generic[T_base_props, T_child]):
                 else:
                     dm_paths_new[k] = v
             res["dmProps"] = dm_paths_new
+        res["isPFLPath"] = self._use_pfl_path
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
@@ -1993,17 +2004,18 @@ class Component(Generic[T_base_props, T_child]):
                 else:
                     v = v_may_draft
                 if isinstance(v, str):
-                    new_kwargs[k] = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(v)), separators=(',', ':'))
+                    # print("PFL", v)
+                    new_kwargs[k] = pfl.compile_pflpath_to_compact_str(v)
                 else:
                     assert isinstance(v, tuple) and len(v) == 2
                     assert isinstance(v[0], Component)
                     vv = v[1] 
                     if isinstance(vv, DraftBase):
                         vp = get_draft_pflpath(vv)
-                        vp = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(vp)), separators=(',', ':'))
+                        vp = pfl.compile_pflpath_to_compact_str(vp)
                         new_kwargs[k] =  (v[0], vp)
                     else:
-                        vp = json.dumps(pfl.dump_pflpath(pfl.compile_pflpath(vv)), separators=(',', ':'))
+                        vp = pfl.compile_pflpath_to_compact_str(vv)
                         new_kwargs[k] = (v[0], vp)
 
         self._flow_data_model_paths.update(new_kwargs)

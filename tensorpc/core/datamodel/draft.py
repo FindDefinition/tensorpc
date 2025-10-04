@@ -56,6 +56,7 @@ from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
 from .draftast import DraftASTFuncType, DraftASTNode, evaluate_draft_ast, evaluate_draft_ast_json, evaluate_draft_ast_with_obj_id_trace, evaluate_draft_ast_noexcept, DraftASTType
 from tensorpc.core.pfl import pflpath
+from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
 T = TypeVar("T")
 
@@ -174,7 +175,7 @@ class DraftUpdateOp:
 
     def to_pfl_path_op(self) -> PFLPathOp:
         # app internal will handle non-dict data in self.opData.
-        return PFLPathOp(self.node.get_pfl_path(), self.op, self.opData)
+        return PFLPathOp(pflpath.compile_pflpath_to_compact_str(self.node.get_pfl_path()), self.op, self.opData)
 
     def to_userdata_removed(self) -> "DraftUpdateOp":
         return dataclasses.replace(self, userdata=None, node=self.node.to_userdata_removed())
@@ -430,7 +431,10 @@ class DraftBase:
         self._tensorpc_draft_attr_anno_state = anno_state
 
     def __str__(self) -> str:
-        return get_draft_jmespath(self)
+        if TENSORPC_DEV_USE_PFL_PATH:
+            return get_draft_pflpath(self)
+        else:
+            return get_draft_jmespath(self)
 
     def _tensorpc_draft_get_update_op(
             self,

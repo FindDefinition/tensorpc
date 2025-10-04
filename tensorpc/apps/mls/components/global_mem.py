@@ -297,7 +297,7 @@ class MatrixPanel(three.Group):
             "position-y": draft.linePosY,
         })
         dm = mui.DataModel.get_datamodel_from_draft(draft)
-        self._hover_line_cond.bind_fields(condition=f"{draft.linePosX} != `null`")
+        self._hover_line_cond.bind_fields(condition=f"{draft.linePosX} is not None")
 
         if enable_hover_line:
             self.event_plane.event_leave.add_frontend_draft_set_none(draft, "linePosX")

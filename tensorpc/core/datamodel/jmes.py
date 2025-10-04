@@ -32,7 +32,7 @@ class _JMESCustomFunctions(functions.Functions):
         return obj % attrs
 
     @functions.signature({'types': ['object']}, {'types': ['array']})
-    def _func_getItemPath(self, obj, *attrs):
+    def _func_getItemPath(self, obj, attrs):
         for attr in attrs:
             obj = obj[attr]
         return obj

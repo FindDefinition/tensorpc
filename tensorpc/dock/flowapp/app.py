@@ -268,7 +268,7 @@ class App:
         self._use_app_editor = False
         # self.__flowapp_external_wrapped_obj = external_wrapped_obj
         root_uid = UniqueTreeIdForComp.from_parts([_ROOT])
-
+        self._is_remote_component = is_remote_comp
         if external_root is not None:
             # TODO better mount
             root = external_root

@@ -6,7 +6,7 @@ from .backends import js
 from .pfl_ast import PFLExpr, PFLName, PFLAttribute, PFLConstant, PFLSlice, PFLSubscript, PFLArray, PFLTuple, PFLDict, PFLBoolOp, BoolOpType, PFLBinOp, PFLCompare, PFLUnaryOp, PFLCall, PFLIfExp, PFLFunc, PFLClass, PFLExprType, is_undefined, PFL_BUILTIN_PROXY_INIT_FN
 from .pfl_reg import STD_REGISTRY, register_pfl_std
 from tensorpc.utils.perfetto_colors import create_slice_name, perfetto_string_to_color
-
+import json 
 import numpy as np 
 
 @register_pfl_std(mapped_name="getRoot", backend="js")
@@ -33,7 +33,7 @@ def cformat(obj: Any, *attrs: Any) -> Any:
     return obj % attrs
 
 @register_pfl_std(mapped_name="getItemPath", backend="js")
-def getItemPath(obj: Any, *attrs: Union[int, str]) -> Any:
+def getItemPath(obj: Any, attrs: list[Any]) -> Any:
     for attr in attrs:
         obj = obj[attr]
     return obj
@@ -62,22 +62,6 @@ def matchCaseVarg(cond, *items) -> Any:
             return items[i + 1]
     return None 
 
-@register_pfl_std(mapped_name="colorFromSlice", backend="js")
-def colorFromSlice(obj):
-    if isinstance(obj, str):
-        return perfetto_string_to_color(create_slice_name(obj), use_cache=False).base.cssString
-    elif isinstance(obj, (int, float)):
-        return perfetto_string_to_color(str(obj), use_cache=False).base.cssString
-    return None 
-
-@register_pfl_std(mapped_name="colorFromName", backend="js")
-def colorFromName(obj):
-    if isinstance(obj, str):
-        return perfetto_string_to_color(obj, use_cache=False).base.cssString
-    elif isinstance(obj, (int, float)):
-        return perfetto_string_to_color(str(obj), use_cache=False).base.cssString
-    return None 
-
 @register_pfl_std(mapped_name="npToList", backend="js")
 def npToList(obj):
     if isinstance(obj, np.ndarray):
@@ -85,7 +69,7 @@ def npToList(obj):
     return None 
 
 @register_pfl_std(mapped_name="npGetSubArray", backend="js")
-def npGetSubArray(obj, index):
+def npGetSubArray(obj: Any, index: int) -> Any:
     if isinstance(obj, np.ndarray):
         if obj.ndim == 0:
             return None
@@ -93,7 +77,7 @@ def npGetSubArray(obj, index):
     return None 
 
 @register_pfl_std(mapped_name="npSliceFirstAxis", backend="js")
-def npSliceFirstAxis(obj, start, end):
+def npSliceFirstAxis(obj: Any, start: int, end: int) -> Any:
     if isinstance(obj, np.ndarray):
         if obj.ndim == 0:
             return None
@@ -101,34 +85,51 @@ def npSliceFirstAxis(obj, start, end):
     return None 
 
 @register_pfl_std(mapped_name="ndarrayGetItem", backend="js")
-def ndarrayGetItem(obj, *index):
+def ndarrayGetItem(obj: Any, *index: int) -> Any:
     if isinstance(obj, np.ndarray):
         return obj[index]
     return None 
 
 @register_pfl_std(mapped_name="maximum", backend="js")
-def maximum(x, y):
+def maximum(x: Any, y: Any) -> Any:
     return max(x, y)
 
+@register_pfl_std(mapped_name="array", backend="js")
+def array(*x: Any) -> list[Any]:
+    return list(x)
+
 @register_pfl_std(mapped_name="minimum", backend="js")
-def minimum(x, y):
+def minimum(x: Any, y: Any) -> Any:
     return min(x, y)
 
 @register_pfl_std(mapped_name="clamp", backend="js")
-def clamp(x, a, b):
+def clamp(x: Any, a: Any, b: Any) -> Any:
     return max(a, min(x, b))
 
 @register_pfl_std(mapped_name="printForward", backend="js")
-def printForward(x):
+def printForward(*x: Any) -> Any:
     print(*x)
     return x[0]
 
 @register_pfl_std(mapped_name="not_null", backend="js")
-def not_null(*x):
+def not_null(*x: Any) -> Any:
     for v in x:
         if v is not None:
             return v
     return None
+
+@register_pfl_std(mapped_name="join", backend="js")
+def join(split: str, *arr: Any) -> Any:
+    return split.join([str(v) for v in arr])
+
+
+@register_pfl_std(mapped_name="where", backend="js")
+def where(cond: bool, x: Any, y: Any) -> Any:
+    return x if cond else y
+
+@register_pfl_std(mapped_name="to_string", backend="js")
+def to_string(x: Any) -> str:
+    return str(x)
 
 
 def _get_default_js_constants():
@@ -152,8 +153,6 @@ def _get_default_js_constants():
         "concat": concat,
         "matchCase": matchCase,
         "matchCaseVarg": matchCaseVarg,
-        "colorFromSlice": colorFromSlice,
-        "colorFromName": colorFromName,
         "npToList": npToList,
         "npGetSubArray": npGetSubArray,
         "npSliceFirstAxis": npSliceFirstAxis,
@@ -163,6 +162,10 @@ def _get_default_js_constants():
         "clamp": clamp,
         "printForward": printForward,
         "not_null": not_null,
+        "where": where,
+        "array": array,
+        "join": join,
+        "to_string": to_string,
     }
 
 class PFLPathEvaluator:
@@ -297,6 +300,14 @@ def compile_pflpath(pflpath: str):
 def dump_pflpath(node: PFLExpr):
     from .parser import _AstAsDict
     return _AstAsDict(ignore_dcls_info=True, ignore_func_info=True)._ast_as_dict(node)
+
+def compile_pflpath_to_compact_str(pflpath: str):
+    node = parse_expr_string_to_pfl_ast(pflpath, _get_default_js_constants(), {}, partial_type_infer=True)
+    node_dict = dump_pflpath(node)
+    return json.dumps({
+        "path": pflpath,
+        "node": node_dict
+    }, separators=(',', ':'))
 
 def search(expression: Union[str, PFLExpr], data: dict) -> Any:
     if isinstance(expression, str):

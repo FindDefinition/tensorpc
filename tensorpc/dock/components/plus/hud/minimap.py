@@ -259,8 +259,8 @@ class MiniMap(three.Group):
         })
 
         line_minimap.bind_fields_unchecked_dict({
-            "position-x": f"({draft.scrollValueX} - `0.5`) * (`1` - {draft.layout.scrollFactorX})",
-            "position-y": f"-({draft.scrollValueY} - `0.5`) * (`1` - {draft.layout.scrollFactorY})",
+            "position-x": f"({draft.scrollValueX} - 0.5) * (1 - {draft.layout.scrollFactorX})",
+            "position-y": f"-({draft.scrollValueY} - 0.5) * (1 - {draft.layout.scrollFactorY})",
             "scale-x": draft.layout.scrollFactorX,
             "scale-y": draft.layout.scrollFactorY,
         })
@@ -268,9 +268,9 @@ class MiniMap(three.Group):
         minimap_event_plane.event_move.add_frontend_handler(dm, MinimapModel._minimap_downmove_pfl, targetPath=str(draft))
         
         
-        minimap_event_plane.event_leave.add_frontend_draft_change(draft, "isMinimapDown", "`false`")
-        minimap_event_plane.event_down.add_frontend_draft_change(draft, "isMinimapDown", "`true`")
-        minimap_event_plane.event_up.add_frontend_draft_change(draft, "isMinimapDown", "`false`")
+        minimap_event_plane.event_leave.add_frontend_draft_change(draft, "isMinimapDown", "False")
+        minimap_event_plane.event_down.add_frontend_draft_change(draft, "isMinimapDown", "True")
+        minimap_event_plane.event_up.add_frontend_draft_change(draft, "isMinimapDown", "Fanse")
         minimap_event_plane.event_down.configure(set_pointer_capture=True)
         minimap_event_plane.event_up.configure(release_pointer_capture=True)
 

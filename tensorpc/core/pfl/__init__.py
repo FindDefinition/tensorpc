@@ -37,4 +37,5 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, NodeTransformer,
 from .pfl_reg import (compiler_print_metadata, compiler_print_type,
                       register_pfl_std, register_pfl_builtin_proxy,
                       compiler_remove_optional)
-from .pflpath import PFLPathEvaluator, compile_pflpath, dump_pflpath
+from .pflpath import (PFLPathEvaluator, compile_pflpath, dump_pflpath, 
+                      compile_pflpath_to_compact_str)

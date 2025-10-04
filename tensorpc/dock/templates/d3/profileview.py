@@ -39,7 +39,9 @@ class App:
             path = yaml.safe_load(f)["perfetto_debug"]["trace_path"]
         with open(path, "r") as f:
             trace = json.load(f)
+        print(type(trace))
         trace_events = trace["traceEvents"]
         trace_events2 = copy.deepcopy(trace_events)
+        print(len(trace_events))
         await self.monitor.append_perf_data(0, [trace_events2], [None], max_depth=15)
         # await self.monitor2.append_perf_data(0, [trace_events], [None], max_depth=4)

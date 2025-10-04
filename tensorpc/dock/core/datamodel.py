@@ -566,6 +566,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             return self.create_comp_event({
                 "type": 0,
                 "ops": frontend_ops,
+                "isPFLPath": self._use_pfl_path,
             })
         else:
             return None 
@@ -789,7 +790,7 @@ class DataSubQuery(ContainerBase[DataSubQueryProps, Component]):
                          children,
                          allowed_events=[])
         if self._use_pfl_path:
-            pfl.compile_pflpath(query)
+            query = pfl.compile_pflpath_to_compact_str(query)
         else:
             jmespath.compile(query)
         self.prop(query=query)

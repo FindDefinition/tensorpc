@@ -42,7 +42,7 @@ from tensorpc.dock.core.appcore import AppSpecialEventType, app_is_remote_comp
 from tensorpc.dock.core.component import FrontendEventType
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from .options import CommonOptions
-
+from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 from tensorpc.dock.client import MasterMeta
 
 class EditorActions(enum.Enum):
@@ -586,8 +586,11 @@ class ScriptManagerV2(mui.FlexBox):
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
         ]))
+        if TENSORPC_DEV_USE_PFL_PATH:
+            self.code_editor_container.bind_fields(visibles="[states[language].is_editor_visible, states[language].is_app_visible]")
+        else:
+            self.code_editor_container.bind_fields(visibles="[getItem(states, language).is_editor_visible, getItem(states, language).is_app_visible]")
 
-        self.code_editor_container.bind_fields(visibles="[getItem(states, language).is_editor_visible, getItem(states, language).is_app_visible]")
         self._scripts_select = mui.Autocomplete(
             "Scripts",
             [],
@@ -617,31 +620,60 @@ class ScriptManagerV2(mui.FlexBox):
                 progressColor="primary",
                 confirmTitle="Warning",
                 confirmMessage="Are you sure to delete this script?")
-        self._save_and_run_btn.bind_fields(disabled="cur_script_idx == `-1`")
-        self._delete_button.bind_fields(disabled="cur_script_idx == `-1`")
-        for btn in ext_buttons:
-            btn.bind_fields(disabled="cur_script_idx == `-1`")
-        self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
-        self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
-        self._show_editor_btn.bind_fields(selected="getItem(states, language).is_editor_visible")
-        self.dm = mui.DataModel(init_model, [
-            mui.HBox([
-                self._scripts_select.prop(flex=1).bind_fields(
-                    options=r"scripts[*].{label: label}", 
-                    value=r"getItem(scripts, cur_script_idx).{label: label}"),
-                self.langs.bind_fields(disabled="cur_script_idx == `-1`"),
-                self._save_and_run_btn,
-                # self._enable_save_watch,
-                self._delete_button,
-                *ext_buttons,
+        if not TENSORPC_DEV_USE_PFL_PATH:
+            self._save_and_run_btn.bind_fields(disabled="cur_script_idx == -1")
+            self._delete_button.bind_fields(disabled="cur_script_idx == -1")
+            for btn in ext_buttons:
+                btn.bind_fields(disabled="cur_script_idx == -1")
+            self.code_editor.bind_fields(readOnly="cur_script_idx == -1")
+            self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
+            self._show_editor_btn.bind_fields(selected="getItem(states, language).is_editor_visible")
+            self.dm = mui.DataModel(init_model, [
+                mui.HBox([
+                    self._scripts_select.prop(flex=1).bind_fields(
+                        options=r"scripts[*].{label: label}", 
+                        value=r"getItem(scripts, cur_script_idx).{label: label}"),
+                    self.langs.bind_fields(disabled="cur_script_idx == -1"),
+                    self._save_and_run_btn,
+                    # self._enable_save_watch,
+                    self._delete_button,
+                    *ext_buttons,
+                    mui.DataSubQuery("getItem(scripts, cur_script_idx)", [
+                        self._show_editor_btn,
+                    ]).bind_fields(enable="cur_script_idx != -1"),
+                ]).prop(alignItems="center"),
                 mui.DataSubQuery("getItem(scripts, cur_script_idx)", [
-                    self._show_editor_btn,
-                ]).bind_fields(enable="cur_script_idx != `-1`"),
-            ]).prop(alignItems="center"),
-            mui.DataSubQuery("getItem(scripts, cur_script_idx)", [
-                self.code_editor_container,
-            ]).bind_fields(enable="cur_script_idx != `-1`"),
-        ])
+                    self.code_editor_container,
+                ]).bind_fields(enable="cur_script_idx != -1"),
+            ])
+
+        else:
+            self._save_and_run_btn.bind_fields(disabled="cur_script_idx == -1")
+            self._delete_button.bind_fields(disabled="cur_script_idx == -1")
+            for btn in ext_buttons:
+                btn.bind_fields(disabled="cur_script_idx == -1")
+            self.code_editor.bind_fields(readOnly="cur_script_idx == -1")
+            self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
+            self._show_editor_btn.bind_fields(selected="states[language].is_editor_visible")
+
+            self.dm = mui.DataModel(init_model, [
+                mui.HBox([
+                    self._scripts_select.prop(flex=1).bind_fields(
+                        options="scripts", 
+                        value="scripts[cur_script_idx]"),
+                    self.langs.bind_fields(disabled="cur_script_idx == -1"),
+                    self._save_and_run_btn,
+                    # self._enable_save_watch,
+                    self._delete_button,
+                    *ext_buttons,
+                    mui.DataSubQuery("scripts[cur_script_idx]", [
+                        self._show_editor_btn,
+                    ]).bind_fields(enable="cur_script_idx != -1"),
+                ]).prop(alignItems="center"),
+                mui.DataSubQuery("scripts[cur_script_idx]", [
+                    self.code_editor_container,
+                ]).bind_fields(enable="cur_script_idx != -1"),
+            ])
         draft = self.dm.get_draft_type_only()
 
         cur_script_draft = draft.scripts[draft.cur_script_idx]

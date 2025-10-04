@@ -74,13 +74,14 @@ class Foo2:
 
     def method(self, a: float, b: float):
         c = stl.Math.pow(a, b)
+        x = None
         if a > 10:
             d = 5 
         else:
             d = 3
         for j in range(10):
             d += 1
-        return add(d, 3 + self.val), c
+        return add(d, 3 + self.val), c + typing.cast(int, x)
 
 if __name__ == "__main__":
     # pflast, run_scope = parse_expr_to_df_ast("Math().sin(2)")
@@ -96,12 +97,12 @@ if __name__ == "__main__":
     # })))
     aa = Foo().method
     lib2 = pfl.parse_func_to_pfl_library(aa, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
-    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)))
+    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)[0]))
     aa = Foo2.method
 
     # breakpoint()
     lib2 = pfl.parse_func_to_pfl_library(aa, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
-    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)))
+    print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)[0]))
 
     # for k, v in all_compiled.items():
     #     print(k, v.ret_st)

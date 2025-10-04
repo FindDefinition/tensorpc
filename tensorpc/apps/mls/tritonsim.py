@@ -779,7 +779,7 @@ class TritonSim:
         container.panel.event_plane.event_move.add_frontend_handler(self.dm, TritonSimModel._on_hover_pfl_single)
         container.panel.event_plane.event_leave.add_frontend_handler(self.dm, TritonSimModel._on_hover_leave_pfl_single)
         local_container = mui.MatchCase.binary_selection(True, container)
-        local_container.bind_fields(condition=f"{draft.local_var_key} != `\"\"`")
+        local_container.bind_fields(condition=f"{draft.local_var_key} != \"\"")
 
         self.tree = plus.ObjectInspector(with_builtins=False, show_terminal=False, default_tab_preview=False, default_sizes=[100, 100],
             init_fast_layout=[local_container])
@@ -814,16 +814,16 @@ class TritonSim:
                 .bind_fields(disabled=draft.cur_thread_option != None),
             mui.IconButton(mui.IconType.KeyboardArrowRight, self._on_debug_next_line)
                 .prop(tooltip="Next Line", size="small", iconSize="small", muiColor="primary")
-                .bind_fields(disabled=f"{draft.cur_thread_option} ? !{draft.cur_thread_option.is_paused} : `true`"),
+                .bind_fields(disabled=f"(not {draft.cur_thread_option.is_paused}) if {draft.cur_thread_option} else True"),
             mui.IconButton(mui.IconType.KeyboardDoubleArrowRight, self._on_debug_continue)
                 .prop(tooltip="Continue", size="small", iconSize="small", muiColor="primary")
-                .bind_fields(disabled=f"{draft.cur_thread_option} ? !{draft.cur_thread_option.is_paused} : `true`"),
+                .bind_fields(disabled=f"(not {draft.cur_thread_option.is_paused}) if {draft.cur_thread_option} else True"),
             mui.IconButton(mui.IconType.RestartAlt,)
                 .prop(tooltip="Restart", size="small", iconSize="small", muiColor="success")
-                .bind_fields(disabled=f"{draft.cur_thread_option} ? !{draft.cur_thread_option.is_paused} : `true`"),
+                .bind_fields(disabled=f"(not {draft.cur_thread_option.is_paused}) if {draft.cur_thread_option} else True"),
             mui.IconButton(mui.IconType.Stop, self._on_debug_stop)
                 .prop(tooltip="Stop", size="small", iconSize="small", muiColor="error")
-                .bind_fields(disabled=f"{draft.cur_thread_option} ? !{draft.cur_thread_option.is_paused} : `true`"),
+                .bind_fields(disabled=f"(not {draft.cur_thread_option.is_paused}) if {draft.cur_thread_option} else True"),
             mui.HBox([]).prop(flex=1),
             mui.IconButton(mui.IconType.QueryStats, self._on_launch_triton)
                 .prop(tooltip="Run Triton Kernel", size="small", iconSize="small", muiColor="error", 

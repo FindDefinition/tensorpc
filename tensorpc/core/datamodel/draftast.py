@@ -7,6 +7,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.core import pfl 
 T = TypeVar("T")
+from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
 # currently jmespath don't support ast to code, so we use a simple ast here.
 
@@ -85,7 +86,10 @@ class DraftASTNode:
             yield from child.walk()
 
     def __repr__(self):
-        return self.get_jmes_path()
+        if TENSORPC_DEV_USE_PFL_PATH:
+            return self.get_pfl_path()
+        else:
+            return self.get_jmes_path()
 
     def to_userdata_removed(self):
         child_removed = [child.to_userdata_removed() for child in self.children]
@@ -121,7 +125,7 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
         return f"\'{node.value}\'"
     elif node.type in _GET_ITEMS:
         child_value = _draft_ast_to_jmes_path_recursive(node.children[0])
-        is_root = child_value == ""
+        is_root = child_value == "" or child_value == "$"
         if node.type == DraftASTType.GET_ATTR:
             if is_root:
                 return f"{node.value}"
@@ -149,24 +153,27 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
 
 def _draft_ast_to_pfl_path_recursive(node: DraftASTNode) -> str:
     if node.type == DraftASTType.NAME:
-        return "getRoot()" if node.value == "$" else node.value
+        return "getRoot()" if node.value == "" else node.value
     elif node.type == DraftASTType.JSON_LITERAL:
         if isinstance(node.value, (int, float)):
             return f"{node.value}"
         else:
-            return f"{json.dumps(node.value)}"
+            return f"{(node.value)}"
     elif node.type == DraftASTType.STRING_LITERAL:
         return f"'{node.value}'"
     elif node.type in _GET_ITEMS:
         child_value = _draft_ast_to_pfl_path_recursive(node.children[0])
-        is_root = child_value == ""
+        is_root = child_value == "" or child_value == "getRoot()"
         if node.type == DraftASTType.GET_ATTR:
             if is_root:
                 return f"{node.value}"
             else:
-                return f"{child_value}[{node.value}]"
+                return f"{child_value}.{node.value}"
         elif node.type == DraftASTType.ARRAY_GET_ITEM:
             return f"{child_value}[{node.value}]"
+        elif node.type == DraftASTType.DICT_GET_ITEM:
+            assert isinstance(node.value, str)
+            return f"{child_value}['{node.value}']"
         else:
             return f"{child_value}[{node.value}]"
     elif node.type == DraftASTType.FUNC_CALL:
@@ -211,7 +218,7 @@ def _impl_not_null(*args):
 
 def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
     if node.type == DraftASTType.NAME:
-        if node.value == "" or node.value == "$":
+        if node.value == "" or node.value == "$" or node.value == "getRoot()":
             return obj
         return getattr(obj, node.value)
     elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
