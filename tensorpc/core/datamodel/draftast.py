@@ -7,7 +7,6 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.core import pfl 
 T = TypeVar("T")
-from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
 # currently jmespath don't support ast to code, so we use a simple ast here.
 
@@ -86,10 +85,7 @@ class DraftASTNode:
             yield from child.walk()
 
     def __repr__(self):
-        if TENSORPC_DEV_USE_PFL_PATH:
-            return self.get_pfl_path()
-        else:
-            return self.get_jmes_path()
+        return self.get_pfl_path()
 
     def to_userdata_removed(self):
         child_removed = [child.to_userdata_removed() for child in self.children]

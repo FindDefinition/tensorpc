@@ -1239,19 +1239,11 @@ class DraftOpUserData:
 TEventData = TypeVar("TEventData")
 
 def _draft_expr_or_str_to_str(draft_expr: Any) -> str:
-    if TENSORPC_DEV_USE_PFL_PATH:
-        if isinstance(draft_expr, DraftBase):
-            draft_expr_str = get_draft_pflpath(draft_expr)
-        else:
-            draft_expr_str = draft_expr
-        return pfl.compile_pflpath_to_compact_str(draft_expr_str)
+    if isinstance(draft_expr, DraftBase):
+        draft_expr_str = get_draft_pflpath(draft_expr)
     else:
-        if isinstance(draft_expr, DraftBase):
-            draft_expr_str = get_draft_jmespath(draft_expr)
-        else:
-            draft_expr_str = draft_expr
-        jmespath.compile(draft_expr_str)
-        return draft_expr_str
+        draft_expr_str = draft_expr
+    return pfl.compile_pflpath_to_compact_str(draft_expr_str)
 
 class _EventSlotBase(Generic[TEventData]):
 
@@ -1311,7 +1303,6 @@ class _EventSlotBase(Generic[TEventData]):
                 targetPath=target_draft_str,
                 targetComp=target_comp,
                 srcPath=src_draft_str,
-                isPFLPath=self.comp._use_pfl_path
             ))
         return self
 
@@ -1360,7 +1351,6 @@ class _EventSlotBase(Generic[TEventData]):
             targetPath=undefined if targetPath == "" else targetPath,
             partialTailArgs=tail_args,
             pflFuncUid=func_specs[0].uid,
-            isPFLPath=self.comp._use_pfl_path,
         )
         if not use_immer:
             op.dontUseImmer = True
@@ -1380,7 +1370,6 @@ class _EventSlotBase(Generic[TEventData]):
                 targetPath=target_draft_str,
                 targetComp=target_comp,
                 srcPath=None,
-                isPFLPath=self.comp._use_pfl_path,
             ))
         return self
 
@@ -1624,9 +1613,6 @@ class Component(Generic[T_base_props, T_child]):
         # before and after unmount.
         # self.event_after_unmount = self._create_emitter_event_slot_noarg(
         #     FrontendEventType.AfterUnmount)
-
-        # TODO debug only
-        self._use_pfl_path: bool = TENSORPC_DEV_USE_PFL_PATH
 
     def use_effect(self,
                    effect: Callable[[],
@@ -1889,7 +1875,6 @@ class Component(Generic[T_base_props, T_child]):
                 else:
                     dm_paths_new[k] = v
             res["dmProps"] = dm_paths_new
-        res["isPFLPath"] = self._use_pfl_path
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
@@ -1981,45 +1966,24 @@ class Component(Generic[T_base_props, T_child]):
     def bind_fields_unchecked_dict(self, kwargs: dict[str, Union[str, tuple["Component", Union[str, Any]], Any]]):
         new_kwargs: dict[str, Union[str, tuple["Component", str]]] = {}
         for k, v_may_draft in kwargs.items():
-            if not self._use_pfl_path:
-                # validate expr
-                if isinstance(v_may_draft, DraftBase):
-                    v = get_draft_jmespath(v_may_draft)
-                else:
-                    v = v_may_draft
-                if isinstance(v, str):
-                    jmespath.compile(v)
-                    new_kwargs[k] = v
-                else:
-                    assert isinstance(v, tuple) and len(v) == 2
-                    assert isinstance(v[0], Component)
-                    vv = v[1] 
-                    if isinstance(vv, DraftBase):
-                        vp = get_draft_jmespath(vv)
-                        jmespath.compile(vp)
-                        new_kwargs[k] =  (v[0], vp)
-                    else:
-                        jmespath.compile(vv)
-                        new_kwargs[k] = (v[0], vv)
+            if isinstance(v_may_draft, DraftBase):
+                v = get_draft_pflpath(v_may_draft)
             else:
-                if isinstance(v_may_draft, DraftBase):
-                    v = get_draft_pflpath(v_may_draft)
+                v = v_may_draft
+            if isinstance(v, str):
+                # print("PFL", v)
+                new_kwargs[k] = pfl.compile_pflpath_to_compact_str(v)
+            else:
+                assert isinstance(v, tuple) and len(v) == 2
+                assert isinstance(v[0], Component)
+                vv = v[1] 
+                if isinstance(vv, DraftBase):
+                    vp = get_draft_pflpath(vv)
+                    vp = pfl.compile_pflpath_to_compact_str(vp)
+                    new_kwargs[k] =  (v[0], vp)
                 else:
-                    v = v_may_draft
-                if isinstance(v, str):
-                    # print("PFL", v)
-                    new_kwargs[k] = pfl.compile_pflpath_to_compact_str(v)
-                else:
-                    assert isinstance(v, tuple) and len(v) == 2
-                    assert isinstance(v[0], Component)
-                    vv = v[1] 
-                    if isinstance(vv, DraftBase):
-                        vp = get_draft_pflpath(vv)
-                        vp = pfl.compile_pflpath_to_compact_str(vp)
-                        new_kwargs[k] =  (v[0], vp)
-                    else:
-                        vp = pfl.compile_pflpath_to_compact_str(vv)
-                        new_kwargs[k] = (v[0], vp)
+                    vp = pfl.compile_pflpath_to_compact_str(vv)
+                    new_kwargs[k] = (v[0], vp)
 
         self._flow_data_model_paths.update(new_kwargs)
         return self

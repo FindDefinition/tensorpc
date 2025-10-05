@@ -56,7 +56,6 @@ from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
 from .draftast import DraftASTFuncType, DraftASTNode, evaluate_draft_ast, evaluate_draft_ast_json, evaluate_draft_ast_with_obj_id_trace, evaluate_draft_ast_noexcept, DraftASTType
 from tensorpc.core.pfl import pflpath
-from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
 T = TypeVar("T")
 
@@ -431,10 +430,7 @@ class DraftBase:
         self._tensorpc_draft_attr_anno_state = anno_state
 
     def __str__(self) -> str:
-        if TENSORPC_DEV_USE_PFL_PATH:
-            return get_draft_pflpath(self)
-        else:
-            return get_draft_jmespath(self)
+        return get_draft_pflpath(self)
 
     def _tensorpc_draft_get_update_op(
             self,
