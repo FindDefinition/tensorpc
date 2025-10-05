@@ -1,6 +1,8 @@
 from collections.abc import Mapping, Sequence
 import inspect
 from typing import Any, Union
+
+from tensorpc.core.tree_id import UniqueTreeId
 from .parser import parse_expr_string_to_pfl_ast
 from .backends import js 
 from .pfl_ast import PFLExpr, PFLName, PFLAttribute, PFLConstant, PFLSlice, PFLSubscript, PFLArray, PFLTuple, PFLDict, PFLBoolOp, BoolOpType, PFLBinOp, PFLCompare, PFLUnaryOp, PFLCall, PFLIfExp, PFLFunc, PFLClass, PFLExprType, is_undefined, PFL_BUILTIN_PROXY_INIT_FN
@@ -304,10 +306,8 @@ def dump_pflpath(node: PFLExpr):
 def compile_pflpath_to_compact_str(pflpath: str):
     node = parse_expr_string_to_pfl_ast(pflpath, _get_default_js_constants(), {}, partial_type_infer=True)
     node_dict = dump_pflpath(node)
-    return json.dumps({
-        "path": pflpath,
-        "node": node_dict
-    }, separators=(',', ':'))
+    node_dict_str = json.dumps(node_dict, separators=(',', ':'))
+    return UniqueTreeId.from_parts([pflpath, node_dict_str]).uid_encoded
 
 def search(expression: Union[str, PFLExpr], data: dict) -> Any:
     if isinstance(expression, str):

@@ -1357,7 +1357,7 @@ class _EventSlotBase(Generic[TEventData]):
 
         op = EventFrontendUpdateOp(
             attr="",
-            targetPath=targetPath,
+            targetPath=undefined if targetPath == "" else targetPath,
             partialTailArgs=tail_args,
             pflFuncUid=func_specs[0].uid,
             isPFLPath=self.comp._use_pfl_path,
@@ -1504,7 +1504,7 @@ class EventSlotNoArgEmitter(_EventSlotEmitterBase):
 @dataclasses.dataclass
 class EventFrontendUpdateOp:
     attr: Union[str, int]
-    targetPath: str 
+    targetPath: Union[Undefined, str] = undefined 
     targetComp: Union[Undefined, "Component"] = undefined
     srcPath: Optional[Union[Undefined, str]] = undefined
     pflAstJson: Union[Undefined, str] = undefined
