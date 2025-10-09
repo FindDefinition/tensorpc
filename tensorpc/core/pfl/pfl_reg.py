@@ -25,6 +25,11 @@ class StdRegistryItem:
         default_factory=dict)
     # used to register some system std function used in decorator (disable type check)
     _internal_disable_type_check: bool = False
+    # only available in dcls.
+    partial_constexpr_fields: Optional[set[str]] = None
+    # wben some args is constexpr in constructor,
+    # we can create a partial-constexpr dataclass.
+    constexpr_infer: Optional[Callable[..., Any]] = None
 
 
 T = TypeVar("T")
@@ -36,6 +41,7 @@ class StdRegistry:
         self.global_dict: dict[tuple[str, Optional[str]], StdRegistryItem] = {}
         self._mapped_backend_to_item: dict[tuple[Any, Optional[str]], StdRegistryItem] = {}
         self._type_backend_to_item: dict[tuple[Any, Optional[str]], StdRegistryItem] = {}
+        self._type_to_item: dict[Any, StdRegistryItem] = {}
 
     def register(
         self,
@@ -45,6 +51,8 @@ class StdRegistry:
         mapped: Optional[Union[ModuleType, Type, Callable]] = None,
         backend: Optional[str] = "js",
         disable_dcls_ctor: bool = False,
+        partial_constexpr_fields: Optional[set[str]] = None,
+        constexpr_infer: Optional[Callable[..., Any]] = None,
         _internal_disable_type_check: bool = False,
     ):
 
@@ -77,6 +85,8 @@ class StdRegistry:
                                 )
                             namespace_aliases[attr] = cast(Type[DataclassType],
                                                         registered_item.dcls)
+            else:
+                assert partial_constexpr_fields is None
             assert mapped_name is not None
             key_ = mapped_name
             assert (
@@ -90,6 +100,8 @@ class StdRegistry:
                 is_func=inspect.isfunction(func),
                 disable_dcls_ctor=disable_dcls_ctor,
                 namespace_aliases=namespace_aliases,
+                partial_constexpr_fields=partial_constexpr_fields,
+                constexpr_infer=constexpr_infer,
                 _internal_disable_type_check=_internal_disable_type_check,
             )
 
@@ -99,6 +111,7 @@ class StdRegistry:
                 self._type_backend_to_item[(mapped, backend)] = item
             self.global_dict[(key_, backend)] = item
             self._type_backend_to_item[(func, backend)] = item
+            self._type_to_item[func] = item
             return cast(T, func)
 
         if func is None:
@@ -152,17 +165,20 @@ class StdRegistry:
     def items(self):
         yield from self.global_dict.items()
 
+    def get_item_by_key(
+        self,
+        type_or_fn: Any,
+    ) -> Optional[StdRegistryItem]:
+        return self._type_to_item.get(type_or_fn, None)
+
     def get_item_by_dcls(
         self,
         dcls: Any,
         backend: str = "js",
-        external: Optional[dict[tuple[str, Optional[str]],
-                                StdRegistryItem]] = None
     ) -> Optional[StdRegistryItem]:
-        if external is not None:
-            check_items = {**self.global_dict, **external}
-        else:
-            check_items = self.global_dict
+        check_items = self.global_dict
+        if dcls not in self._type_to_item:
+            return None
         for _, item in check_items.items():
             if item.backend is not None and item.backend != backend:
                 continue
@@ -176,15 +192,9 @@ class StdRegistry:
         self,
         mapped_type: Any,
         backend: str = "js",
-        external: Optional[dict[tuple[str, Optional[str]],
-                                StdRegistryItem]] = None,
         _builtin_only: bool = False
     ) -> Optional[StdRegistryItem]:
-        if external is not None:
-            check_items = {**self.global_dict, **external}
-        else:
-            return self._mapped_backend_to_item.get((mapped_type, backend), None)
-            # check_items = self.global_dict
+        check_items = self.global_dict
         for _, item in check_items.items():
             if _builtin_only and not item.is_builtin:
                 continue
@@ -198,13 +208,10 @@ class StdRegistry:
         self,
         mapped_type: Any,
         backend: str = "js",
-        external: Optional[dict[tuple[str, Optional[str]],
-                                StdRegistryItem]] = None,
     ) -> Optional[StdRegistryItem]:
         return self.get_dcls_item_by_mapped_type(
             mapped_type,
             backend=backend,
-            external=external,
             _builtin_only=True,
         )
 
@@ -218,6 +225,8 @@ def register_pfl_std(
     mapped: Optional[Union[ModuleType, Type, Callable]] = None,
     backend: Optional[str] = "js",
     disable_dcls_ctor: bool = False,
+    partial_constexpr_fields: Optional[set[str]] = None,
+    constexpr_infer: Optional[Callable[..., Any]] = None,
     _internal_disable_type_check: bool = False,
 ):
     return STD_REGISTRY.register(
@@ -226,6 +235,8 @@ def register_pfl_std(
         mapped=mapped,
         backend=backend,
         disable_dcls_ctor=disable_dcls_ctor,
+        partial_constexpr_fields=partial_constexpr_fields,
+        constexpr_infer=constexpr_infer,
         _internal_disable_type_check=_internal_disable_type_check)
 
 def register_pfl_builtin_proxy(

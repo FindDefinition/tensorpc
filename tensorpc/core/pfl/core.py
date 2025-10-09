@@ -30,7 +30,7 @@ from tensorpc.utils.rich_logging import get_logger
 if TYPE_CHECKING:
     from .pfl_ast import PFLFunc
 
-PFL_LOGGER = get_logger("tensorpc.pfl")
+PFL_LOGGER = get_logger("pfl")
 
 _T = TypeVar("_T")
 
@@ -276,7 +276,6 @@ class PFLParseCache:
         self._mapped_proxy_cache: dict[Type, Optional[StdRegistryItem]] = {}
 
         self._mapped_type_cache: dict[Type, StdRegistryItem] = {}
-        self._temp_dcls_dict: dict[tuple[str, Optional[str]], StdRegistryItem] = {}
         self._backend = backend
         self._var_preproc = var_preproc
 
@@ -363,7 +362,7 @@ class PFLParseCache:
     def cached_get_std_item(self, dcls: Type[T_dataclass]):
         if dcls in self._std_item_cache:
             return self._std_item_cache[dcls]
-        item = STD_REGISTRY.get_item_by_dcls(dcls, self._backend, external=self._temp_dcls_dict)
+        item = STD_REGISTRY.get_item_by_dcls(dcls, self._backend)
         self._std_item_cache[dcls] = item
         return item
 
@@ -371,7 +370,7 @@ class PFLParseCache:
         if usercls in self._mapped_type_cache:
             return self._mapped_type_cache[usercls]
         item = STD_REGISTRY.get_dcls_item_by_mapped_type(
-            usercls, self._backend, external=self._temp_dcls_dict)
+            usercls, self._backend)
         if item is None:
             raise ValueError(
                 f"can't find your mapped type {get_qualname_of_type(usercls)} from std registry."
@@ -383,7 +382,7 @@ class PFLParseCache:
         if usercls in self._mapped_proxy_cache:
             return self._mapped_proxy_cache[usercls]
         item = STD_REGISTRY.get_proxy_dcls_by_mapped_type(
-            usercls, self._backend, external=self._temp_dcls_dict)
+            usercls, self._backend)
         self._mapped_proxy_cache[usercls] = item
         return item
 
@@ -1644,6 +1643,9 @@ class PFLStdlibFuncMeta:
     take_overloads_fn: Optional[Callable] = None
     # if any stdlib func define this, we will use this to infer type instead of annotation.
     static_type_infer: Optional[Callable[..., Any]] = None
+    # wben some args is constexpr in func call,
+    # we can create a partial-constexpr data.
+    constexpr_infer: Optional[Callable[..., Any]] = None
 
     
 T_callable = TypeVar("T_callable", bound=Callable[..., Optional[PFLMetaInferResult]])
@@ -1837,7 +1839,8 @@ def get_compilable_meta(fn: Callable) -> Optional[PFLCompileFuncMeta]:
 
 def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_infer: Optional[Callable[..., Optional[PFLMetaInferResult]]] = None,
                        static_type_infer: Optional[Callable[..., Any]] = None,
-                       force_meta_infer: bool = False) -> Callable[[T_base_callable], T_base_callable]:
+                       force_meta_infer: bool = False,
+                       constexpr_infer: Optional[Callable[..., Any]] = None) -> Callable[[T_base_callable], T_base_callable]:
     def wrapper(fn_wrapped: T_base_callable) -> T_base_callable:
         fn_unwrapped = unwrap_fn_static_cls_property(fn_wrapped)
 
@@ -1852,7 +1855,8 @@ def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_inf
             meta_infer_set_first_arg = None
         if prev_meta is None:
             prev_meta = PFLStdlibFuncMeta(take_overloads_fn=take_overloads_fn, meta_infer=meta_infer_set_first_arg,
-                                          static_type_infer=static_type_infer, force_meta_infer=force_meta_infer)
+                                          static_type_infer=static_type_infer, force_meta_infer=force_meta_infer,
+                                          constexpr_infer=constexpr_infer)
             setattr(fn_wrapped, PFL_STDLIB_FUNC_META_ATTR, prev_meta)
         else:
             if take_overloads_fn_ is not None:
@@ -1861,6 +1865,8 @@ def configure_std_func(*, take_overloads_fn: Optional[Callable] = None, meta_inf
                 prev_meta.meta_infer = meta_infer_set_first_arg
             if static_type_infer is not None:
                 prev_meta.static_type_infer = static_type_infer
+            if constexpr_infer is not None:
+                prev_meta.constexpr_infer = constexpr_infer
             prev_meta.force_meta_infer = force_meta_infer
 
         return cast(T_base_callable, fn_wrapped)

@@ -13,9 +13,10 @@ from tensorpc.core.annolib import (AnnotatedType, Undefined, is_undefined,
                                    undefined)
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN, PFL_STDLIB_FUNC_META_ATTR
 from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.core.pfl.pfl_reg import STD_REGISTRY
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
+from .core import (PFL_LOGGER, FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
                    get_parse_context_checked, param_fn, varparam_fn)
 
 
@@ -1070,8 +1071,20 @@ class PFLCall(PFLExpr):
         assert self.func.st.type == PFLExprType.FUNCTION or self.func.st.type == PFLExprType.DATACLASS_TYPE, f"func must be function/dcls, but got {self.func.st.type}"
         overloads: list[tuple[FuncMatchResult[PFLExpr], PFLExprFuncInfo]] = []
         is_const = False
+        constexpr_infer: Optional[Callable[..., Any]] = None
+        constexpr_first_arg: Optional[Callable] = None
         if self.func.st.type == PFLExprType.FUNCTION:
             finfo = self.func.st.get_func_info_checked()
+            raw_fn = finfo.raw_func
+            if raw_fn is not None:
+                std_item = STD_REGISTRY.get_item_by_key(raw_fn)
+                if std_item is not None:
+                    constexpr_infer = std_item.constexpr_infer
+                    constexpr_first_arg = raw_fn
+                if constexpr_infer is None:
+                    std_meta: Optional[PFLStdlibFuncMeta] = getattr(raw_fn, PFL_STDLIB_FUNC_META_ATTR, None)
+                    if std_meta is not None:
+                        constexpr_infer = std_meta.constexpr_infer
             overload_infos = [self.func.st.get_func_info_checked()]
             if finfo.overloads is not None:
                 overload_infos.extend(finfo.overloads)
@@ -1095,7 +1108,7 @@ class PFLCall(PFLExpr):
                 error_msg = f"func {self.func.st} overloads not match args {[a.st for a in self.args]} kws {self.keys}. match errors:\n"
                 for e in match_errors:
                     error_msg += f"  - {e}\n"
-                print(error_msg)
+                PFL_LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
         elif self.func.st.type == PFLExprType.DATACLASS_TYPE:
@@ -1115,6 +1128,10 @@ class PFLCall(PFLExpr):
                 if self.func.st.is_stdlib:
                     # stdlib dcls is lazy parsed.
                     assert self.func.st.annotype is not None 
+                    std_item = STD_REGISTRY.get_item_by_key(self.func.st.annotype.origin_type)
+                    if std_item is not None:
+                        constexpr_infer = std_item.constexpr_infer
+                        constexpr_first_arg = self.func.st.annotype.origin_type
                     dcls_st = get_parse_cache_checked().cached_parse_dcls(self.func.st.annotype.origin_type)
                     func_info = dcls_st.get_func_info_checked()
                 else:
@@ -1143,7 +1160,7 @@ class PFLCall(PFLExpr):
             error_msg = f"func {self.func.st} overloads not match args {[a.st for a in self.args]} kws {self.keys}. error:\n"
             for e in errors:
                 error_msg += f"  - {e}\n"
-            print(error_msg)
+            PFL_LOGGER.error(error_msg)
             raise ValueError(error_msg)
         else:
             # find best overload
@@ -1168,9 +1185,10 @@ class PFLCall(PFLExpr):
                 self.st = dataclasses.replace(best_return_type)
             if self.func.st.type != PFLExprType.FUNCTION:
                 # TODO better constexpr infer
-                if is_const:
-                    args = []
-                    kwargs = {}
+                args = []
+                kwargs = {}
+
+                if is_const or constexpr_infer is not None:
                     for a in self.args:
                         assert a.is_const, "when you define static type infer, all arguments must be constexpr."
                         args.append(a.st._constexpr_data)
@@ -1179,6 +1197,10 @@ class PFLCall(PFLExpr):
                         for k, v in zip(self.keys, self.vals):
                             assert v.is_const, "when you define static type infer, all arguments must be constexpr."
                             kwargs[k] = v.st._constexpr_data
+                if constexpr_infer is not None:
+                    assert constexpr_first_arg is not None 
+                    self.st._constexpr_data = constexpr_infer(constexpr_first_arg, *args, **kwargs)
+                elif is_const:
                     if self.func.st.proxy_dcls is not None:
                         self.st._constexpr_data = inspect.getattr_static(self.func.st.proxy_dcls, PFL_BUILTIN_PROXY_INIT_FN)(*args, **kwargs)
                     else:
@@ -1454,7 +1476,14 @@ class PFLAttribute(PFLExpr):
                     new_st._constexpr_data = default
                 else:
                     if not is_undefined(self.value.st._constexpr_data):
-                        new_st._constexpr_data = getattr(self.value.st._constexpr_data, self.attr, undefined)
+                        # check partial constexpr fields, if defined,
+                        # only forward these fields.
+                        item = STD_REGISTRY.get_item_by_key(dcls_type)
+                        should_fwd_constexpr = True
+                        if item is not None and item.partial_constexpr_fields is not None:
+                            should_fwd_constexpr = self.attr in item.partial_constexpr_fields
+                        if should_fwd_constexpr:
+                            new_st._constexpr_data = getattr(self.value.st._constexpr_data, self.attr, undefined)
                 # print(self.attr, self.value.st._constexpr_data, new_st._constexpr_data)
                 self.st = new_st
             else:
