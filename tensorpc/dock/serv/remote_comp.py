@@ -250,10 +250,15 @@ class RemoteComponentService:
         # gid, nid = split_unique_node_id(node_uid)
         # app_obj.app.app_storage.set_graph_node_id(gid, nid)
         REMOTE_APP_SERV_LOGGER.warning("%sMount remote comp %s to %s", self._rank_prefix, key, app_obj.mounted_app_meta.url_with_port)
+        # event (remote mount) must be handled async, because it may send event to frontend, 
+        # the app send loop isn't ready before mount_app returns.
+        asyncio.create_task(self._send_remote_mount(app_obj), name="send remote mount")
+        # with enter_app_context(app_obj.app):
+        #     await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompMount, app_obj.mounted_app_meta)
+
+    async def _send_remote_mount(self, app_obj: AppObject):
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompMount, app_obj.mounted_app_meta)
-
-        # app_obj.send_loop_task = send_loop_task
 
     async def unmount_app(self, key: str, is_local_call: bool = False):
         assert key in self._app_objs
@@ -293,7 +298,7 @@ class RemoteComponentService:
 
     async def mount_app_generator(self, key: str,
                         prefixes: List[str], url: str = "", port: int = -1):
-        REMOTE_APP_SERV_LOGGER.warning("Mount remote comp %s (Generator)", key)
+        REMOTE_APP_SERV_LOGGER.warning("Start remote comp %s (Generator)", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         assert self._is_master
@@ -309,6 +314,7 @@ class RemoteComponentService:
                 await self.mount_app(key, url, port, prefixes, queue)
             shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name="shutdown")
             wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
+            # REMOTE_APP_SERV_LOGGER.warning("Start remote comp %s (Generator) step 2", key)
             yield await self.get_layout_dict(key, prefixes)
             while True:
                 try:
@@ -374,7 +380,6 @@ class RemoteComponentService:
             ev: AppEvent = send_task.result()
             if ev.is_loopback:
                 raise NotImplementedError("loopback not implemented")
-            # print(app_obj.mounted_app_meta, robj)
             if app_obj.mounted_app_meta is None:
                 # we got app event, but
                 # remote component isn't mounted, ignore app event

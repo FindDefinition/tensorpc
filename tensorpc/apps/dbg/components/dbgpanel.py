@@ -459,6 +459,8 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _unmount_remote_server_apps(self):
         await self._remote_comp_container.set_new_layout([])
+        await self._remote_comp_tv_container.set_new_layout([])
+
         await self._set_selected_remote_list(None)
 
     async def _set_selected_remote_list(self, selected_meta: Optional[DebugServerProcessInfo] = None):
