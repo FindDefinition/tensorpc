@@ -223,7 +223,7 @@ def serve(service_def: ServiceDef,
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     with server_core.enter_global_context():
-        with server_core.enter_exec_context():
+        with server_core.enter_exec_context(is_loopback_call=True):
             server_core.run_event(ServiceEventType.Init)
         service = RemoteObjectService(server_core, is_local, length)
         return serve_service(service, wait_time, port, length, is_local,
@@ -237,7 +237,7 @@ def serve_service_core(service_core: ProtobufServiceCore,
           process_id=-1,
           credentials=None):
     with service_core.enter_global_context():
-        with service_core.enter_exec_context():
+        with service_core.enter_exec_context(is_loopback_call=True):
             service_core.run_event(ServiceEventType.Init)
         service = RemoteObjectService(service_core, is_local, length)
         return serve_service(service, wait_time, service_core.server_meta.port, length, is_local,
@@ -261,7 +261,7 @@ def serve_with_http(service_def: ServiceDef,
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
     with server_core.enter_global_context():
-        with server_core.enter_exec_context():
+        with server_core.enter_exec_context(is_loopback_call=True):
             server_core.run_event(ServiceEventType.Init)
         kwargs = {
             "service": service,

@@ -177,8 +177,6 @@ class StdRegistry:
         backend: str = "js",
     ) -> Optional[StdRegistryItem]:
         check_items = self.global_dict
-        if dcls not in self._type_to_item:
-            return None
         for _, item in check_items.items():
             if item.backend is not None and item.backend != backend:
                 continue

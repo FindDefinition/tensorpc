@@ -39,7 +39,7 @@ class WorkersStatusBox(mui.DataFlexBox):
                                 margin="2px")
         self._box_template.bind_fields(
             backgroundColor="color",
-            animation="where(num_bkpt_proc > `0`, 'animateOutline 3s ease infinite', 'none')",
+            animation="where(num_bkpt_proc > 0, 'animateOutline 3s ease infinite', 'none')",
             # border=
             # f"where(num_bkpt_proc > `0`, '2px solid red', where(selected, '2px solid lightpink', '2px solid transparent'))",
             border=

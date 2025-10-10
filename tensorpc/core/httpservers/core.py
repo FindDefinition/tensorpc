@@ -345,7 +345,7 @@ class WebsocketHandler:
         self.new_event_ev = asyncio.Event()
         self.shutdown_ev = service_core.async_shutdown_event
         self._shutdown_task: Optional[asyncio.Task] = None
-        with service_core.enter_exec_context():
+        with service_core.enter_exec_context(is_loopback_call=True):
             service_core.service_units.init_service(init_service_has_websocket_only=True)
         self.all_ev_providers = service_core.service_units.get_all_event_providers(
         )
@@ -409,7 +409,7 @@ class WebsocketHandler:
         conn_st_ev = asyncio.Event()
         # wait at most 100 rpcs
         conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
-        with service_core.enter_exec_context():
+        with service_core.enter_exec_context(is_loopback_call=True):
             try:
                 await service_core.service_units.run_event_async(
                     ServiceEventType.WebSocketOnConnect, client)

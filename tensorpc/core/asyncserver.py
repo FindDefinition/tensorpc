@@ -273,7 +273,7 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
 
         url = '[::]:{}'.format(port)
         with server_core.enter_global_context():
-            with server_core.enter_exec_context():
+            with server_core.enter_exec_context(is_loopback_call=True):
                 await server_core._init_async_members()
                 await server_core.run_event_async(ServiceEventType.Init)
             service = AsyncRemoteObjectService(server_core, is_local, length)
@@ -295,7 +295,7 @@ async def run_exit_async(server_core: ProtobufServiceCore):
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)
         with server_core.enter_global_context():
-            with server_core.enter_exec_context():
+            with server_core.enter_exec_context(is_loopback_call=True):
                 server_core.async_shutdown_event.set()
                 async with server_core._shutdown_handler_lock:
                     if not server_core._is_exit_async_run:
@@ -315,7 +315,7 @@ async def serve_async(sc: ProtobufServiceCore,
                       max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     server_core = sc
     with server_core.enter_global_context():
-        with server_core.enter_exec_context():
+        with server_core.enter_exec_context(is_loopback_call=True):
             await server_core._init_async_members()
             await server_core.run_event_async(ServiceEventType.Init)
         service = AsyncRemoteObjectService(server_core, is_local, length)
