@@ -470,6 +470,7 @@ class NodeWithSSHBase(RunnableNodeBase):
         self.running_driver_id = ""
 
         self.session_identify_key = None
+        self._cur_cmd: Optional[str] = None
 
     @property
     def terminal_state(self):
@@ -1196,17 +1197,25 @@ class AppNode(CommandNode, DataStorageNodeBase):
         cfg_encoded_compressed = base64.b64encode(gzip.compress(json.dumps(cfg).encode("utf-8")))
         return serv_name, cfg_encoded_compressed.decode("utf-8")
 
-    async def run_command(self,
-                          newenvs: Optional[Dict[str, Any]] = None,
-                          cmd_renderer: Optional[Callable[[str], str]] = None):
+    def _get_app_run_cmd(self):
         serv_name, cfg_encoded = self._get_cfg_encoded()
-        # TODO only use http port
         cmd = (f" python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "
                f"--serv_config_b64 '{cfg_encoded}' "
                f"--serv_config_is_gzip=True")
+        return cmd
+
+    async def run_command(self,
+                          newenvs: Optional[Dict[str, Any]] = None,
+                          cmd_renderer: Optional[Callable[[str], str]] = None):
+        # TODO only use http port
+        cmd = self._get_app_run_cmd()
         await self.input_queue.put(cmd + "\n")
 
+    def is_running(self):
+        serv_name, cfg_encoded = self._get_cfg_encoded()
+        part_of_cmd = f"python -m tensorpc.serve {serv_name}"
+        return super().is_running() and part_of_cmd in self._cur_cmd
 
 _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "command": CommandNode,
@@ -2043,6 +2052,12 @@ class Flow:
 
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
+                if event.type == CommandEventType.CURRENT_COMMAND:
+                    if event.arg is not None:
+                        parts = event.arg.decode("utf-8").split(";")
+                        node._cur_cmd = ";".join(parts[:-1])
+                        APP_SERV_LOGGER.warning(f"cmd: {node._cur_cmd}")
+
                 if event.type == CommandEventType.COMMAND_OUTPUT_START:
                     if isinstance(node, CommandNode):
                         if event.arg is not None:
@@ -2051,6 +2066,7 @@ class Flow:
                             ):
                                 node._start_record_stdout = True
                 if event.type == CommandEventType.COMMAND_COMPLETE:
+                    node._cur_cmd = ""
                     if isinstance(node, CommandNode):
                         if node._start_record_stdout:
                             res = node.get_previous_cmd_result()
