@@ -11,7 +11,7 @@ from tensorpc.dock.components.three.event import KeyboardHoldEvent, PointerEvent
 from tensorpc.core.pfl.backends.js import ColorUtil, Math, MathUtil
 import tensorpc.core.datamodel as D
 
-MAX_MATRIX_SIZE = 512 * 256
+MAX_MATRIX_SIZE = 2048 * 256
 
 @dataclasses.dataclass(kw_only=True, config=dataclasses.PyDanticConfigForAnyObject)
 class Label:

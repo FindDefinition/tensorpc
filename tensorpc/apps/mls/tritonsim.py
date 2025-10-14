@@ -20,6 +20,7 @@ import watchdog.events
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
 import dataclasses as dataclasses_plain
+from tensorpc.apps.mls.backends._triton.runtime import TritonInlineRunEnv
 from tensorpc.core.astex.sourcecache import SCDItem, SourceChangeDiffCache
 from tensorpc.apps.mls import tsim
 from tensorpc.apps.mls.components.global_mem import Label, MatrixPanel, GlobalMemContainer, GlobalMemoryModel, Matrix, layout_table_inplace
@@ -441,6 +442,15 @@ class _WatchDogForKernelFile(watchdog.events.FileSystemEventHandler):
                 self._ignore_mtime = cur_mtime
                 return self._on_modified(event)
 
+def _temp_module_path_getter(fn: Any, path_editor: str, code_editor: str):
+    mod = inspect.getmodule(fn)
+    assert mod is not None, "module_code_path_getter must be provided if func isn't a module function"
+    path = inspect.getabsfile(mod)
+    if Path(path).resolve() == Path(path_editor).resolve():
+        return code_editor, path_editor
+    module_code = inspect.getsource(mod)
+    return module_code, inspect.getabsfile(mod)
+
 
 @dataclasses_plain.dataclass
 class TritonKernelManagerState:
@@ -482,7 +492,10 @@ class TritonKernelManagerState:
 
     def switch_lib_in_same_file(self, new_fn_name: str):
         new_fn = self.module_dict[new_fn_name]
-        runner = tritonstd.parse_triton_compilable_to_runner(new_fn, do_meta_eval=True, module_code_path_getter=lambda x: (self.content, self.path))
+        runner = tritonstd.parse_triton_compilable_to_runner(new_fn, do_meta_eval=True, 
+            # module_code_path_getter=lambda x: (self.content, self.path)
+            module_code_path_getter=partial(_temp_module_path_getter, path_editor=self.path, code_editor=self.content)
+            )
         # print(ast.ret_st)
         lib = runner._library
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
@@ -500,7 +513,8 @@ class TritonKernelManagerState:
         self.mapper_new_to_old = None
 
 class TritonKernelManager:
-    def __init__(self, item: AstCacheItem, path: str, lineno: int, fn_name: Optional[str] = None, bkpts: Optional[list[mui.MonacoBreakpoint]] = None):
+    def __init__(self, item: AstCacheItem, path: str, lineno: int, fn_name: Optional[str] = None, bkpts: Optional[list[mui.MonacoBreakpoint]] = None,
+            fixed_inline_env: Optional[TritonInlineRunEnv] = None):
         self._compiled_tmp_file_path: Optional[str] = None
         if fn_name is None:
             func_nodes = find_toplevel_func_node_container_by_lineno(cast(ast.Module, item.tree), lineno)
@@ -510,8 +524,9 @@ class TritonKernelManager:
             assert isinstance(fn_node, ast.FunctionDef), "Function node must be a FunctionDef"
 
             fn_name = fn_node.name
-        self.state = self._get_state_from_code(path, item.content, fn_name, bkpts)
+        self.state = self._get_state_from_code(path, item.content, fn_name, bkpts, fixed_inline_env)
         self._runner_task_ev = asyncio.Event()
+        self._fixed_inline_env = fixed_inline_env
 
     @property 
     def grid_size(self):
@@ -528,10 +543,11 @@ class TritonKernelManager:
         self.state.stop_watchdog()
 
     async def validate(self):
-        await self.runner.copy().validate_kernel_by_test_data(self.state.fn)
+        await self.runner.copy().validate_kernel_by_test_data(self.state.fn, external_inline_env=self._fixed_inline_env)
 
     async def _run_triton_bench(self):
-        _, _, compile_info = await self.runner.bench_kernel_in_triton_process(self.state.fn)
+        _, _, compile_info = await self.runner.bench_kernel_in_triton_process(self.state.fn,
+            ext_inline_env=self._fixed_inline_env)
         return compile_info
 
     async def run_triton_bench_sync(self):
@@ -553,7 +569,7 @@ class TritonKernelManager:
             mod_dict = importlib.import_module(module_import_path).__dict__
         fn_options: list[str] = []
         for k, v in mod_dict.items():
-            v = tritonstd._may_triton_func(v)
+            v = tritonstd.may_triton_func(v)
             meta = pfl.get_compilable_meta(v)
             
             if meta is not None and isinstance(meta, tritonstd.TritonSimFuncMeta):
@@ -587,11 +603,14 @@ class TritonKernelManager:
         mod_dict = module.__dict__
         return mod_dict
 
-    def _get_state_from_code(self, path: str, code: str, fn_name: str, bkpts: Optional[list[mui.MonacoBreakpoint]] = None):
+    def _get_state_from_code(self, path: str, code: str, fn_name: str, 
+            bkpts: Optional[list[mui.MonacoBreakpoint]] = None,
+            fixed_inline_env: Optional[TritonInlineRunEnv] = None):
         mod_dict, fn_names = self._get_module_dict_init(path, code)
         fn = mod_dict[fn_name]
-        runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, module_code_path_getter=lambda x: (code, path))
-        # print(ast.ret_st)
+        runner = tritonstd.parse_triton_compilable_to_runner(fn, do_meta_eval=True, 
+            module_code_path_getter=partial(_temp_module_path_getter, path_editor=path, code_editor=code),
+            external_inline_env=fixed_inline_env)
         lib = runner._library
         finder_dict: dict[str, pfl.PFLTreeNodeFinder] = {}
         expr_finder_dict: dict[str, pfl.PFLTreeExprFinder] = {}
@@ -624,13 +643,13 @@ class TritonKernelManager:
     def recompile(self, new_code: str):
         self._runner_task_ev.clear()
         prev_state = self.state
-        self.state = self._get_state_from_code(self.state.path, new_code, self.state.cur_fn_name, self.state.bkpts)
+        self.state = self._get_state_from_code(self.state.path, new_code, self.state.cur_fn_name, self.state.bkpts, self._fixed_inline_env)
         self.state.watchdog_observer = prev_state.watchdog_observer
         self.state.watchdog_watcher = prev_state.watchdog_watcher
         
     def run_to_use_task(self, grid_idxes: Sequence[int], lineno: int, thread_id: Optional[str] = None):
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
-        stmt = self.state.lib.find_stmt_by_path_lineno(self.state.lib.get_module_by_func(unwrapped_fn).uid, lineno)
+        stmt = self.state.lib.find_stmt_by_path_lineno(self.state.lib.get_module_by_func(unwrapped_fn).compile_info.path, lineno)
         if stmt is not None:
             if self.runner.has_paused_thread():
                 assert thread_id is not None, "Thread ID must be provided when runner is paused."
@@ -639,7 +658,10 @@ class TritonKernelManager:
             else:
                 self._runner_task_ev.clear()
                 with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
-                    inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
+                    if self._fixed_inline_env is not None:
+                        inline_env = self._fixed_inline_env
+                    else:
+                        inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
                     # use data in inline_env to create tensor visualization.
                     func_node = self.runner._library.get_compiled_unit_specs(unwrapped_fn)[0]
                     self._runner_task = asyncio.create_task(self.runner.run_until(lineno, func_node.uid, 
@@ -648,15 +670,17 @@ class TritonKernelManager:
         return None 
 
     async def run_expr_trace_kernel_test(self):
-        return await self.state.expr_trace_runner.run_kernel_test(self.state.fn)
-
+        return await self.state.expr_trace_runner.run_kernel_test(self.state.fn, external_inline_env=self._fixed_inline_env)
 
     async def run_single_block(self, grid_idxes: Sequence[int]):
         unwrapped_fn = self.runner.get_unwrapped_triton_fn(self.state.fn)
         assert not self.runner.is_running(), "Runner is running, cannot run single block."
         self._runner_task_ev.clear()
         with tsim.enter_tensorsim_context(grid_idxes, self.runner.triton_sim_info.grid_size):
-            inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
+            if self._fixed_inline_env is not None:
+                inline_env = self._fixed_inline_env
+            else:
+                inline_env = self.runner.get_triton_fn_inline_env(unwrapped_fn, tritonstd.TritonSimExecType.SIM)
             # use data in inline_env to create tensor visualization.
             func_node = self.runner._library.get_compiled_unit_specs(unwrapped_fn)[0]
             self._runner_task = asyncio.create_task(self.runner.run_func(func_node.uid, 
@@ -761,6 +785,7 @@ class TritonSimAppModel:
     bkpts: dict[str, list[mui.MonacoBreakpoint]] = dataclasses.field(default_factory=dict)
     fn_options: Annotated[list[Any], DraftFieldMeta(is_store_external=True)]  = dataclasses.field(default_factory=list)
     cur_fn_option: Annotated[Optional[Any], DraftFieldMeta(is_store_external=True)] = None
+    is_external_kernel: bool = False 
 
 class TritonSim:
     @mark_create_layout
@@ -941,7 +966,7 @@ class TritonSim:
     async def _handle_app_dm_storage_fetched(self, prev_model: TritonSimAppModel):
         # fetch from storage
         model = self.app_dm.model
-        if model.path is not None and model.fn_name is not None and model.lineno is not None:
+        if model.path is not None and model.fn_name is not None and model.lineno is not None and not model.is_external_kernel:
             try:
                 runner = TritonKernelManager(
                     self._ast_cache.query_path(Path(model.path)),
@@ -1137,6 +1162,20 @@ class TritonSim:
     async def _handle_thread_changed(self, new_threads: dict[str, PFLAsyncThread]):
         await self._sync_threads_status()
 
+    async def launch_external_sim(self, path: str, lineno: int, inline_env: TritonInlineRunEnv):
+        item = self._ast_cache.query_path(Path(path))
+        runner = TritonKernelManager(item, path, lineno, fixed_inline_env=inline_env)
+        async with self.app_dm.draft_update() as draft:
+            draft.path = path
+            draft.fn_name = runner.state.cur_fn_name
+            draft.lineno = lineno
+            draft.fn_options = [{"label": fn_name} for fn_name in runner.state.fn_names]
+            draft.cur_fn_option = {
+                "label": runner.state.cur_fn_name,
+            }
+            draft.is_external_kernel = True
+        await self._init_new_runner(runner, lineno)
+
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):
         if data.type == VscodeTensorpcMessageType.PFLLaunchSimulation:
             if self._runner is not None:
@@ -1160,6 +1199,7 @@ class TritonSim:
                 draft.cur_fn_option = {
                     "label": runner.state.cur_fn_name,
                 }
+                draft.is_external_kernel = False
             await self._init_new_runner(runner, lineno)
         elif data.type == VscodeTensorpcMessageType.PFLRunExprTrace:
             if self._runner is None:
@@ -1881,6 +1921,9 @@ class TritonSim:
         self._runner.runner.sync_breakpoints(bkpts_desc)
         async with self.app_dm.draft_update() as draft:
             draft.bkpts[cur_path] = bkpts
+
+    async def set_triton_compile_info(self, func_id: str, info: tritonstd.TritonKernelCompileInfo):
+        await self._triton_viewer.set_triton_compile_info(func_id, info)
 
 def _main():
     from tensorpc.dock.core.datamodel import _compile_pfllibrary

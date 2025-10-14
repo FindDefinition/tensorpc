@@ -12,7 +12,7 @@ from typing_extensions import Self
 
 from tensorpc.core.pfl.pfl_ast import BinOpType, CompareType, UnaryOpType
 from tensorpc.apps.mls.tsim.core import DTypeEnum, get_default_base_dtype, get_default_float_dtype, get_default_int_dtype, get_tensorsim_context, NumpyReduceType
-from .core import get_sim_mode, TensorSimMode
+from .core import get_sim_mode, TensorSimMode, get_tensorsim_context_checked
 
 @dataclasses.dataclass
 class SimTensorStorage:
@@ -252,6 +252,9 @@ class SimTensorBase:
     def dtype_promotion(*args: int):
         return DTypeEnum.dtype_promotion(*args)
 
+    def is_logicsim_ignore(self) -> bool:
+        return get_sim_mode() == TensorSimMode.LOGIC_ONLY and (DTypeEnum(self.dtype).is_floating_type() and not self.is_pointer())
+
     def is_floating(self) -> bool:
         return DTypeEnum(self.dtype).is_floating_type()
 
@@ -391,7 +394,7 @@ class SimTensorBase:
         return res
 
     def cumsum(self, dim: int):
-        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
+        if self.storage is None or self.is_logicsim_ignore():
             return dataclasses.replace(self)
         new_data = np.cumsum(self.storage.data, axis=dim)
         new_storage = self.storage.clone()
@@ -403,7 +406,7 @@ class SimTensorBase:
     def _unary_base(self, op_type: UnaryOpType) -> Self:
         if self.storage is None:
             return dataclasses.replace(self, shape=list(map(int, self.shape)))
-        if get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating():
+        if self.is_logicsim_ignore():
             new_data = self.storage.data
         else:
             if op_type == UnaryOpType.UADD:
@@ -449,10 +452,10 @@ class SimTensorBase:
                 assert self.is_integer() or self.is_unsigned(), "Pointer tensor can only be operated with integer or unsigned tensor"
         if is_pointer:
             assert op_type in (BinOpType.ADD, BinOpType.SUB), "Pointer tensors can only be added or subtracted"
-        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
+        if self.storage is None or self.is_logicsim_ignore():
             if isinstance(other, SimTensorBase):
-                if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
-                    assert other.is_floating()
+                if self.is_logicsim_ignore():
+                    assert other.is_logicsim_ignore()
                 if op_type == BinOpType.MATMUL:
                     assert len(self.shape) >= 2 and len(other.shape) >= 2
                     new_shape_no_mm = np.broadcast_shapes(self.shape[:-2], other.shape[:-2])
@@ -477,14 +480,14 @@ class SimTensorBase:
                 new_shape = self.shape
                 new_dtype = self.dtype_promotion(self.dtype, other_dtype)
             if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
-                new_data = np.empty(new_shape, dtype=self.dtype_to_np(new_dtype))
+                ctx = get_tensorsim_context_checked()
+                new_data = ctx._cached_empty(new_shape, dtype=self.dtype_to_np(new_dtype))
                 new_storage = SimTensorStorage(data=new_data, indices={})
             else:
                 new_storage = None
             return dataclasses.replace(res_replace_tgt, shape=list(map(int, new_shape)), dtype=new_dtype, storage=new_storage)
         if isinstance(other, SimTensorBase):
-            if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
-                assert not other.is_floating()
+            assert not other.is_logicsim_ignore()
             assert other.storage is not None 
             other_data = other.storage.data
             # new_dtype = self.dtype_promotion(self.dtype, other.dtype)
@@ -703,6 +706,13 @@ class SimTensor(SimTensorBase):
     def _reduce_meta_only(self, axes: Optional[Sequence[int]] = None, keepdims: bool = False) -> Self:
         if axes is None:
             axes = list(range(len(self.shape)))
+        else:
+            axes = list(axes)
+        for i in range(len(axes)):
+            # handle negative axes
+            if axes[i] < 0:
+                axes[i] += len(self.shape)
+            assert 0 <= axes[i] < len(self.shape), f"Axis {axes[i]} is out of bounds for tensor of dimension {len(self.shape)}"
         # only meta inference is supported
         new_shape: list[int] = []
         for i, dim in enumerate(self.shape):
@@ -710,7 +720,7 @@ class SimTensor(SimTensorBase):
                 new_shape.append(dim)
             elif keepdims:
                 new_shape.append(1)
-        if get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating():
+        if self.is_logicsim_ignore():
             new_data = np.empty(new_shape, dtype=self.dtype_to_np(self.dtype))  # type: ignore
             new_storage = SimTensorStorage(data=new_data, indices={})
         else:
@@ -729,7 +739,7 @@ class SimTensor(SimTensorBase):
             axis = tuple([axis])
         elif isinstance(axis, Sequence):
             axis = tuple(axis)
-        if self.storage is None or (get_sim_mode() == TensorSimMode.LOGIC_ONLY and self.is_floating()):
+        if self.storage is None or self.is_logicsim_ignore():
             # logic only mode don't support argmax/argmin.
             assert rtype != NumpyReduceType.ARGMAX and rtype != NumpyReduceType.ARGMIN, "argmax/argmin is not supported in logic only mode"
             return self._reduce_meta_only(axis, keepdims)
@@ -971,7 +981,7 @@ def ones(shape: Sequence[int], dtype: int) -> SimTensor:
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
 
-def empty(shape: Sequence[int], dtype: int) -> SimTensor:
+def empty(shape: Sequence[int], dtype: int, *, _internal_cached_empty: bool = False) -> SimTensor:
     """
     Create an empty tensor with uninitialized data.
     """
@@ -986,7 +996,11 @@ def empty(shape: Sequence[int], dtype: int) -> SimTensor:
     if meta_only:
         # only meta inference is supported
         return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=None)
-    data = np.empty(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
+    if _internal_cached_empty:
+        ctx = get_tensorsim_context_checked()
+        data = ctx._cached_empty(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
+    else:
+        data = np.empty(shape, dtype=DTypeEnum(dtype).to_numpy_dtype())
     storage = SimTensorStorage(data=data)
     return SimTensor(shape=list(map(int, shape)), dtype=dtype, storage=storage)
 

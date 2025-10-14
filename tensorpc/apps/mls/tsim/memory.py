@@ -12,8 +12,11 @@ from tensorpc.apps.mls.tsim.core import (
     DTypeEnum,
     TensorSimIoMatrixInfo,
     TensorSimIoOp,
+    TensorSimMode,
     get_default_base_dtype,
+    get_sim_mode,
     get_tensorsim_context,
+    get_tensorsim_context_checked,
 )
 from .tensor import (
     SimTensor,
@@ -233,7 +236,14 @@ class SimMemoryStorage(SimTensorStorage):
         if DTypeEnum(pointer.dtype).to_numpy_dtype() != block_data.dtype:
             raise NotImplementedError
 
-        output = empty([*pointer.shape, pointer.num_element], pointer.dtype)
+        if get_sim_mode() == TensorSimMode.LOGIC_ONLY and pointer.is_floating():
+            output = empty([*pointer.shape, pointer.num_element], pointer.dtype, _internal_cached_empty=True)
+            if pointer.num_element == 1:
+                output = output[..., 0]
+            return output
+        else:
+            output = empty([*pointer.shape, pointer.num_element], pointer.dtype)
+        
         output_data = output.get_storage_checked().data
         data_raw = block_data.view(pointer.dtype_to_np(pointer.dtype)).reshape(
             -1, pointer.num_element)
@@ -850,21 +860,36 @@ class SimTensorBlockPointer:
             offsets = [
                 self.offset[i] + offsets[i] for i in range(len(self.offset))
             ]
-        offsets_blocks = np.meshgrid(
-            *[
-                np.arange(o, o + s, dtype=np.int64)
-                for o, s in zip(offsets, self.block_shape)
-            ],
-            indexing="ij",
-        )
+        if get_sim_mode() == TensorSimMode.LOGIC_ONLY:
+            ctx = get_tensorsim_context_checked()
+            if tuple(self.block_shape) not in ctx._logic_only_cached_offsets:
+                offsets_blocks = np.meshgrid(
+                    *[
+                        np.arange(0, s, dtype=np.int64)
+                        for s in self.block_shape
+                    ],
+                    indexing="ij",
+                )
+
+                ctx._logic_only_cached_offsets[tuple(self.block_shape)] = offsets_blocks
+            else:
+                offsets_blocks = ctx._logic_only_cached_offsets[tuple(self.block_shape)]
+        else: 
+            offsets_blocks = np.meshgrid(
+                *[
+                    np.arange(0, s, dtype=np.int64)
+                    for s in self.block_shape
+                ],
+                indexing="ij",
+            )
         offset_data = cast(
             np.ndarray,
-            sum(o * s for o, s in zip(offsets_blocks, self.strides)))
-        pointer_tensor = pointer_base + from_numpy(offset_data)
+            sum((ob + o) * s for ob, o, s in zip(offsets, offsets_blocks, self.strides)))
         mask_arr = np.logical_and.reduce([
             np.logical_and(o >= 0, o < s)
             for o, s in zip(offsets_blocks, self.shape)
         ])
+        pointer_tensor = pointer_base + from_numpy(offset_data)
         return pointer_tensor, from_numpy(mask_arr)
 
     def load(

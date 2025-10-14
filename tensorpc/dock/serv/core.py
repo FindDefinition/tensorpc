@@ -470,7 +470,7 @@ class NodeWithSSHBase(RunnableNodeBase):
         self.running_driver_id = ""
 
         self.session_identify_key = None
-        self._cur_cmd: Optional[str] = None
+        self._cur_cmd: str = ""
 
     @property
     def terminal_state(self):
@@ -1958,7 +1958,7 @@ class Flow:
         res = []
         for n in gh.nodes:
             if isinstance(n, AppNode):
-                if n.is_session_started() or not n.is_running():
+                if not n.is_session_started() or not n.is_running():
                     continue
                 node_desp = self._get_node_desp(graph_id, n.id)
                 assert node_desp.driver is not None, f"you must select a driver for app node first"
@@ -2153,7 +2153,6 @@ class Flow:
         node.terminal_close_ts = -1
         if width >= 0 and height >= 0:
             await self.ssh_change_size(graph_id, node_id, width, height)
-        print("TERMINAL STATE SIZE", len(node.terminal_state) / 1024 / 1024)
         return node.terminal_state
 
     async def command_node_input(self, graph_id: str, node_id: str, data: str):

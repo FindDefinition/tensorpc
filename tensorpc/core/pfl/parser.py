@@ -207,8 +207,9 @@ class PFLLibrary:
         # print(module_key, self._modules.keys())
         return self._modules[module_key]
 
-    def find_stmt_by_path_lineno(self, module_id: str, lineno: int):
-        finder = self._cached_get_stmt_finder()[module_id]
+    def find_stmt_by_path_lineno(self, module_path: str, lineno: int):
+        finders = self._cached_get_stmt_finder()
+        finder = finders[module_path]
         return finder.find_nearest_node_by_line(lineno)
 
     @property
@@ -293,11 +294,13 @@ class MapAstNodeToConstant(ast.NodeVisitor):
 
     def __init__(self,
                  func_globals: dict[str, Any],
+                 global_or_nonlocal_names: set[str],
                  error_ctx: PFLErrorFormatContext,
                  backend: str = "js",
                  var_preproc: Callable[[Any], PFLProcessedVarMeta] = default_pfl_var_proc):
         super().__init__()
         self.func_globals = {**func_globals}
+        self._global_or_nonlocal_names = global_or_nonlocal_names
         for k, v in _SUPPORTED_PYTHON_BUILTINS.items():
             if k not in func_globals:
                 self.func_globals[k] = v
@@ -331,6 +334,7 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         parts_node: list[ast.AST] = []
         cur_node = node
         name_found = False
+        is_external_name: bool = False
         while isinstance(cur_node, (ast.Attribute, ast.Name)):
             if isinstance(cur_node, ast.Attribute):
                 parts.append(cur_node.attr)
@@ -340,8 +344,9 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 parts.append(cur_node.id)
                 parts_node.append(cur_node)
                 name_found = True
+                is_external_name = cur_node.id in self._global_or_nonlocal_names or cur_node.id in _SUPPORTED_PYTHON_BUILTINS
                 break
-        if not name_found:
+        if not name_found or not is_external_name:
             return self.generic_visit(node)
 
         parts = parts[::-1]
@@ -542,14 +547,15 @@ class PFLParser:
                                 self_annotype)
                         meta: Optional[
                             PFLCompileFuncMeta] = item.var_meta.compilable_meta
+                        new_st = parse_cache.cached_parse_func(item.value,
+                                            is_bound_method=item.bound_self
+                                            is not None,
+                                            self_type=self_annotype,
+                                            ext_preproc_res=item.var_meta)
+                        new_finfo = new_st.get_func_info_checked()
+
                         if meta is None or not meta.need_delayed_processing(
                         ):
-                            new_st = parse_cache.cached_parse_func(item.value,
-                                                is_bound_method=item.bound_self
-                                                is not None,
-                                                self_type=self_annotype,
-                                                ext_preproc_res=item.var_meta)
-                            new_finfo = new_st.get_func_info_checked()
                             creq = ctx.enqueue_func_compile(
                                 item.value,
                                 new_finfo,
@@ -564,10 +570,9 @@ class PFLParser:
                                           st=new_st)
                             res.st.compiled_uid = creq.get_func_compile_uid()
                         else:
-                            new_st = PFLExprInfo(PFLExprType.FUNCTION)
                             req = ctx.get_compile_req(
                                 item.value,
-                                None,
+                                new_finfo,
                                 meta,
                                 is_method_def=False,
                                 self_type=self_type,
@@ -1474,6 +1479,7 @@ class PFLParser:
         func_code_lines = expr_str.splitlines()
         transformer = MapAstNodeToConstant(
             constants,
+            set(constants.keys()),
             PFLErrorFormatContext(func_code_lines),
             backend=self._backend,
             var_preproc=self._var_preproc)
@@ -1562,8 +1568,10 @@ class PFLParser:
                     child_node.col_offset += common_indent  # type: ignore
                 if hasattr(child_node, 'end_col_offset'):
                     child_node.end_col_offset += common_indent  # type: ignore
-
-        fn_globals = func.__globals__.copy()
+        closure = inspect.getclosurevars(func)
+        fn_globals_base = func.__globals__ | dict(closure.nonlocals)
+        global_nonlocal_names = set(closure.nonlocals.keys()) | set(closure.globals.keys())
+        fn_globals = fn_globals_base.copy()
         if req.bound_self is not None:
             # add "self" to globals
             assert req.bound_self is not None, "bound_self must not be None"
@@ -1575,12 +1583,12 @@ class PFLParser:
         # find funcdef
         transformer = MapAstNodeToConstant(
             fn_globals,
+            global_nonlocal_names,
             PFLErrorFormatContext(func_code_lines),
             backend=backend,
             var_preproc=self._var_preproc)
         transformer.visit(func_node)
-
-        anno_eval_globals = func.__globals__.copy()
+        anno_eval_globals = fn_globals_base.copy()
         outer_ctx = get_parse_context()
         if outer_ctx is not None:
             parse_ctx = PFLParseContext.from_outer_ctx(
@@ -1665,7 +1673,7 @@ class PFLParser:
         parse_cache = get_parse_cache_checked()
         # template dataclasses info is shared for all subsequence usage.
         _, module_path = self._module_code_path_getter(req.func_or_dcls)
-
+        assert req.info is not None
         if has_user_init:
             fn = req.func_or_dcls.__init__
             if req.meta.is_template:
@@ -1674,7 +1682,8 @@ class PFLParser:
                 else:
                     args_from_call = ([dcls_obj_type], {})
                 fn_req = ctx.get_compile_req(fn, None, req.meta, is_method_def=True, self_type=dcls_obj_type,
-                    args_from_call=args_from_call)
+                    args_from_call=args_from_call,
+                    local_ids=req.info._locals_ids)
                 fn_req.dcls_infer_field_type = True
                 compiled_func = self.parse_func_compile_req_to_pfl_ast(
                     fn_req, allow_inline_expand=allow_inline_expand)
@@ -1701,7 +1710,8 @@ class PFLParser:
                     new_finfo,
                     is_method_def=True,
                     self_type=dcls_obj_type,
-                    is_prop=False)
+                    is_prop=False,
+                    local_ids=req.info._locals_ids)
                 # parse 
                 cls_node.init_uid = creq.get_func_compile_uid()
                 # use func_info to store init function info
@@ -1732,7 +1742,8 @@ class PFLParser:
             if req.meta.is_template:
 
                 fn_req = ctx.get_compile_req(fn, None, req.meta, is_method_def=True, self_type=dcls_obj_type,
-                    args_from_call=req.args_from_call)
+                    args_from_call=req.args_from_call,
+                    local_ids=req.info._locals_ids)
                 # parse 
                 compiled_func = self.parse_func_compile_req_to_pfl_ast(
                     fn_req, allow_inline_expand=allow_inline_expand)
@@ -1749,7 +1760,8 @@ class PFLParser:
                     new_finfo,
                     is_method_def=True,
                     self_type=dcls_obj_type,
-                    is_prop=False)
+                    is_prop=False,
+                    local_ids=req.info._locals_ids)
                 cls_node.post_init_uid = creq.get_func_compile_uid()
 
         cls_node.st = dcls_type

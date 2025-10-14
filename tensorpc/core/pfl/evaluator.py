@@ -1330,6 +1330,8 @@ class PFLAsyncRunner:
                         await cancel_task(task)
                     break
                 wait_tasks = [new_thread_task, sd_task, *task_to_thread.keys()]
+        except asyncio.CancelledError:
+            raise
         finally:
             self._running_threads.clear()
             if exit_event is not None:

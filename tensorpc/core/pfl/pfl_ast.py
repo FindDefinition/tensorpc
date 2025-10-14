@@ -1512,9 +1512,14 @@ class PFLAttribute(PFLExpr):
                         assert inspecttools.isstaticmethod(
                             dcls_type, self.attr
                         ), f"{self.attr} of {dcls_type} must be staticmethod"
+                    local_ids = []
+                    if self.value.st.dcls_info is not None:
+                        local_ids = self.value.st.dcls_info._locals_ids
+
                     new_st = get_parse_cache_checked().cached_parse_func(
                         unbound_func, self_type=self_type,
-                        ext_preproc_res=prep_res)
+                        ext_preproc_res=prep_res,
+                        external_local_ids=local_ids)
                     if self_st_type is not None:
                         # bound method
                         new_st = new_st.get_bounded_type(self_st_type)
@@ -1529,15 +1534,26 @@ class PFLAttribute(PFLExpr):
                     self.st.is_stdlib = self.value.st.is_stdlib
                     if not self.value.st.is_stdlib:
                         # template/inline function need to be compiled in Call.
+                        ctx = get_parse_context_checked()
                         if not new_finfo.need_delayed_processing():
-                            ctx = get_parse_context_checked()
-                            creq = ctx.enqueue_func_compile(unbound_func, new_finfo,
-                                self_type=self_st_type, is_method_def=is_method_def,
-                                is_prop=is_prop)
                             # this is required when this attribute/name is treated as a function pointer.
                             # template/inline functions can't be used as function pointer, so no need 
                             # to set compiled_uid.
+                            creq = ctx.enqueue_func_compile(unbound_func, new_finfo,
+                                self_type=self_st_type, is_method_def=is_method_def,
+                                is_prop=is_prop)
+
                             self.st.compiled_uid = creq.get_func_compile_uid()
+                        else:
+                            creq = ctx.get_compile_req(
+                                unbound_func,
+                                new_finfo,
+                                new_finfo.compilable_meta,
+                                is_method_def=is_method_def,
+                                self_type=self_st_type,
+                                is_prop=is_prop)
+
+                            self.st.delayed_compile_req = creq
                     else:
                         self._update_std_func_meta(unbound_func)
         else:

@@ -298,6 +298,9 @@ class TensorSimContext:
 
         self._recorded_io_ops: list[TensorSimIoOp] = []
 
+        self._logic_only_cached_memory: dict[tuple[tuple[int, ...], np.dtype], Any] = {}
+        self._logic_only_cached_offsets: dict[tuple[int, ...], Any] = {}
+
     def get_flatted_grid_id(self) -> int:
         """
         Returns the flatted grid id, which is the linear index of the grid.
@@ -308,6 +311,18 @@ class TensorSimContext:
         for idx, size in zip(self.grid_id, self.grid_size):
             res = res * size + idx
         return res
+
+    def set_grid_id(self, grid_id: Sequence[int]):
+        # TODO simd group id set
+        assert len(grid_id) == len(self.grid_size), \
+            f"Grid id {grid_id} and size {self.grid_size} must have same length."
+        self.grid_id = grid_id
+
+    def _cached_empty(self, shape: Sequence[int], dtype: np.dtype):
+        key = (tuple(shape), dtype)
+        if key not in self._logic_only_cached_memory:
+            self._logic_only_cached_memory[key] = np.zeros(shape, dtype=dtype)
+        return self._logic_only_cached_memory[key]
 
 _TENSOR_SIM_CONTEXT: contextvars.ContextVar[
     Optional[TensorSimContext]] = contextvars.ContextVar("TensorSimContext",

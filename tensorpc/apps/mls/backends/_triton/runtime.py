@@ -19,17 +19,20 @@ from tensorpc.apps.mls.tsim.core import TensorSimConfig, TensorSimMode, get_tens
 from tensorpc.core import pfl
 import numpy as np
 import dataclasses
+from tensorpc.core import dataclass_dispatch as dataclasses_pydantic
 from typing import Annotated, Any, Callable, ClassVar, Optional, Type, TypeAlias, TypeVar, Union, cast, get_type_hints, overload
 from tensorpc.apps.mls import tsim
 from tensorpc.apps.mls.tsim import DTypeEnum
 import triton.language as tl
-
+from triton.compiler import CompiledKernel
 from tensorpc.core.annolib import Undefined
 from tensorpc.core.moduleid import get_object_type_from_module_id
 from tensorpc.core.pfl.core import PFLInlineRunEnv
+from tensorpc.dock.client import list_all_app_in_machine, list_all_running_apps_in_relay
 from tensorpc.utils.package_finder import find_submodule_from_file
 
 from .std import PointerScalarFloat, PointerScalarInt, PointerTensor, TensorDescriptor, Tensor, ConstExpr
+import rich.progress
 
 TRITON_VERSION_TUPLE = tuple(int(x) for x in triton.__version__.split(".")[:2])
 
@@ -54,7 +57,7 @@ def _triton_anno_transform(inferred: pfl.PFLExprInfo,
 
 
 
-@dataclasses.dataclass
+@dataclasses_pydantic.dataclass
 class TritonSimFuncMeta(pfl.PFLCompileFuncMeta):
     sim_kwargs: Optional[dict[str, Any]] = None
     real_kwargs: Optional[dict[str, Any]] = None
@@ -284,7 +287,7 @@ def _handle_triton_inline_data(
 
 
 
-@dataclasses.dataclass
+@dataclasses_pydantic.dataclass
 class TritonInlineRunEnv(PFLInlineRunEnv):
     raw_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
 
@@ -300,12 +303,12 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
         return TritonKernelRunner(self._library, self._init_inline_env)
 
     def get_unwrapped_triton_fn(self, key: Callable) -> Callable:
-        return _may_triton_func(key)
+        return may_triton_func(key)
 
     def get_triton_fn_inline_env(
             self, key: Union[str, Callable], exec_type: TritonSimExecType) -> TritonInlineRunEnv:
         if not isinstance(key, str):
-            key = _may_triton_func(key)
+            key = may_triton_func(key)
         kwargs = None 
         specs = self._library.get_compiled_unit_specs(key)
         assert len(specs) == 1 
@@ -330,7 +333,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
 
     async def run_kernel(self, fn: Any, grid_size: tuple[int, int, int],
                          global_mem: tsim.SimMemoryStorage, kwargs: dict[str, Any], reverse_grid: bool = True) -> None:
-        fn_no_jit = _may_triton_func(fn)
+        fn_no_jit = may_triton_func(fn)
 
         lib = self._library
         kwargs, _ = _validate_and_convert_triton_kwargs(kwargs, global_mem)
@@ -370,15 +373,18 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
     def run_kernel_in_executor(self, fn: Any, grid_size: tuple[int, int, int],
                                global_mem: tsim.SimMemoryStorage,
                                **kwargs) -> None:
-        fn_no_jit = _may_triton_func(fn)
+        fn_no_jit = may_triton_func(fn)
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(self._run_kernel_in_executor, fn_no_jit,
                                      grid_size, global_mem, kwargs)
             future.result()
 
-    async def run_kernel_test(self, fn: Any, reverse_grid: bool = True) -> TritonSimInfo:
-        fn_no_jit = _may_triton_func(fn)
-        inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
+    async def run_kernel_test(self, fn: Any, reverse_grid: bool = True, external_inline_env: Optional[PFLInlineRunEnv] = None) -> TritonSimInfo:
+        fn_no_jit = may_triton_func(fn)
+        if external_inline_env is not None:
+            inline_env = external_inline_env
+        else:
+            inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
         assert sim_info.global_mem is not None
         await self.run_kernel(fn_no_jit, sim_info.grid_size,
@@ -390,10 +396,14 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                            fn: Any,
                                            res_comparer: Optional[Callable[
                                                [Any, Any], Any]] = None,
-                                           run_triton: bool = False) -> None:
+                                           run_triton: bool = False,
+                                           external_inline_env: Optional[PFLInlineRunEnv] = None) -> None:
 
-        fn_no_jit = _may_triton_func(fn)
-        inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
+        fn_no_jit = may_triton_func(fn)
+        if external_inline_env is not None:
+            inline_env = external_inline_env
+        else:
+            inline_env = self.get_triton_fn_inline_env(fn_no_jit, TritonSimExecType.SIM)
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
         assert sim_info.global_mem is not None
         await self.run_kernel(fn_no_jit, sim_info.grid_size,
@@ -411,7 +421,7 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
             await self.validate_kernel_in_triton_process(fn)
 
     def _get_triton_run_args(self, fn: Any):
-        fn_no_jit = _may_triton_func(fn)
+        fn_no_jit = may_triton_func(fn)
         path = inspect.getfile(fn_no_jit)
         module_import_path = find_submodule_from_file(path)
         is_func_id = True
@@ -441,7 +451,8 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
     async def bench_kernel_in_triton_process(self, fn: Any,
                                             warming_up: int = 2,
                                             run_cnt: int = 3,
-                                            override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None):
+                                            override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None,
+                                            ext_inline_env: Optional[TritonInlineRunEnv] = None):
         # TODO: this don't support ptr of ptr in real triton sim currently.
         assert isinstance(
             fn, (triton.JITFunction,
@@ -457,7 +468,8 @@ class TritonKernelRunner(pfl.PFLAsyncRunner):
                                               fn_name, is_func_id,
                                               warming_up,
                                               run_cnt,
-                                              override_kwargs_set)
+                                              override_kwargs_set,
+                                              ext_inline_env)
 
 def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
     if is_func_id:
@@ -479,20 +491,26 @@ def _get_triton_fn(func_id_or_path: str, fn_name: str, is_func_id: bool):
     return fn
 
 def _get_triton_run_datas_from_path(func_id_or_path: str, fn_name: str,
-                             is_func_id: bool, override_kwargs: Optional[dict[str, Any]] = None):
+                             is_func_id: bool, override_kwargs: Optional[dict[str, Any]] = None,
+                             ext_inline_env: Optional[TritonInlineRunEnv] = None):
     import torch
     fn = _get_triton_fn(func_id_or_path, fn_name, is_func_id)
-    fn_unwrapped = _may_triton_func(fn)
+    fn_unwrapped = may_triton_func(fn)
     fn_sig = inspect.signature(fn_unwrapped)
     all_triton_param_names = set(fn_sig.parameters.keys())
-    fn_meta = pfl.get_compilable_meta(fn_unwrapped)
-    assert isinstance(fn_meta, TritonSimFuncMeta), "fn must be a triton compilable function"
-    assert fn_meta.inline_run_env_fn is not None, "inline_run_env_fn must be set for real run."
-    if fn_meta.real_kwargs is not None:
-        inline_env = fn_meta.inline_run_env_fn(**fn_meta.real_kwargs)
+    fn_meta = None 
+    if ext_inline_env is None:
+        fn_meta = pfl.get_compilable_meta(fn_unwrapped)
+        assert isinstance(fn_meta, TritonSimFuncMeta), "fn must be a triton compilable function"
+        assert fn_meta.inline_run_env_fn is not None, "inline_run_env_fn must be set for real run."
+        if fn_meta.real_kwargs is not None:
+            inline_env = fn_meta.inline_run_env_fn(**fn_meta.real_kwargs)
+        else:
+            inline_env = fn_meta.inline_run_env_fn()
+        kwargs = inline_env.kwargs
     else:
-        inline_env = fn_meta.inline_run_env_fn()
-    kwargs = inline_env.kwargs
+        inline_env = ext_inline_env
+        kwargs = inline_env.raw_kwargs
     kwargs = kwargs.copy()
     if override_kwargs is not None:
         kwargs.update(override_kwargs)
@@ -534,7 +552,7 @@ class TritonKernelCompileInfo:
     metadata: dict[str, Any]
     best_config: Any = None
 
-def _get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) -> TritonKernelCompileInfo:
+def get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) -> TritonKernelCompileInfo:
     from triton.runtime.driver import driver
 
     device = driver.active.get_current_device()
@@ -552,6 +570,11 @@ def _get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) -
     # Get the first cached compilation (or iterate over all)
     compiled_kernel = cache_entry[key]
 
+    res = get_triton_compile_info_from_res(compiled_kernel, log_ptxas_info)
+    res.best_config = best_config
+    return res
+
+def get_triton_compile_info_from_res(compiled_kernel: CompiledKernel, log_ptxas_info: bool = False) -> TritonKernelCompileInfo:
     # Access the 'asm' dictionary
     asm_dict = compiled_kernel.asm.copy()
     for k in list(asm_dict.keys()):
@@ -581,18 +604,19 @@ def _get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) -
                 universal_newlines=True) 
             print(out)
 
-    return TritonKernelCompileInfo(asm_dict, metadata_dict, best_config)
-
+    return TritonKernelCompileInfo(asm_dict, metadata_dict)
 
 def _run_triton_fn_for_validation(func_id_or_path: str, fn_name: str,
                                   is_func_id: bool):
     fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
         func_id_or_path, fn_name, is_func_id)
     sim_info = inline_env.get_userdata_typed(TritonSimInfo)
-    assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
-    fn[sim_info.grid_size_for_triton](**kwargs_tt)
+    if sim_info.grid_size_for_triton is not None:
+        fn[sim_info.grid_size_for_triton](**kwargs_tt)
+    else:
+        fn[sim_info.grid_size](**kwargs_tt)
     # compare result here.
-    run_info = _get_triton_compile_infos(fn, kwargs_tt)
+    run_info = get_triton_compile_infos(fn, kwargs_tt)
     if run_info.metadata["n_spills"] > 0:
         LOGGER.warning(f"{run_info.metadata['n_spills']} register spills detected. try eliminate it to increase performance.")
     print(run_info.best_config)
@@ -617,7 +641,8 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                              is_func_id: bool,
                              warming_up: int = 2,
                              run_cnt: int = 3,
-                             override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None):
+                             override_kwargs_set: Optional[dict[str, dict[str, Any]]] = None,
+                             ext_inline_env: Optional[TritonInlineRunEnv] = None):
     import torch
     if override_kwargs_set is None:
         override_kwargs_set = {
@@ -628,13 +653,17 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
     run_info: Optional[TritonKernelCompileInfo] = None
     for kw_set_name, override_kwargs in override_kwargs_set.items():
         fn, fn_meta, kwargs_tt, kwargs_th, inline_env = _get_triton_run_datas_from_path(
-            func_id_or_path, fn_name, is_func_id, override_kwargs)
-        raw_fn = fn_meta.raw_fn
+            func_id_or_path, fn_name, is_func_id, override_kwargs, ext_inline_env)
+        raw_fn = None 
+        if fn_meta is not None:
+            raw_fn = fn_meta.raw_fn
         sim_info = inline_env.get_userdata_typed(TritonSimInfo)
-        assert sim_info.grid_size_for_triton is not None, "you must use functional grid for triton real run."
+        grid_size_or_grid_size_fn = sim_info.grid_size_for_triton
+        if grid_size_or_grid_size_fn is None:
+            grid_size_or_grid_size_fn = sim_info.grid_size
         try:
             for j in range(warming_up):
-                fn[sim_info.grid_size_for_triton](**kwargs_tt)
+                fn[grid_size_or_grid_size_fn](**kwargs_tt)
         except:
             traceback.print_exc()
             continue 
@@ -643,7 +672,7 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
             start_ev = torch.cuda.Event(enable_timing=True)
             end_ev = torch.cuda.Event(enable_timing=True)
             start_ev.record(stream)
-            fn[sim_info.grid_size_for_triton](**kwargs_tt)
+            fn[grid_size_or_grid_size_fn](**kwargs_tt)
             end_ev.record(stream)
             start_ev.synchronize()
             end_ev.synchronize()
@@ -670,7 +699,7 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
                 raw_dur_msg = ", ".join(
                     f"{k}: {v:.3f} ms" for k, v in duration_dict.items())
                 print(f"{fn_name}(raw) dur: {raw_dur_msg}")
-        run_info = _get_triton_compile_infos(fn, kwargs_tt)
+        run_info = get_triton_compile_infos(fn, kwargs_tt)
         if run_info.metadata["n_spills"] > 0:
             LOGGER.warning(f"{run_info.metadata['n_spills']} register spills detected. try eliminate it to increase performance.")
         
@@ -679,7 +708,7 @@ def _run_triton_fn_for_bench(func_id_or_path: str,
     assert run_info is not None
     return durations, raw_durations, run_info
 
-def _may_triton_func(fn: Any) -> Any:
+def may_triton_func(fn: Any) -> Any:
     if isinstance(fn, triton.runtime.Autotuner):
         fn = fn.fn
     if isinstance(fn, triton.JITFunction):
@@ -714,26 +743,31 @@ def _tt_assign_check(tgt_meta: Any, src_meta: Any):
 def parse_triton_compilable_to_runner(
     fn: Union[triton.JITFunction, triton.runtime.Autotuner],
     do_meta_eval: bool = True,
-    module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None
+    module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
+    external_inline_env: Optional[PFLInlineRunEnv] = None,
 ) -> TritonKernelRunner:
     if isinstance(fn, triton.runtime.Autotuner):
         fn = fn.fn
     fn_unwrapped = inspect.unwrap(fn.fn)
+
     fn_metadata = pfl.get_compilable_meta(fn_unwrapped)
-    assert isinstance(fn_metadata, TritonSimFuncMeta)
-    inline_run_env_fn = fn_metadata.inline_run_env_fn
-    assert inline_run_env_fn is not None
-    if fn_metadata.sim_kwargs is not None:
-        env = inline_run_env_fn(**fn_metadata.sim_kwargs)
+    if external_inline_env is not None:
+        env = external_inline_env
     else:
-        env = inline_run_env_fn()
+        assert isinstance(fn_metadata, TritonSimFuncMeta)
+        inline_run_env_fn = fn_metadata.inline_run_env_fn
+        assert inline_run_env_fn is not None
+        if fn_metadata.sim_kwargs is not None:
+            env = inline_run_env_fn(**fn_metadata.sim_kwargs)
+        else:
+            env = inline_run_env_fn()
     meta_args = _create_metadata_from_triton_kwargs(env.kwargs)
     external_annos = {k: type(v) for k, v in meta_args.items()}
     sim_info = env.get_userdata_typed(TritonSimInfo)
     kwargs, gmem = _validate_and_convert_triton_kwargs(
         env.kwargs, sim_info.global_mem)
     sim_info = dataclasses.replace(sim_info, global_mem=gmem)
-    env = TritonInlineRunEnv(annotations=env.annotations,
+    env_tt = TritonInlineRunEnv(annotations=env.annotations,
                              contexts=env.contexts,
                              kwargs=kwargs,
                              raw_kwargs=env.kwargs,
@@ -742,7 +776,7 @@ def parse_triton_compilable_to_runner(
     constexpr_args = {}
     for k, v in type_hints.items():
         if v is tl.constexpr:
-            constexpr_args[k] = env.raw_kwargs[k]
+            constexpr_args[k] = env_tt.raw_kwargs[k]
     lib = pfl.parse_func_to_pfl_library(fn.fn,
                                         backend="triton",
                                         external_anno=(external_annos, None),
@@ -753,14 +787,17 @@ def parse_triton_compilable_to_runner(
     if do_meta_eval:
         evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib, assign_check=_tt_assign_check)
         evaluator.eval_total_tree(fn.fn, meta_args)
-    return TritonKernelRunner(lib, env)
+    return TritonKernelRunner(lib, env_tt)
 
 class TritonRuntimeRunnerNested:
     def __init__(self, grid: Union[tuple[int, ...], Callable[[Any], tuple[int, ...]]], 
             fn: Union[triton.JITFunction, triton.runtime.Autotuner],
             autotune_cfg_idx: int = 0,
             module_code_path_getter: Optional[Callable[[Any], tuple[str, str]]] = None,
-            mode: TensorSimMode = TensorSimMode.FULL):
+            mode: TensorSimMode = TensorSimMode.FULL,
+            submit_to_ui: bool = False, 
+            submit_ref_results: Optional[dict[str, np.ndarray]] = None,
+            submit_asm_to_ui: bool = False):
         self._autotuner: Optional[triton.runtime.Autotuner] = None
         self._autotune_cfg_idx = autotune_cfg_idx
         if isinstance(fn, triton.runtime.Autotuner):
@@ -774,8 +811,14 @@ class TritonRuntimeRunnerNested:
 
         self._sig = sig
         self._module_code_path_getter = module_code_path_getter
+        self._submit_to_ui = submit_to_ui
+        if submit_to_ui:
+            if submit_ref_results is None:
+                submit_ref_results = {}
+        self._submit_ref_results = submit_ref_results
+        self._submit_asm_to_ui = submit_asm_to_ui
 
-    async def _run_sim(self,  *args, **kwargs):
+    async def _run_sim(self, *args, **kwargs):
         import torch
         from triton.tools.tensor_descriptor import TensorDescriptor as TTTensorDescriptor
         triton_reserved_param_names = {
@@ -795,6 +838,28 @@ class TritonRuntimeRunnerNested:
             grid_size = grid_may_fn(mapped_kwargs)
         else:
             grid_size = cast(tuple[int, ...], grid_may_fn)
+        if len(grid_size) != 3:
+            grid_size = (*grid_size, *[1] * (3 - len(grid_size)))
+        if self._submit_to_ui:
+            fn_path = inspect.getfile(self._fn_unwrapped)
+            fn_lineno = inspect.getsourcelines(self._fn_unwrapped)[1]
+            assert self._submit_ref_results is not None 
+            sim_info = TritonSimInfo(
+                grid_size=(grid_size[0], grid_size[1], grid_size[2]),
+                ref_results=self._submit_ref_results,
+                global_mem=global_mem,
+            )
+            inline_env = TritonInlineRunEnv(
+                kwargs=kwargs_for_sim,
+                userdata=sim_info,
+                raw_kwargs=kwargs_cpu)
+            app_metas = list_all_app_in_machine()
+            for meta in app_metas:
+                if meta.module_name == "TritonSim":
+                    client = meta.create_client()
+                    with client:
+                        client.app_chunked_remote_call("launch_external_sim", fn_path, fn_lineno, inline_env)
+                    break
         type_hints = get_type_hints(self._fn_unwrapped)
         constexpr_args = {}
         for k, v in type_hints.items():
@@ -814,7 +879,7 @@ class TritonRuntimeRunnerNested:
             evaluator = pfl.PFLStaticEvaluator.meta_evaulator(lib, assign_check=_tt_assign_check)
             evaluator.eval_total_tree(self.fn.fn, meta_args)
         runner = pfl.PFLAsyncRunner(lib)
-        fn_no_jit = _may_triton_func(self.fn.fn)
+        fn_no_jit = may_triton_func(self.fn.fn)
         lib = runner._library
         jkl_arr_tuple = np.meshgrid(
             range(grid_size[0]), range(grid_size[1]), range(grid_size[2]),
@@ -822,14 +887,17 @@ class TritonRuntimeRunnerNested:
         jkl_arr = np.stack(jkl_arr_tuple, axis=-1).reshape(
             -1, 3)
         sim_cfg = TensorSimConfig(mode=self._mode)
-        for jkl in jkl_arr:
-            j = int(jkl[0])
-            k = int(jkl[1])
-            l = int(jkl[2])
-            with tsim.enter_tensorsim_context([j, k, l],
-                                                grid_size,
-                                                global_mem=global_mem,
-                                                cfg=sim_cfg):
+        jkl_arr = rich.progress.track(jkl_arr, description="Running Triton Sim...")
+        
+        with tsim.enter_tensorsim_context([-1, -1, -1],
+                                            grid_size,
+                                            global_mem=global_mem,
+                                            cfg=sim_cfg) as ctx:
+            for jkl in jkl_arr:
+                j = int(jkl[0])
+                k = int(jkl[1])
+                l = int(jkl[2])
+                ctx.set_grid_id([j, k, l])
                 kwargs_cloned = kwargs_for_sim.copy()
                 # clone pointer tensor because it may be modified in place
                 for key, v in kwargs_cloned.items():
@@ -840,6 +908,9 @@ class TritonRuntimeRunnerNested:
                 await (runner.run_func(
                     lib.get_compiled_unit_specs(fn_no_jit)[0].uid,
                     kwargs_cloned))
+                # import tensorpc 
+                # tensorpc.dbg.breakpoint()
+        need_run_ker: bool = False
         # print(kwargs_for_sim)
         if self._mode == TensorSimMode.FULL:
             for k, v in mapped_kwargs.items():
@@ -851,18 +922,28 @@ class TritonRuntimeRunnerNested:
                         v.copy_(torch.from_numpy(global_mem.memory_blocks[k].get_data_view_checked())) 
                     elif isinstance(v, TTTensorDescriptor):
                         v.base.copy_(torch.from_numpy(global_mem.memory_blocks[k].get_data_view_checked()))
+            if self._submit_asm_to_ui:
+                need_run_ker = True 
         else:
             assert self._mode == TensorSimMode.LOGIC_ONLY
+            need_run_ker = True
             # for logic only, we run real triton kernel instead of sim.
             # logic only is used to check memory access and detect invalid
             # reduce on empty value.
+        if need_run_ker:
             if self._autotuner is not None:
-                self._autotuner[self.grid](*args, **kwargs)
+                compiled_ker = self._autotuner[self.grid](*args, **kwargs)
             else:
-                self.fn[self.grid](*args, **kwargs)
+                compiled_ker = self.fn[self.grid](*args, **kwargs)
+            if self._submit_asm_to_ui:
+                submit_compiled_kernel_to_ui(compiled_ker)
 
     def __call__(self, *args, **kwargs):
-        asyncio.run(self._run_sim(*args, **kwargs))
+        try:
+            asyncio.run(self._run_sim(*args, **kwargs))
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt received, exiting.")
+            raise 
 
     def _get_autotuner_run_kwargs(self, mapped_kwargs):
         if self._autotuner is None:
@@ -876,17 +957,37 @@ class TritonRuntimeRunnerNested:
             config.pre_hook(full_nargs)
         return full_nargs
 
+def submit_compiled_kernel_to_ui(kernel: CompiledKernel):
+    info = get_triton_compile_info_from_res(kernel, log_ptxas_info=False)
+    app_metas = list_all_running_apps_in_relay()
+    for meta in app_metas:
+        if meta.module_name == "TritonSim":
+            client = meta.create_client()
+            with client:
+                fn_name = "compiled_kernel"
+                client.app_chunked_remote_call("set_triton_compile_info", fn_name, info)
+            break
 
 class TritonRuntimeRunner:
     def __init__(self, fn: Union[triton.JITFunction, triton.runtime.Autotuner], 
             autotune_cfg_idx: int = 0,
-            mode: TensorSimMode = TensorSimMode.FULL):
+            mode: TensorSimMode = TensorSimMode.FULL,
+            submit_to_ui: bool = False, 
+            submit_asm_to_ui: bool = False,
+            submit_ref_results: Optional[dict[str, np.ndarray]] = None):
         self.fn = fn
         self._autotune_cfg_idx = autotune_cfg_idx
         self._mode = mode
+        self._submit_to_ui = submit_to_ui
+        self._submit_ref_results = submit_ref_results
+        self._submit_asm_to_ui = submit_asm_to_ui
 
     def __getitem__(self, grid):
-        return TritonRuntimeRunnerNested(grid, self.fn, mode=self._mode) 
+        return TritonRuntimeRunnerNested(grid, self.fn, mode=self._mode,
+                                         autotune_cfg_idx=self._autotune_cfg_idx,
+                                         submit_to_ui=self._submit_to_ui,
+                                         submit_ref_results=self._submit_ref_results,
+                                         submit_asm_to_ui=self._submit_asm_to_ui) 
 
 @dataclasses.dataclass
 class Duration:
