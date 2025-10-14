@@ -1002,6 +1002,11 @@ class App:
             res = await self.handle_event(ev, is_sync)
         return res 
 
+    @contextlib.contextmanager
+    def _enter_app_conetxt(self):
+        with enter_app_context(self):
+            yield
+
     def register_remote_comp_event_handler(self, key: str,
                                        handler: Callable[[RemoteCompEvent], Any]):
         self._flowapp_component_rpc_eemitter.on(key, handler)

@@ -79,6 +79,13 @@ def get_type_hints_with_cache(cls, include_extras: bool = False):
             cls, include_extras=include_extras)
     return _DCLS_GET_TYPE_HINTS_CACHE[cls]
 
+_DCLS_RESOLVE_TYPE_HINTS_CACHE: dict[Any, dict[str, Any]] = {}
+
+def resolve_type_hints_with_cache(cls):
+    if cls not in _DCLS_RESOLVE_TYPE_HINTS_CACHE:
+        _DCLS_RESOLVE_TYPE_HINTS_CACHE[cls] = resolve_type_hints(
+            cls)
+    return _DCLS_RESOLVE_TYPE_HINTS_CACHE[cls]
 
 class Undefined:
 

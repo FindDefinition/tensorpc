@@ -955,18 +955,15 @@ class DynamicClass:
         module_cls = module_name.split(TENSORPC_SPLIT)
         if code != "":
             assert len(module_cls) == 1, "you only need to specify class name"
-
-        self.module_path = module_cls[0]
-        self.alias: Optional[str] = None
+        module_path, cls_name, alias = DynamicClass.split_module_name(
+            module_name)
+        self.module_path = module_path
+        self.alias = alias
+        self.cls_name = cls_name
         self.is_standard_module = False
         self.standard_module: Optional[types.ModuleType] = None
         self.file_path = ""
         self.is_dynamic_code = False
-        if len(module_cls) == 3:
-            self.alias = module_cls[-1]
-            self.cls_name = module_cls[-2]
-        else:
-            self.cls_name = module_cls[-1]
         try:
             if code != "":
                 # TODO we need to redesign whole dynamic load
@@ -1018,6 +1015,18 @@ class DynamicClass:
         obj_type = self.module_dict[self.cls_name]
         self.obj_type = obj_type
         self.module_key = f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
+
+    @staticmethod 
+    def split_module_name(module_name: str):
+        module_cls = module_name.split(TENSORPC_SPLIT)
+        if len(module_cls) == 3:
+            alias = module_cls[-1]
+            cls_name = module_cls[-2]
+        else:
+            alias = None
+            cls_name = module_cls[-1]
+        module_path = module_cls[0]
+        return module_path, cls_name, alias
 
 
 class ReloadableDynamicClass(DynamicClass):
@@ -1359,8 +1368,6 @@ class ServiceUnit(DynamicClass):
 
     @identity_wrapper
     def get_service_unit_ids(self) -> List[str]:
-        a = 1 + 3
-        c = a + 4
         if self.alias is not None:
             return [self.module_key, self.alias]
         else:
@@ -1376,6 +1383,11 @@ class ServiceUnit(DynamicClass):
         self.init_service()
         meta = self.services[serv_key]
         return meta.get_binded_fn(), meta
+
+    def get_service_and_meta_by_local_key(self, local_key: str):
+        serv_key = f"{self.module_key}.{local_key}"
+        return self.get_service_and_meta(serv_key)
+
 
     def get_service_meta_only(self, serv_key: str):
         self.init_service()

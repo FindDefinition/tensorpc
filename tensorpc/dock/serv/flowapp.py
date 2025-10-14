@@ -87,6 +87,9 @@ class FlowApp:
         #     exec(init_code, {})
         self.module_name = module_name
         self.is_dynamic_code: bool = module_name == ""
+        if self.is_dynamic_code:
+            module_name = "App"
+        _, cls_name, _ = ReloadableDynamicClass.split_module_name(module_name)
         self.config = config
         self.shutdown_ev = asyncio.Event()
         self.master_meta = MasterMeta()
@@ -94,7 +97,7 @@ class FlowApp:
         assert not prim.get_server_is_sync(), "only support async server"
         try:
             import setproctitle  # type: ignore
-            self.master_meta.set_process_title()
+            self.master_meta.set_process_title(cls_name)
         except ImportError:
             pass
         if not headless:
@@ -112,7 +115,6 @@ class FlowApp:
         reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
         use_app_editor = True
         if self.is_dynamic_code:
-            module_name = "App"
             use_app_editor = False
             reload_mgr.in_memory_fs.add_file(f"<{TENSORPC_FILE_NAME_PREFIX}-tensorpc_app_root>", init_code)
 
@@ -249,18 +251,20 @@ class FlowApp:
             return await self.app._restore_simple_app_state(ev.uid_to_data)
 
     async def run_app_service(self, key: str, *args, **kwargs):
-        serv, meta = self.app_su.get_service_and_meta(key)
-        res_or_coro = serv(*args, **kwargs)
-        if meta.is_async:
-            return await res_or_coro
-        else:
-            return res_or_coro
+        serv, meta = self.app_su.get_service_and_meta_by_local_key(key)
+        with self.app._enter_app_conetxt():
+            res_or_coro = serv(*args, **kwargs)
+            if meta.is_async:
+                return await res_or_coro
+            else:
+                return res_or_coro
 
     async def run_app_async_gen_service(self, key: str, *args, **kwargs):
-        serv, meta = self.app_su.get_service_and_meta(key)
-        assert meta.is_async and meta.is_gen
-        async for x in serv(*args, **kwargs):
-            yield x
+        serv, meta = self.app_su.get_service_and_meta_by_local_key(key)
+        with self.app._enter_app_conetxt():
+            assert meta.is_async and meta.is_gen
+            async for x in serv(*args, **kwargs):
+                yield x
 
     async def _run_schedule_event_task(self, data):
         ev = ScheduleEvent.from_dict(data)

@@ -1715,6 +1715,32 @@ class Flow:
         if new_t2e:
             await self._app_q.put(ev)
 
+    async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+    
+        grpc_port = node.grpc_port
+        durl, _ = get_url_port(driver.url)
+        if driver.enable_port_forward:
+            app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+        else:
+            app_url = get_grpc_url(durl, grpc_port)
+        return await tensorpc.simple_chunk_call_async(
+            app_url, key, *args, **kwargs)
+
+    async def run_app_async_gen_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+    
+        grpc_port = node.grpc_port
+        durl, _ = get_url_port(driver.url)
+        if driver.enable_port_forward:
+            app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+        else:
+            app_url = get_grpc_url(durl, grpc_port)
+        async with AsyncRemoteManager(app_url) as robj:
+            async for msg in robj.chunked_remote_generator(
+                    app_url, key, *args, **kwargs):
+                yield msg 
+
     async def schedule_next(self, graph_id: str, node_id: str,
                             sche_ev_data: Dict[str, Any]):
         # schedule next node(s) of this node with data.
@@ -1915,6 +1941,32 @@ class Flow:
             "is_remote": False,
             "module_name": node.module_name,
         }
+
+    async def query_all_running_app_nodes(self, graph_id: str):
+        if graph_id not in self.flow_dict:
+            return []
+        gh = self.flow_dict[graph_id]
+        res = []
+        for n in gh.nodes:
+            if isinstance(n, AppNode):
+                if n.is_session_started() or not n.is_running():
+                    continue
+                node_desp = self._get_node_desp(graph_id, n.id)
+                assert node_desp.driver is not None, f"you must select a driver for app node first"
+                assert isinstance(node_desp.driver, DirectSSHNode)
+                driver = node_desp.driver
+                durl, _ = get_url_port(driver.url)
+                if driver.enable_port_forward:
+                    app_url = get_grpc_url("localhost", n.fwd_grpc_port)
+                else:
+                    app_url = get_grpc_url(durl, n.grpc_port)
+                res.append({
+                    "id": n.id,
+                    "readable_id": n.readable_id,
+                    "module_name": n.module_name,
+                    "relay_url": app_url,
+                })
+        return res
 
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)
