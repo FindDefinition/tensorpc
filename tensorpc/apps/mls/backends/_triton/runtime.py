@@ -561,9 +561,13 @@ def get_triton_compile_infos(kernel, kwargs_tt, log_ptxas_info: bool = False) ->
         best_config = kernel.best_config.all_kwargs()
         kernel = kernel.fn
     if hasattr(kernel, "device_caches"):
-        cache_entry, target, backend, binder = kernel.device_caches[device]
+        caches = kernel.device_caches[device]
     else:
-        cache_entry, target, backend, binder = kernel.cache
+        caches = kernel.cache
+    if len(caches) == 5:
+        cache_entry, _, target, backend, binder = caches
+    else:
+        cache_entry, target, backend, binder = caches
     bound_args, specialization, options = binder(**kwargs_tt, **best_config, debug=False)
     # compute cache key
     key = str(specialization) + str(options)
@@ -957,11 +961,14 @@ class TritonRuntimeRunnerNested:
             config.pre_hook(full_nargs)
         return full_nargs
 
-def submit_compiled_kernel_to_ui(kernel: CompiledKernel):
+def submit_compiled_kernel_to_ui(kernel: CompiledKernel, via_relay: bool = True):
     info = get_triton_compile_info_from_res(kernel, log_ptxas_info=False)
-    app_metas = list_all_running_apps_in_relay()
+    if via_relay:
+        app_metas = list_all_running_apps_in_relay()
+    else:
+        app_metas = list_all_app_in_machine()
     for meta in app_metas:
-        if meta.module_name == "TritonSim":
+        if "TritonSim" in meta.module_name:
             client = meta.create_client()
             with client:
                 fn_name = "compiled_kernel"
