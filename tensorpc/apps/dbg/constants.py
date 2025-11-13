@@ -134,6 +134,14 @@ class TracerSingleResult:
 class TraceResult:
     single_results: List[TracerSingleResult] 
 
+    def get_raw_event_removed(self):
+        res_remove_trace_events = TraceResult(single_results=[])
+        for single_res in self.single_results:
+            # remove raw trace events, they should only be used in remote comp.
+            res_remove_trace_events.single_results.append(
+                dataclasses.replace(single_res, trace_events=None))
+        return res_remove_trace_events
+
 @dataclasses.dataclass
 class DebugMetric:
     total_skipped_bkpt: int
@@ -157,6 +165,8 @@ class DebugDistributedInfo:
         elif self.backend == "openmpi":
             return "mpi"
         else:
+            if self.backend is None:
+                return "unknown"
             return self.backend
 
 @dataclasses.dataclass

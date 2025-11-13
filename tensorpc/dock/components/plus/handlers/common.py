@@ -502,12 +502,17 @@ class PytorchModuleHandler(DefaultHandler):
             await self._graph.do_dagre_layout(dagre)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
+        from torch.distributed.tensor import DTensor
         await super().bind(obj, uid)
         # obj is nn.Module
         # get weight size
         total_size = 0
         for name, param in obj.named_parameters():
-            total_size += param.numel() * param.element_size()
+            if isinstance(param.data, DTensor):
+                local = param.data._local_tensor
+                total_size += local.numel() * local.element_size()
+            else:
+                total_size += param.numel() * param.element_size()
         total_size_str = humanize.naturalsize(total_size)
         await self._model_size.write(f"Model Size: {total_size_str}")
 

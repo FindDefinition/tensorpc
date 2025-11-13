@@ -961,8 +961,8 @@ class TritonRuntimeRunnerNested:
             config.pre_hook(full_nargs)
         return full_nargs
 
-def submit_compiled_kernel_to_ui(kernel: CompiledKernel, via_relay: bool = True):
-    info = get_triton_compile_info_from_res(kernel, log_ptxas_info=False)
+def submit_compiled_kernel_to_ui(kernel: CompiledKernel, via_relay: bool = True, log_ptxas_info: bool = False):
+    info = get_triton_compile_info_from_res(kernel, log_ptxas_info=log_ptxas_info)
     if via_relay:
         app_metas = list_all_running_apps_in_relay()
     else:

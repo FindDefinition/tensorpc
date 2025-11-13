@@ -1263,7 +1263,10 @@ class EditableApp(App):
             # add all observed function paths
             for p in paths:
                 observer.schedule(self._watchdog_watcher, p, recursive=True if compat.InMacOS else False)
-            observer.start()
+            try:
+                observer.start()
+            except:
+                APP_LOGGER.error("watchdog observer start failed!", exc_info=True)
             self._watchdog_observer = observer
         else:
             self._flowapp_code_mgr = None
