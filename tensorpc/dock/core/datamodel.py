@@ -472,7 +472,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         if submodel_draft is not None:
             dm = self.get_datamodel_from_draft(submodel_draft)
             assert dm is self, "submodel_draft must be a draft of this datamodel."
-            subpath = str(submodel_draft)
+            subpath = pfl.compile_pflpath_to_compact_str(str(submodel_draft))
         
         assert self._pfl_library is not None, "your datamodel must define pfl marked functions."
         tail_kws = None
