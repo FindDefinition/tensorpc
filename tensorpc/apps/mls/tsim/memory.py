@@ -463,13 +463,14 @@ class SimMemoryStorage(SimTensorStorage):
             data_raw[pointer_data_masked] = stored_data_raw_masked
         # all inds are stored in flatten array.
         for k, inds in block_desc.indices.items():
-            value_inds = value.storage.indices[k]
-            if mask is None:
-                inds[pointer_data] = value_inds.reshape(-1)
-            else:
-                mask_view = mask.get_storage_checked().data.reshape(-1)
-                inds[pointer_data[mask_view]] = value_inds.reshape(
-                    -1)[mask_view]
+            if k in value.storage.indices:
+                value_inds = value.storage.indices[k]
+                if mask is None:
+                    inds[pointer_data] = value_inds.reshape(-1)
+                else:
+                    mask_view = mask.get_storage_checked().data.reshape(-1)
+                    inds[pointer_data[mask_view]] = value_inds.reshape(
+                        -1)[mask_view]
         return old
 
 

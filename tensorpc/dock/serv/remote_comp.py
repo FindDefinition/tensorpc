@@ -68,6 +68,8 @@ class AppObject:
 Distributed test cmd:
 torchrun --nproc_per_node=2 -m tensorpc.serve --port 50051,50052 --distributed_mode torch_nccl \
     --serv_config_json '{"tensorpc.dock.serv.remote_comp::RemoteComponentService": {"init_apps": {"dev": "tensorpc.apps.sample.dist::TorchDistributedApp"}}}'
+torchrun --nproc_per_node=2 -m tensorpc.dock.serve_remote --port 50051,50052 --distributed_mode torch_nccl \
+    tensorpc.apps.sample.dist::TorchDistributedApp
 
 """
 

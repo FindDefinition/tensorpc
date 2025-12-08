@@ -1445,7 +1445,7 @@ class triton_gluon_std(triton_std_math):
     @staticmethod
     @overload
     def store(pointer: PointerTensor,
-              value: Tensor,
+              value: Union[int, float, Tensor],
               mask: Optional[Tensor] = None,
               boundary_check: Optional[tuple[int, ...]] = None,
              cache_modifier: Optional[str] = None,
@@ -1454,7 +1454,7 @@ class triton_gluon_std(triton_std_math):
 
     @staticmethod
     @overload
-    def store(pointer: BlockPointer, value: Tensor,
+    def store(pointer: BlockPointer, value: Union[int, float, Tensor],
               mask: Optional[Tensor] = None,
               boundary_check: Optional[tuple[int, ...]] = None,
              cache_modifier: Optional[str] = None,

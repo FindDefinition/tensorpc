@@ -376,11 +376,12 @@ class DebugTracerWrapper:
                                 },
                             })
         if base_ts is None:
-            LOGGER.warning("Failed to fast find baseTimeNanoseconds in pytorch trace json")
-            # fast check failed, load entire json file
-            pth_trace_dict = json.loads(data)
-            if "baseTimeNanoseconds" in pth_trace_dict:
-                base_ts = pth_trace_dict["baseTimeNanoseconds"]
+            if data_json is None:
+                LOGGER.warning("Failed to fast find baseTimeNanoseconds in pytorch trace json")
+                # fast check failed, load entire json file
+                data_json = json.loads(data)
+            if "baseTimeNanoseconds" in data_json:
+                base_ts = data_json["baseTimeNanoseconds"]
         return data, base_ts
 
     def _filter_viztracer_data_inplace(self, data: Dict[str, Any]):
