@@ -128,6 +128,7 @@ class VideoRTCStreamApp:
     def my_layout(self):
         self.track = SimpleVideoStreamTrack(width=640, height=480)
         self.video = mui.VideoRTCStream(self.track)
+        self.video.prop(disableContextMenu=True)
         root_box = mui.HBox([
             self.video.prop(flex=1),
         ]).prop(width=640, height=480, border="1px solid red")

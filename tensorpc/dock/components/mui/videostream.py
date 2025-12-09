@@ -51,7 +51,7 @@ class VideoBasicStreamProps(MUIFlexBoxProps, _BaseVideoProps):
 
 @dataclasses.dataclass
 class VideoRTCStreamProps(MUIFlexBoxProps, _BaseVideoProps):
-    pass
+    disableContextMenu: Union[Undefined, bool] = undefined
 
 
 class VideoBasicStream(MUIComponentBase[VideoBasicStreamProps]):
