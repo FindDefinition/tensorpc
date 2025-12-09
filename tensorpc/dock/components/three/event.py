@@ -3,7 +3,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import Undefined, undefined
 from typing import Any, TypeAlias, Union, Optional
 from tensorpc.core.datamodel.typemetas import (NumberType, Vector2Type, Vector3Type, ColorRGB, ColorRGBA)
-
+from tensorpc.dock.components.mui.event import KeyboardEvent, KeyboardHoldEvent
 EulerTuple: TypeAlias = Union[tuple[float, float, float], tuple[float, float, float, str]]
 
 @dataclasses.dataclass
@@ -62,19 +62,6 @@ class CameraEvent:
     size: Vector2Type
     fov: Union[Undefined, NumberType] = undefined
     aspect: Union[Undefined, NumberType] = undefined
-
-@dataclasses.dataclass
-class KeyboardEvent:
-    code: str 
-    altKey: bool
-    ctrlKey: bool
-    metaKey: bool
-    shiftKey: bool
-
-@dataclasses.dataclass
-class KeyboardHoldEvent(KeyboardEvent):
-    deltaTime: NumberType
-    elapsedTime: NumberType
 
 @dataclasses.dataclass
 class ViewportChangeEvent:

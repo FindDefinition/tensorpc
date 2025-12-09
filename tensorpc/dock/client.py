@@ -45,6 +45,8 @@ class MasterMeta:
         gport = os.getenv(constants.TENSORPC_FLOW_MASTER_GRPC_PORT)
 
         use_rf = os.getenv(constants.TENSORPC_FLOW_USE_REMOTE_FWD)
+        fwd_http_port = os.getenv(constants.TENSORPC_FLOW_APP_HTTP_FWD_PORT)
+
         url = ""
         grpc_url = ""
         if (use_rf is not None and use_rf == "1"):
@@ -71,6 +73,7 @@ class MasterMeta:
         self.http_port = port
         self.grpc_url = grpc_url
         self.http_url = url
+        self.fwd_http_port = fwd_http_port
         lsp_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_PORT,
                              None)
         self.lsp_port = int(lsp_port) if lsp_port is not None else None

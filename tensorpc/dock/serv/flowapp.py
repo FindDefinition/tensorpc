@@ -26,9 +26,9 @@ from typing import Any, Dict, List, Optional
 import grpc
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_chunk_call_async
-from tensorpc.core.core_io import extract_object_from_data
 from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
+from tensorpc.dock.core.uitypes import RTCTrackInfo
 from tensorpc.dock.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.dock.serv.common import handle_file_resource
@@ -36,7 +36,7 @@ from tensorpc.dock.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpc
 from tensorpc.dock import appctx
 from tensorpc.dock.core.appcore import ALL_OBSERVED_FUNCTIONS, RemoteCompEvent, enter_app_context
 from tensorpc.dock.components.mui import FlexBox, flex_wrapper
-from tensorpc.dock.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, RemoteComponentBase, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.dock.core.component import Component, AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, RemoteComponentBase, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.dock.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
@@ -44,11 +44,9 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
-from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.dock.jsonlike import Undefined
 from tensorpc.dock.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
-from tensorpc.utils.uniquename import UniqueNamePool
 from ..client import AppLocalMeta, MasterMeta
 from tensorpc import prim
 from tensorpc.dock.serv_names import serv_names
@@ -151,6 +149,7 @@ class FlowApp:
         # self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop_v2())
         self.lsp_port = self.master_meta.lsp_port
+        self.http_port = self.master_meta.http_port
         if self.lsp_port is not None:
             assert self.master_meta.lsp_fwd_port is not None
             self.lsp_fwd_port = self.master_meta.lsp_fwd_port
@@ -158,6 +157,7 @@ class FlowApp:
             self.lsp_fwd_port = None
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
+
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init(self):
@@ -187,6 +187,8 @@ class FlowApp:
             except:
                 traceback.print_exc()
         lay = await self.app._get_app_layout()
+        if self.http_port is not None:
+            lay["httpPort"] = self.master_meta.fwd_http_port
         self.app._flowapp_is_inited = True
         first_event = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})
         # first_event._after_send_callback = self.app.app_initialize_async
@@ -363,7 +365,12 @@ class FlowApp:
             res = await self.app._get_app_layout()
         if self.app._flowapp_enable_lsp:
             res["lspPort"] = self.lsp_port
+        if self.http_port is not None:
+            res["httpPort"] = self.master_meta.fwd_http_port
         return res
+
+    def get_rtc_tracks_and_codecs(self, comp_uid: str):
+        return self.app._flowapp_registered_rtc_tracks.get(comp_uid, [])
 
     def _get_file_path_stat(
         self, path: str

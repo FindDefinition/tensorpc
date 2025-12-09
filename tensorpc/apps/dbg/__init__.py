@@ -5,4 +5,4 @@ from .bkpt import (RECORDING, breakpoint, breakpoint_dist_pth, init,
                    manual_trace_scope)
 from . import rttracer
 
-from .offline_tracer import offline_pth_only_tracer, offline_viztracer_only_tracer, offline_viztracer_pytorch_tracer
+from .offline_tracer import WrapperTraceResult, offline_pth_only_tracer, offline_viztracer_only_tracer, offline_viztracer_pytorch_tracer

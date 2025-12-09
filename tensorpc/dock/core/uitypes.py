@@ -5,6 +5,12 @@ from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, TypeVar, Union)
+from aiortc import (
+    MediaStreamTrack,
+)
+
+import dataclasses as dataclasses_plain
+
 NumberType: TypeAlias = Union[int, float]
 
 class IconType(enum.IntEnum):
@@ -124,3 +130,10 @@ ALL_KEY_CODES = {
     'Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'Fn', 'FnLock', 'PrintScreen', 'ScrollLock', 'Pause',
     'BrowserBack', 'BrowserFavorites', 'BrowserForward', 'BrowserHome', 'BrowserRefresh', 'BrowserSearch', 'BrowserStop', 'Eject', 'LaunchApp1', 'LaunchApp2', 'LaunchMail', 'MediaPlayPause', 'MediaSelect', 'MediaStop', 'MediaTrackNext', 'MediaTrackPrevious', 'Power', 'Sleep', 'AudioVolumeDown', 'AudioVolumeMute', 'AudioVolumeUp', 'WakeUp'
 }
+
+
+@dataclasses_plain.dataclass
+class RTCTrackInfo:
+    track: MediaStreamTrack
+    kind: Literal["audio", "video"]
+    force_codec: Optional[str] = None

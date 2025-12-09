@@ -53,7 +53,6 @@ class WrapperTraceResult:
                 client = meta.create_client()
                 with client:
                     client.app_chunked_remote_call("external_set_perfetto_data", ui_data[0], ui_data[1], "offline_tracer")
-                break
 
     def submit_to_ui(self, via_relay: bool = False):
         # TODO we currently assume ui is in rank 0.

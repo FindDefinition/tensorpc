@@ -1021,6 +1021,8 @@ class AppNode(CommandNode, DataStorageNodeBase):
         self.lang_server_port = -1
         self.fwd_lang_server_port = -1
 
+        self.rtc_port = -1
+
         self.state: Optional[dict] = None
 
     def get_node_id(self) -> str:
@@ -1054,12 +1056,14 @@ class AppNode(CommandNode, DataStorageNodeBase):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
-            print(self.lang_server_port, fports[2])
             if self.lang_server_port != -1:
                 self.fwd_lang_server_port = fports[2]
                 env[flowconstants.
                     TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
                         self.fwd_lang_server_port)
+            env[flowconstants.
+                TENSORPC_FLOW_APP_HTTP_FWD_PORT] = str(
+                    self.fwd_http_port)
 
         super()._env_port_modifier(fports, rfports, env)
 
@@ -1119,6 +1123,8 @@ class AppNode(CommandNode, DataStorageNodeBase):
         self.grpc_port = ports[0]
         self.http_port = ports[1]
         self.lang_server_port = ports[2]
+        # self.rtc_port = ports[3]
+
         fwd_ports = []
         self.fwd_grpc_port = self.grpc_port
         self.fwd_http_port = self.http_port
@@ -1148,7 +1154,8 @@ class AppNode(CommandNode, DataStorageNodeBase):
         # this port is used to forward lang server
         envs[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
             self.lang_server_port)
-
+        envs[flowconstants.TENSORPC_FLOW_APP_HTTP_FWD_PORT] = str(
+            self.http_port)
         if self.module_name.startswith("!"):
             envs[flowconstants.
                  TENSORPC_FLOW_APP_MODULE_NAME] = f"\"\\{self.module_name}\""

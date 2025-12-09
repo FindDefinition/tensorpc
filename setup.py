@@ -56,6 +56,8 @@ REQUIRED = [
     "orjson",
     "lark",
     "cmap",
+    "aiortc",
+    "aiohttp_cors",
 ]
 
 # What packages are optional?

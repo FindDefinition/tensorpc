@@ -20,3 +20,4 @@ from .misc import (ColorMap, Points, Segments, Boxes2D, BoundingBox, AxesHelper,
     Bvh, LineShape)
 
 from . import uikit 
+from .event import PointerEvent

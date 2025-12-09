@@ -73,6 +73,7 @@ from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_
 from tensorpc.dock.client import MasterMeta
 from tensorpc.dock.constants import TENSORPC_APP_DND_SRC_KEY, TENSORPC_APP_ROOT_COMP, TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
+from tensorpc.dock.core.uitypes import RTCTrackInfo
 from tensorpc.dock.flowapp.appstorage import AppStorage
 from tensorpc.utils.wait_tools import debounce
 from ..components import mui, three
@@ -335,6 +336,7 @@ class App:
             ObservedFunctionRegistryProtocol] = None
         self._flowapp_file_resource_handlers: SimpleRPCHandler[Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]] = SimpleRPCHandler()
         self._flowapp_simple_rpc_handlers: SimpleRPCHandler = SimpleRPCHandler()
+        self._flowapp_registered_rtc_tracks: dict[str, list[RTCTrackInfo]] = {}
 
     @property
     def _flow_reload_manager(self):
@@ -350,6 +352,17 @@ class App:
         key: str,
     ):
         self._flowapp_file_resource_handlers.off(key)
+
+    def _register_rtc_track(self, comp: Component, track_codecs: list[RTCTrackInfo]):
+        assert comp._flow_uid is not None, "you must call this after mount"
+        assert comp._flow_uid.uid_encoded not in self._flowapp_registered_rtc_tracks, "rtc track already registered"
+        self._flowapp_registered_rtc_tracks[comp._flow_uid.uid_encoded] = track_codecs
+
+    def _unregister_rtc_track(self, comp: Component):
+        assert comp._flow_uid is not None, "you must call this after mount"
+        if comp._flow_uid.uid_encoded in self._flowapp_registered_rtc_tracks:
+            del self._flowapp_registered_rtc_tracks[comp._flow_uid.uid_encoded]
+
 
     def set_enable_language_server(self, enable: bool):
         """must be setted before app init (in layout function), only valid

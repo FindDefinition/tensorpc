@@ -400,13 +400,13 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
                                 drag=True)
         elif qname == CommonQualNames.TorchDTensor:
             t = JsonLikeType.Tensor
-            shape_short = ",".join(map(str, obj.data.shape))
+            shape_short = ",".join(map(str, obj._local_tensor.shape))
             shape_local_short = ",".join(map(str, obj._local_tensor.shape))
             return JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="torch.DTensor",
-                                value=f"[{shape_short}]({shape_local_short})<{_get_torch_dtensor_placements(obj)}>{obj.data.dtype}",
+                                value=f"[{shape_short}]({shape_local_short})<{_get_torch_dtensor_placements(obj)}>{obj._local_tensor.dtype}",
                                 drag=True)
         elif qname == CommonQualNames.TVTensor:
             t = JsonLikeType.Tensor

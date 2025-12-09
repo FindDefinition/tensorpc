@@ -48,6 +48,7 @@ from pydantic import field_validator, model_validator
 from tensorpc.core.datamodel.draft import DraftASTNode, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, apply_draft_update_ops_to_json, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.dock import marker
+from tensorpc.dock.components.mui.event import KeyboardEvent, PointerEvent, KeyboardHoldEvent
 from tensorpc.dock.coretypes import StorageType
 from ....core.datamodel.typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
@@ -1247,6 +1248,9 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
                              FrontendEventType.Drop.value,
                              FrontendEventType.DragCollect.value,
                              FrontendEventType.FileDrop.value,
+                             FrontendEventType.KeyHold.value,
+                             FrontendEventType.KeyDown.value,
+                             FrontendEventType.KeyUp.value,
                          ] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
@@ -1255,21 +1259,29 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_pointer_enter = self._create_event_slot(
-            FrontendEventType.Enter)
+            FrontendEventType.Enter, lambda x: PointerEvent(**x))
         self.event_pointer_leave = self._create_event_slot(
-            FrontendEventType.Leave)
+            FrontendEventType.Leave, lambda x: PointerEvent(**x))
         self.event_pointer_down = self._create_event_slot(
-            FrontendEventType.Down)
-        self.event_pointer_up = self._create_event_slot(FrontendEventType.Up)
+            FrontendEventType.Down, lambda x: PointerEvent(**x))
+        self.event_pointer_up = self._create_event_slot(
+            FrontendEventType.Up, lambda x: PointerEvent(**x))
         self.event_pointer_move = self._create_event_slot(
-            FrontendEventType.Move)
+            FrontendEventType.Move, lambda x: PointerEvent(**x))
         self.event_pointer_over = self._create_event_slot(
-            FrontendEventType.Over)
-        self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
+            FrontendEventType.Over, lambda x: PointerEvent(**x))
+        self.event_pointer_out = self._create_event_slot(
+            FrontendEventType.Out, lambda x: PointerEvent(**x))
         self.event_pointer_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
         self.event_drag_collect = self._create_event_slot(
             FrontendEventType.DragCollect)
+        self.event_keyboard_hold = self._create_event_slot(
+            FrontendEventType.KeyHold, lambda x: KeyboardHoldEvent(**x))
+        self.event_keydown = self._create_event_slot(
+            FrontendEventType.KeyDown, lambda x: KeyboardEvent(**x))
+        self.event_keyup = self._create_event_slot(
+            FrontendEventType.KeyUp, lambda x: KeyboardEvent(**x))
 
     def as_drag_handle(self):
         self.props.takeDragRef = True

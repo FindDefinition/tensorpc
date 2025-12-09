@@ -185,7 +185,9 @@ class UIType(enum.IntEnum):
     Pagination = 0x3e
     VideoPlayer = 0x3f
     GridLayout = 0x40
+    VideoBasicStream = 0x41
     TaskLoop = 0x42
+    VideoRTCStream = 0x43
 
     RANGE_CHART_START = 0x50
     Plotly = 0x51
@@ -518,6 +520,8 @@ class FrontendEventType(enum.IntEnum):
     ChartLineClick = 162
     ChartMarkClick = 163
     ChartAxisClick = 164
+
+    VideoStreamReady = 170
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
@@ -1269,7 +1273,20 @@ class _EventSlotBase(Generic[TEventData]):
                   debounce: Optional[NumberType] = None,
                   key_codes: Optional[list[str]] = None,
                   set_pointer_capture: bool = False,
-                  release_pointer_capture: bool = False) -> Self:
+                  release_pointer_capture: bool = False,
+                  key_hold_interval_delay: Optional[NumberType] = None) -> Self:
+        """configure event handlers.
+        Args:
+            stop_propagation: whether to stop propagation of the event.
+            throttle: throttle time in milliseconds.
+            debounce: debounce time in milliseconds.
+            key_codes: list of key codes to filter the event.
+            set_pointer_capture: whether to set pointer capture on pointer down event.
+            release_pointer_capture: whether to release pointer capture on pointer up event.
+            key_hold_interval_delay: interval delay for key hold event in milliseconds.
+        Returns:
+            Self: the event slot itself.
+        """
         self.comp.configure_event_handlers(
             self.event_type,
             stop_propagation,
@@ -1277,7 +1294,8 @@ class _EventSlotBase(Generic[TEventData]):
             debounce,
             key_codes=key_codes,
             set_pointer_capture=set_pointer_capture,
-            release_pointer_capture=release_pointer_capture)
+            release_pointer_capture=release_pointer_capture,
+            key_hold_interval_delay=key_hold_interval_delay)
         return self
 
     def set_frontend_draft_change(self, update_ops: list["EventFrontendUpdateOp"]) -> Self:
@@ -2010,7 +2028,8 @@ class Component(Generic[T_base_props, T_child]):
                                  update_ops: Optional[list[EventFrontendUpdateOp]] = None,
                                  key_codes: Optional[list[str]] = None,
                                 set_pointer_capture: bool = False,
-                                release_pointer_capture: bool = False):
+                                release_pointer_capture: bool = False,
+                                key_hold_interval_delay: Optional[NumberType] = None):
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
@@ -2024,6 +2043,7 @@ class Component(Generic[T_base_props, T_child]):
         handlers.debounce = debounce
         handlers.set_pointer_capture = set_pointer_capture
         handlers.release_pointer_capture = release_pointer_capture
+        handlers.key_hold_interval_delay = key_hold_interval_delay
         if backend_only is not None:
             handlers.backend_only = backend_only
         if update_ops is not None:

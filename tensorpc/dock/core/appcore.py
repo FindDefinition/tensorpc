@@ -113,7 +113,8 @@ class EventHandlers:
                  update_ops: Optional[list[Any]] = None,
                  key_codes: Optional[list[str]] = None,
                  set_pointer_capture: bool = False,
-                 release_pointer_capture: bool = False) -> None:
+                 release_pointer_capture: bool = False,
+                 key_hold_interval_delay: Optional[NumberType] = None) -> None:
 
         self.handlers = handlers
         self.stop_propagation = stop_propagation
@@ -127,7 +128,7 @@ class EventHandlers:
         self.key_codes = key_codes
         self.set_pointer_capture = set_pointer_capture
         self.release_pointer_capture = release_pointer_capture
-
+        self.key_hold_interval_delay = key_hold_interval_delay
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -152,6 +153,9 @@ class EventHandlers:
             for code in self.key_codes:
                 assert code in ALL_KEY_CODES
             res["keyCodes"] = self.key_codes
+        if self.key_hold_interval_delay is not None:
+            assert self.key_hold_interval_delay > 0
+            res["keyHoldIntervalDelay"] = self.key_hold_interval_delay
         return res
 
     def get_bind_event_handlers(self, event: Event):
