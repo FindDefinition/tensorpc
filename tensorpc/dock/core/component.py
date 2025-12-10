@@ -435,6 +435,7 @@ class FrontendEventType(enum.IntEnum):
     CanvasViewportChange = 15
     HudGroupLayoutChange = 16
     MeshPoseChange = 17
+    PointerLockReleased = 18
 
     Change = 20
     Delete = 21

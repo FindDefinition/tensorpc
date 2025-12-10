@@ -1251,6 +1251,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
                              FrontendEventType.KeyHold.value,
                              FrontendEventType.KeyDown.value,
                              FrontendEventType.KeyUp.value,
+                             FrontendEventType.PointerLockReleased.value,
                          ] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
@@ -1282,6 +1283,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
             FrontendEventType.KeyDown, lambda x: KeyboardEvent(**x))
         self.event_keyup = self._create_event_slot(
             FrontendEventType.KeyUp, lambda x: KeyboardEvent(**x))
+        self.event_pointer_lock_released = self._create_event_slot_noarg(
+            FrontendEventType.PointerLockReleased)
 
     def as_drag_handle(self):
         self.props.takeDragRef = True
@@ -1334,6 +1337,21 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]
                                            sync_status_first=False,
                                            is_sync=is_sync)
 
+    async def request_pointer_lock(self, unadjusted_movement: Optional[bool] = None):
+        """Request pointer lock for this component.
+        see https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API
+        """
+        msg = {
+            "type": 0,
+        }
+        if unadjusted_movement is not None:
+            msg["unadjustedMovement"] = unadjusted_movement
+        return await self.send_and_wait(self.create_comp_event(msg))
+
+    async def exit_pointer_lock(self):
+        return await self.send_and_wait(self.create_comp_event({
+            "type": 1,
+        }))
 
 class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
 

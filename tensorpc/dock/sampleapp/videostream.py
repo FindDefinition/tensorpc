@@ -47,7 +47,7 @@ class SimpleVideoStreamTrack(VideoStreamTrack):
         self.width = width
         self.height = height
         self.fps = fps
-        self._mouse_move_center: Optional[tuple[int, int]] = None
+        self._mouse_move_center: tuple[float, float] = (width // 2, height // 2)
         self._keyboard_move_center = (width // 2, height // 2)
         self._cur_mouse_event: Optional[mui.PointerEvent] = None
         # self._cur_mouse_events: dict[str, Optional[mui.PointerEvent]] = {
@@ -72,26 +72,31 @@ class SimpleVideoStreamTrack(VideoStreamTrack):
         torch.cuda.set_device(device)
         pass
 
+    def update_mouse_movement(self, ev: mui.PointerEvent):
+        assert ev.movementX is not None and ev.movementY is not None
+        new_x = min(max(self._mouse_move_center[0] + ev.movementX, 0), self.width)
+        new_y = min(max(self._mouse_move_center[1] + ev.movementY, 0), self.height)
+        self._mouse_move_center = (new_x, new_y)
+
     async def recv(self):
         pts, time_base = await self.next_timestamp()
         frame = np.zeros((self.height, self.width, 3), np.uint8)
-        
-        if self._mouse_move_center is not None:
-            left_pressed = self._cur_mouse_btn_state[0]
-            right_pressed = self._cur_mouse_btn_state[2]
-            middle_pressed = self._cur_mouse_btn_state[1]
-            circle_color = None
-            if left_pressed:
-                circle_color = (255, 0, 0)  # Blue for left button
-            elif right_pressed:
-                circle_color = (0, 0, 255)  # Red for right button
-            elif middle_pressed:
-                circle_color = (0, 255, 0)  # Green for middle button
-            if circle_color is not None:
-                # draw a circle at the mouse position
-                x = int(self._mouse_move_center[0])
-                y = int(self._mouse_move_center[1])
-                cv2.circle(frame, (x, y), 20, circle_color, -1)
+        # if self._mouse_move_center is not None:
+        left_pressed = self._cur_mouse_btn_state[0]
+        right_pressed = self._cur_mouse_btn_state[2]
+        middle_pressed = self._cur_mouse_btn_state[1]
+        circle_color = None
+        if left_pressed:
+            circle_color = (255, 0, 0)  # Blue for left button
+        elif right_pressed:
+            circle_color = (0, 0, 255)  # Red for right button
+        elif middle_pressed:
+            circle_color = (0, 255, 0)  # Green for middle button
+        if circle_color is not None:
+            # draw a circle at the mouse position
+            x = int(self._mouse_move_center[0])
+            y = int(self._mouse_move_center[1])
+            cv2.circle(frame, (x, y), 20, circle_color, -1)
         keyboard_wasd_move_speed = 10
         code_to_delta = {
             "KeyW": (0, -keyboard_wasd_move_speed),
@@ -107,7 +112,6 @@ class SimpleVideoStreamTrack(VideoStreamTrack):
                     self._keyboard_move_center[1] + delta[1],
                 )
                 self._cur_keyboard_events[k] = None
-        # print(self._keyboard_move_center)
         # draw keyboard heart
         draw_heart(
             frame, 
@@ -130,8 +134,8 @@ class VideoRTCStreamApp:
         self.video = mui.VideoRTCStream(self.track)
         self.video.prop(disableContextMenu=True)
         root_box = mui.HBox([
-            self.video.prop(flex=1),
-        ]).prop(width=640, height=480, border="1px solid red")
+            self.video.prop(flex=1, minHeight=0, minWidth=0),
+        ]).prop(width="100%", height="100%", overflow="hidden", minHeight=0, minWidth=0)
         root_box.event_pointer_move.on(self._on_pointer_move)
         root_box.event_pointer_down.on(self._on_pointer_down)
         root_box.event_pointer_up.on(self._on_pointer_up)
@@ -139,20 +143,24 @@ class VideoRTCStreamApp:
             key_codes=["KeyW", "KeyA", "KeyS", "KeyD"],
             key_hold_interval_delay=33.33,
         )
+        root_box.event_pointer_lock_released.on(self._on_pointer_lock_release)
         self._enable_events = False
         # enable controls
         root_box.event_keyup.on(self._on_key_up).configure(
-            key_codes=["KeyZ", "KeyX"],
+            key_codes=["KeyZ", "KeyX", "Escape"],
         )
-
-        return mui.HBox([
-            root_box
-        ]).prop(width="100%", height="100%", overflow="auto")
+        self.button = mui.Button("Click Me!", self._on_click)
+        self._event_box = root_box
+        return mui.VBox([
+            root_box,
+            self.button,
+        ]).prop(width="100%", height="100%", overflow="hidden", minHeight=0, minWidth=0)
 
     @mark_did_mount
     async def _on_mount(self):
         await self.video.start()
         # await self.video.set_media_source("video/mp2t; codecs=\"avc1.4d002a\"") 
+    
     @mark_will_unmount
     async def _on_unmount(self):
         await self.video.stop()
@@ -161,7 +169,8 @@ class VideoRTCStreamApp:
         if not self._enable_events:
             return
         # self.track._cur_mouse_event = data
-        self.track._mouse_move_center = (data.offsetX, data.offsetY)
+        self.track.update_mouse_movement(data)
+        # self.track._mouse_move_center = (data.offsetX, data.offsetY)
 
     async def _on_pointer_down(self, data: mui.PointerEvent):
         if not self._enable_events:
@@ -184,7 +193,14 @@ class VideoRTCStreamApp:
 
     async def _on_key_up(self, data: mui.KeyboardEvent):
         if data.code == "KeyZ":
+            await self._event_box.request_pointer_lock()
             self._enable_events = True
-        elif data.code == "KeyX":
+        elif data.code == "KeyX" or data.code == "Escape":
+            await self._event_box.exit_pointer_lock()
             self._enable_events = False
 
+    async def _on_pointer_lock_release(self):
+        self._enable_events = False
+
+    def _on_click(self):
+        print("Button clicked!")

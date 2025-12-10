@@ -119,6 +119,7 @@ _NOARG_EVENTS = set([
     FrontendEventType.DoubleClick.value,
     FrontendEventType.EditorQueryState.value,
     FrontendEventType.Delete.value,
+    FrontendEventType.PointerLockReleased.value,
 ])
 
 async def handle_raw_event(event: Event,

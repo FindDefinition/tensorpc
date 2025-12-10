@@ -22,6 +22,8 @@ class PointerEvent:
     deltaX: Optional[NumberType] = None
     deltaY: Optional[NumberType] = None
     deltaZ: Optional[NumberType] = None
+    movementX: Optional[NumberType] = None
+    movementY: Optional[NumberType] = None
 
 @dataclasses.dataclass
 class KeyboardEvent:
