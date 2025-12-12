@@ -19,7 +19,7 @@ from tensorpc.dock.core.common import (handle_standard_event)
 from tensorpc.dock.core.uitypes import RTCTrackInfo
 from .core import MUIComponentBase, MUIFlexBoxProps
 from ...core.component import (
-    Component, ContainerBaseProps, DraftOpUserData, 
+    LOGGER, Component, ContainerBaseProps, DraftOpUserData, 
     FrontendEventType, NumberType, UIType,
     Undefined, ValueType, undefined)
 from ...core.datamodel import DataModel
@@ -28,6 +28,7 @@ from aiortc import (
     VideoStreamTrack,
     AudioStreamTrack
 )
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCRtpSender, RTCSessionDescription
 
 class VideoControlType(enum.IntEnum):
     SetMediaSource = 0
@@ -103,22 +104,43 @@ class VideoRTCControlType(enum.IntEnum):
 
 _T = TypeVar("_T", bound=VideoStreamTrack)
 
+def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
+    kind = forced_codec.split("/")[0]
+    codecs = RTCRtpSender.getCapabilities(kind).codecs
+    transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
+    transceiver.setCodecPreferences(
+        [codec for codec in codecs if codec.mimeType == forced_codec]
+    )
+
 class VideoRTCStream(MUIComponentBase[VideoRTCStreamProps], Generic[_T]):
 
-    def __init__(self, video_track: _T) -> None:
+    def __init__(self, video_track: _T, force_codec: Optional[str] = None) -> None:
         super().__init__(UIType.VideoRTCStream, VideoRTCStreamProps, 
-            allowed_events=[])
+            allowed_events=[FrontendEventType.RTCSdpRequest])
         self._video_track = video_track
+        self._force_codec = force_codec
+        self.event_rtc_sdp_request = self._create_event_slot(FrontendEventType.RTCSdpRequest)
+        self.event_rtc_sdp_request.on(self._on_rtc_sdp_request)
+        self._pcs: set[RTCPeerConnection] = set()
+        self._rtc_info = RTCTrackInfo(track=self._video_track, kind="video", force_codec=self._force_codec)
 
-        self.event_after_mount.on(self._on_component_mount)
-
-    def _on_component_mount(self):
-        appctx.get_app()._register_rtc_track(self, [
-            RTCTrackInfo(track=self._video_track, kind="video")
-        ])
-
-    def _on_component_unmount(self):
-        appctx.get_app()._unregister_rtc_track(self)
+    async def _on_rtc_sdp_request(self, params: Any):
+        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+        pc = RTCPeerConnection()
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            LOGGER.info("Connection state is %s", pc.connectionState)
+            if pc.connectionState == "failed":
+                await pc.close()
+                self._pcs.discard(pc)
+        for item in [self._rtc_info]:
+            sender = pc.addTrack(item.track)
+            if item.force_codec is not None:
+                force_codec(pc, sender, item.force_codec)
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
     @property
     def video_track(self) -> _T:
@@ -137,11 +159,14 @@ class VideoRTCStream(MUIComponentBase[VideoRTCStreamProps], Generic[_T]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def start(self):
+    async def start(self, rtc_config: Optional[Any] = None):
+        msg = {
+            "type": int(VideoRTCControlType.StartStream),
+        }
+        if rtc_config is not None:
+            msg["config"] = rtc_config
         return await self.send_and_wait(
-            self.create_comp_event({
-                "type": int(VideoRTCControlType.StartStream),
-            }))
+            self.create_comp_event(msg))
 
 
     async def stop(self):

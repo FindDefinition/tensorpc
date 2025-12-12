@@ -513,6 +513,10 @@ class FaultToleranceSSHServer:
     async def shutdown_or_kill_cmd(self, just_kill: bool = False):
         if self._cmd_task is not None:
             await self._cmd_shutdown_sequence(not just_kill)
+        else:
+            ft_state = self._get_ft_state()
+            LOGGER.warning(f"[Rank-{ft_state.rank}]no command is running, skip shutdown_or_kill_cmd. "
+                f"state: {ft_state.status}")
 
     async def client_run_cmd(self, cmd: str):
         assert self._cmd_task is None, "master can only run one command at a time" 
@@ -692,6 +696,12 @@ class FaultToleranceSSHServer:
             exit_ev.set()
             self._cmd_task = None
             LOGGER.warning("cmd waiter finished.")
+
+    def _get_ft_state(self):
+        if self._is_master:
+            return self._master_ui.dm.model.client_states[self._master_rank]
+        else:
+            return self._client_ui.dm.model
 
     async def _master_sync_cmd_status(self):
         prev_status = self._master_ui.dm.model.cmd_status

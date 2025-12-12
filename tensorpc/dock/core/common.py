@@ -105,6 +105,7 @@ _ONEARG_CHART_EVENTS = set([
 
 _ONEARG_VIDEO_STREAM_EVENTS = set([
     FrontendEventType.VideoStreamReady.value,
+    FrontendEventType.RTCSdpRequest.value,
 ])
 
 _ONEARG_EVENTS = (set(

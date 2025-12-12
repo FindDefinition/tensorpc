@@ -23,10 +23,8 @@ from tensorpc.protos_export import rpc_message_pb2
 from contextlib import suppress
 from tensorpc.core.serviceunit import ServiceEventType
 from .aiohttp_file import FileProxy, FileProxyResponse
-import aiohttp_cors
 
 from tensorpc.utils.rich_logging import get_logger
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCRtpSender, RTCSessionDescription
 
 LOGGER = get_logger("tensorpc.http", log_time_format="[%x %X]")
 
@@ -142,7 +140,6 @@ class HttpService:
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
 
-        self._pcs: set[RTCPeerConnection] = set()
         self._default_headers = {
             'Access-Control-Allow-Origin': '*',
             # 'Access-Control-Allow-Headers': '*',
@@ -266,58 +263,6 @@ class HttpService:
         res = web.Response(body=byte, headers=self._default_headers)
         return res
 
-    async def rtc_offer(self, request: web.Request):
-        params_q = request.rel_url.query
-        # node_uid = params.get('nodeUid')
-        # resource_key = params.get('key')
-        comp_uid = params_q.get('compUid')
-
-        params = await request.json()
-        # print(params)
-        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-        # comp_uid = params["compUid"]
-        pc = RTCPeerConnection()
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            LOGGER.info("Connection state is %s", pc.connectionState)
-            if pc.connectionState == "failed":
-                await pc.close()
-                self._pcs.discard(pc)
-        serv_key = "tensorpc.dock.serv.flowapp::FlowApp.get_rtc_tracks_and_codecs"
-        res, is_exc = await self.service_core.execute_async_service(
-            serv_key, [comp_uid], {}, json_call=False)
-        # You cannot rely on Content-Length if transfer is chunked.
-        if not is_exc:
-            try:
-                assert isinstance(res, list)
-                track_codec_pairs = res
-                for item in track_codec_pairs:
-                    # item is RTCTrackInfo
-                    sender = pc.addTrack(item.track)
-                    if item.force_codec is not None:
-                        force_codec(pc, sender, item.force_codec)
-                await pc.setRemoteDescription(offer)
-                answer = await pc.createAnswer()
-                await pc.setLocalDescription(answer)
-                return web.Response(content_type="application/json",
-                                text=json.dumps(
-                                    {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-                                ))
-            except:
-                traceback.print_exc()
-                return web.Response(status=500, text="Internal server error", headers=self._default_headers)
-        else:
-            return web.Response(status=500, text=res, headers=self._default_headers)
-
-def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
-    kind = forced_codec.split("/")[0]
-    codecs = RTCRtpSender.getCapabilities(kind).codecs
-    transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
-    transceiver.setCodecPreferences(
-        [codec for codec in codecs if codec.mimeType == forced_codec]
-    )
-
-
 async def _await_shutdown(shutdown_ev, loop):
     return await loop.run_in_executor(None, shutdown_ev.wait)
 
@@ -355,8 +300,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}",
-                                  rtc_conn_name="/api/webrtc"):
+                                  ws_backup_name="/api/ws_backup/{client_id}"):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -373,8 +317,6 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         # print("???????", client_max_size)
         app = web.Application(client_max_size=client_max_size)
         # logging.basicConfig(level=logging.DEBUG)
-        cors = aiohttp_cors.setup(app)
-
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
@@ -392,15 +334,6 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         app.router.add_get(ws_backup_name,
                            ws_service.handle_new_backup_connection_aiohttp)
-        cors.add(
-            app.router.add_post(rtc_conn_name, http_service.rtc_offer),
-            {
-                "*":
-                aiohttp_cors.ResourceOptions(allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*"),
-            }
-        )
 
         LOGGER.warning("server started at {}".format(port))
 
@@ -427,12 +360,10 @@ def serve_service_core(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}",
-                                  rtc_conn_name="/api/webrtc"):
+                                  ws_backup_name="/api/ws_backup/{client_id}"):
     http_task = serve_service_core_task(server_core, port, rpc_name, 
         ws_name, is_sync, rpc_pickle_name, client_max_size, standalone, 
-        ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name,
-        rtc_conn_name)
+        ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name)
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:

@@ -523,6 +523,7 @@ class FrontendEventType(enum.IntEnum):
     ChartAxisClick = 164
 
     VideoStreamReady = 170
+    RTCSdpRequest = 171
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
