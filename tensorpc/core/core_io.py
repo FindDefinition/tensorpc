@@ -595,7 +595,7 @@ def extract_arrays_from_data(data,
     return arrays, data_skeleton
 
 
-def put_arrays_to_data(arrays, data_skeleton, json_index="") -> Any:
+def put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY) -> Any:
     # if not arrays:
     #     return data_skeleton
     return _put_arrays_to_data(arrays, data_skeleton, json_index)
@@ -1278,3 +1278,11 @@ def get_exception_json(exc: BaseException):
     detail = traceback.format_exc()
     exception_json = {"error": str(exc), "detail": detail}
     return exception_json
+
+def _main():
+    data = {'': [['position-x', '65.490|(minimap.scrollValueX - 0.5) * (1 - minimap.layout.scrollFactorX).{"type":34,"st":{"type":-1},"left":{"type":34,"st":{"type":-1},"left":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"scrollValueX"},"right":{"type":40,"st":{"type":0},"value":0.5},"op":1},"right":{"type":34,"st":{"type":-1},"left":{"type":40,"st":{"type":0},"value":1},"right":{"type":43,"st":{"type":-1},"value":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"layout"},"attr":"scrollFactorX"},"op":1},"op":2}'], ['position-y', '66.536|-(minimap.scrollValueY - 0.5) * (1 - minimap.layout.scrollFactorY).{"type":34,"st":{"type":-1},"left":{"type":35,"st":{"type":-1},"op":3,"operand":{"type":34,"st":{"type":-1},"left":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"scrollValueY"},"right":{"type":40,"st":{"type":0},"value":0.5},"op":1}},"right":{"type":34,"st":{"type":-1},"left":{"type":40,"st":{"type":0},"value":1},"right":{"type":43,"st":{"type":-1},"value":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"layout"},"attr":"scrollFactorY"},"op":1},"op":2}'], ['scale-x', '28.156|minimap.layout.scrollFactorX.{"type":43,"st":{"type":-1},"value":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"layout"},"attr":"scrollFactorX"}'], ['scale-y', '28.156|minimap.layout.scrollFactorY.{"type":43,"st":{"type":-1},"value":{"type":43,"st":{"type":-1},"value":{"type":39,"st":{"type":-1},"id":"minimap"},"attr":"layout"},"attr":"scrollFactorY"}']]}
+    arrs, sk = extract_arrays_from_data(data, json_index=JSON_INDEX_KEY)
+    data_recover = put_arrays_to_data(arrs, sk, json_index=JSON_INDEX_KEY)
+
+if __name__ == "__main__":
+    _main()

@@ -1025,7 +1025,7 @@ class CopyToClipboardEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.InitLSPClient.value)
 class InitLSPClientEvent:
 
-    def __init__(self, port: int, init_cfg: dict) -> None:
+    def __init__(self, port: Union[int, str], init_cfg: dict) -> None:
         self.port = port
         self.init_cfg = init_cfg
 
@@ -1873,6 +1873,39 @@ class Component(Generic[T_base_props, T_child]):
     def get_raw_props(self):
         return self.__raw_props
 
+    def _get_dm_props_for_frontend(self, model_paths):
+        dm_paths_new = {}
+        for k, v in model_paths.items():
+            if not isinstance(v, str):
+                dm_paths_new[k] = (v[0]._flow_uid, v[1])
+            else:
+                dm_paths_new[k] = v
+        # group dm props by container to speed up query in frontend.
+        dm_paths_new_grouped = {}
+        id_to_containers = {}
+        for k, v in model_paths.items():
+            if not isinstance(v, str):
+                container = id(v[0])
+                id_to_containers[id(v[0])] = v[0]
+            else:
+                container = None
+            if container not in dm_paths_new_grouped:
+                dm_paths_new_grouped[container] = []
+            if not isinstance(v, str):
+                dm_paths_new_grouped[container].append((k, v[1]))
+            else:
+                dm_paths_new_grouped[container].append((k, v))
+        grouped_res = []
+        for container_id, paths in dm_paths_new_grouped.items():
+            if container_id is not None:
+                container = id_to_containers[container_id]
+                grouped_res.append(
+                    (container._flow_uid, paths))
+            else:
+                grouped_res.append(
+                    ("", paths))
+        return dm_paths_new, grouped_res
+
     def to_dict(self):
         """undefined will be removed here.
         if you reimplement to_dict, you need to use 
@@ -1888,13 +1921,10 @@ class Component(Generic[T_base_props, T_child]):
             "props": props,
         }
         if self._flow_data_model_paths:
-            dm_paths_new = {}
-            for k, v in self._flow_data_model_paths.items():
-                if not isinstance(v, str):
-                    dm_paths_new[k] = (v[0]._flow_uid, v[1])
-                else:
-                    dm_paths_new[k] = v
+            dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)
             res["dmProps"] = dm_paths_new
+            res["dmPropsGrouped"] = dm_paths_new_grouped
+
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
@@ -2167,9 +2197,12 @@ class Component(Generic[T_base_props, T_child]):
         data_unds = []
         if isinstance(dm_props, Undefined):
             data_unds.append("dmProps")
+            data_unds.append("dmPropsGrouped")
         else:
             if dm_props is not None:
-                data_no_und["dmProps"] = dm_props
+                dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(dm_props)
+                data_no_und["dmProps"] = dm_paths_new
+                data_no_und["dmPropsGrouped"] = dm_paths_new_grouped
         if isinstance(used_events, Undefined):
             data_unds.append("usedEvents")
         else:

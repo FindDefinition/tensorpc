@@ -26,14 +26,13 @@ from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.protos_export import wsdef_pb2
-from tensorpc.utils import rich_logging
 from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
 from contextlib import suppress
 import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-LOGGER = rich_logging.get_logger("tensorpc.http")
+from .logger import LOGGER
 
 JS_MAX_SAFE_INT = 2**53 - 1
 
@@ -611,7 +610,7 @@ class WebsocketHandler:
                     client_may_main._large_data_ws = None
             else:
                 self.client_id_to_client.pop(client_id)
-        print(f"CONN {client_id} (is_backup={is_backup}) disconnected.")
+        LOGGER.warning(f"ws {client_id} (is_backup={is_backup}) disconnected.")
 
     async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
                           shutdown_ev: asyncio.Event):

@@ -926,7 +926,7 @@ class TritonSim:
 
         self.dm.init_add_layout([
             mui.VBox([
-                mui.DataPortal([self.app_dm], [
+                mui.DataPortal(self.app_dm, [
                     self._kernel_select,
                 ]),
                 self._thread_select,

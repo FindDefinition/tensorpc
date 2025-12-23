@@ -513,6 +513,8 @@ def install_module_hook_query(module: Any, queries: list[tuple[Union[ModuleVaria
         query = item[0]
         assert isinstance(query, (ModuleVariableQuery, ModuleStackQuery)), "currently only ModuleVariableQuery and ModuleStackQuery is supported in fwd"
         mods = simple_module_query(module, query.mod_query)
+        if not mods:
+            raise ValueError(f"No module found for query: {query}")
         for mod_res in mods:
             mod_fqn = mod_res.fqn
             with_kwargs = False

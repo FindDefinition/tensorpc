@@ -46,7 +46,6 @@ import tensorpc
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
 
 from tensorpc.dock.jsonlike import Undefined
-from tensorpc.dock.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import AppLocalMeta, MasterMeta
 from tensorpc import prim
 from tensorpc.dock.serv_names import serv_names
@@ -148,13 +147,7 @@ class FlowApp:
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         # self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop_v2())
-        self.lsp_port = self.master_meta.lsp_port
-        self.http_port = self.master_meta.http_port
-        if self.lsp_port is not None:
-            assert self.master_meta.lsp_fwd_port is not None
-            self.lsp_fwd_port = self.master_meta.lsp_fwd_port
-        else:
-            self.lsp_fwd_port = None
+        self.fwd_http_port = self.master_meta.fwd_http_port
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
 
@@ -176,18 +169,9 @@ class FlowApp:
                                   self.app._flow_app_comp_core)
         # print(lay["layout"])
         # await self.app.app_initialize_async()
-        enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
-        print(enable_lsp, self.lsp_port)
-        if enable_lsp:
-            assert self.lsp_port is not None
-            try:
-                get_tmux_lang_server_info_may_create("pyright",
-                                                    self.master_meta.node_id,
-                                                    self.lsp_port)
-            except:
-                traceback.print_exc()
+        enable_lsp = self.fwd_http_port is not None and self.app._flowapp_enable_lsp
         lay = await self.app._get_app_layout()
-        if self.http_port is not None:
+        if enable_lsp and self.fwd_http_port is not None:
             lay["httpPort"] = self.master_meta.fwd_http_port
         self.app._flowapp_is_inited = True
         first_event = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})
@@ -198,7 +182,7 @@ class FlowApp:
         init_event: Dict[AppEventType, Any] = {
             AppEventType.Notify: NotifyEvent(NotifyType.AppStart)
         }
-        if self.lsp_fwd_port is not None and enable_lsp:
+        if self.fwd_http_port is not None and enable_lsp:
             cfg = copy.deepcopy(self.app._flowapp_internal_lsp_config)
             extra_path = os.getenv(TENSORPC_LSP_EXTRA_PATH, None)
             if extra_path is not None:
@@ -208,7 +192,7 @@ class FlowApp:
                 else:
                     cfg.python.analysis.extraPaths = extra_paths
             init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(
-                self.lsp_fwd_port,
+                self.fwd_http_port,
                 cfg.get_dict())
         await self._send_loop_queue.put(AppEvent("", init_event))
         if self.external_argv is not None:
@@ -363,9 +347,7 @@ class FlowApp:
             res = self.app._get_app_editor_state()
         else:
             res = await self.app._get_app_layout()
-        if self.app._flowapp_enable_lsp:
-            res["lspPort"] = self.lsp_port
-        if self.http_port is not None:
+        if self.app._flowapp_enable_lsp and self.fwd_http_port is not None:
             res["httpPort"] = self.master_meta.fwd_http_port
         return res
 

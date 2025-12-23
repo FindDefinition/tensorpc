@@ -1,4 +1,26 @@
 # Changelog
+# [0.26.0] - 2025-12-24
+- [infra] better datamodel query impl.
+- [infra] BREAKING CHANGE: better language server impl, you must upgrade tensorpc to 0.26 to use language server.
+
+# [0.25.3] - 2025-12-10
+### Added
+- [ui] add pointer lock support for flex box.
+### Fixed 
+- [ui] fix small bug in video rtc.
+
+# [0.25.2] - 2025-12-09
+### Added
+- [ui] add `disableContextMenu` to video rtc component to disable right click context menu when run app in browser.
+
+# [0.25.1] - 2025-12-09
+### Added
+- [ui] add regular keyboard event to flex box.
+
+# [0.25.0] - 2025-12-09
+### Added
+- [ui] add video rtc component for low latency video streaming.
+
 # [0.24.0] - 2025-10-xx
 - [infra] pfl improvement: add class support. add multi-thread support for ast runner.
 - [infra] add distributed support (single-node only).

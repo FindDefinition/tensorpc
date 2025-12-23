@@ -30,7 +30,6 @@ from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.apps.dbg.constants import TENSORPC_DBG_FRAMESCRIPT_STORAGE_PREFIX, DebugFrameState
 from tensorpc.apps.dbg.core.frame_id import get_frame_uid
 from tensorpc.dock.components.plus.styles import CodeStyles
-from tensorpc.dock.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.dock.components import mui
 from tensorpc.dock import appctx
 

@@ -30,7 +30,6 @@ from tensorpc.utils.containers.dict_proxy import DictProxy
 
 import numpy as np
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
-from tensorpc.dock.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.dock.components import mui
 from tensorpc.dock import appctx
 # from tensorpc.core import dataclass_dispatch as dataclasses

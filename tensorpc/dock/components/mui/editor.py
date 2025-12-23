@@ -79,7 +79,6 @@ class MonacoEditorProps(FlexComponentBaseProps, ContainerBaseProps):
     language: Union[str, Undefined] = undefined
     path: Union[str, Undefined] = undefined
     debounce: Union[NumberType, Undefined] = undefined
-    lspPort: Union[int, Undefined] = undefined
     readOnly: Union[bool, Undefined] = undefined
 
     actions: Union[list[MonacoEditorAction], Undefined] = undefined

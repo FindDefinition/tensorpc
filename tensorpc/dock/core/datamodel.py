@@ -704,7 +704,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 @dataclasses.dataclass
 class DataPortalProps(ContainerBaseProps):
     comps: list[Component] = dataclasses.field(default_factory=list)
-    query: Union[Undefined, str] = undefined
 
 
 class DataPortal(ContainerBase[DataPortalProps, Component]):
@@ -714,7 +713,7 @@ class DataPortal(ContainerBase[DataPortalProps, Component]):
 
     def __init__(
         self,
-        sources: list[Component],
+        source: Component,
         children: Optional[Union[Sequence[Component],
                                  Mapping[str, Component]]] = None
     ) -> None:
@@ -724,9 +723,10 @@ class DataPortal(ContainerBase[DataPortalProps, Component]):
             UIType.DataModel, UIType.ThreeURILoaderContext,
             UIType.ThreeCubeCamera
         }
+        sources = [source]
         for comp in sources:
             assert comp._flow_comp_type in allowed_comp_types, "DataPortal only support DataModel and resource loaders."
-        assert len(sources) > 0, "DataPortal must have at least one source"
+        assert len(sources) == 1, "DataPortal only support one source."
         super().__init__(UIType.DataPortal,
                          DataPortalProps,
                          children,

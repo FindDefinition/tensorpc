@@ -46,7 +46,7 @@ REQUIRED = [
     "psutil",
     "libtmux",
     "humanize",
-    "pyright",
+    "pyright[nodejs]",
     "pydantic>=2.7,<3.0",
     "setproctitle",
     "rich",
@@ -57,7 +57,6 @@ REQUIRED = [
     "lark",
     "cmap",
     "aiortc",
-    "aiohttp_cors",
 ]
 
 # What packages are optional?

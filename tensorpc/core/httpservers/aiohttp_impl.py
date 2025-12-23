@@ -15,6 +15,7 @@ from tensorpc.core import core_io, defs
 import ssl
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.constants import TENSORPC_API_FILE_DOWNLOAD, TENSORPC_API_FILE_UPLOAD, TENSORPC_FETCH_STATUS
+from tensorpc.core.httpservers.langservers.core import LanguageServerHandler
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
@@ -300,7 +301,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}"):
+                                  ws_backup_name="/api/ws_backup/{client_id}",
+                                  langserver_name="/api/langserver/{type}"):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -314,6 +316,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
             await server_core.run_event_async(ServiceEventType.Init)
 
         ws_service = AiohttpWebsocketHandler(server_core)
+        ls_service = LanguageServerHandler()
         # print("???????", client_max_size)
         app = web.Application(client_max_size=client_max_size)
         # logging.basicConfig(level=logging.DEBUG)
@@ -334,6 +337,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         app.router.add_get(ws_backup_name,
                            ws_service.handle_new_backup_connection_aiohttp)
+        app.router.add_get(langserver_name, ls_service.handle_ls_open)
 
         LOGGER.warning("server started at {}".format(port))
 
@@ -360,10 +364,12 @@ def serve_service_core(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}"):
+                                  ws_backup_name="/api/ws_backup/{client_id}",
+                                  langserver_name="/api/langserver/{type}"):
     http_task = serve_service_core_task(server_core, port, rpc_name, 
         ws_name, is_sync, rpc_pickle_name, client_max_size, standalone, 
-        ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name)
+        ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name,
+        langserver_name)
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:
