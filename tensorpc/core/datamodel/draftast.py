@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 import enum
 import json
+import traceback
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -36,6 +37,8 @@ class DraftASTFuncType(enum.Enum):
     NUMPY_TO_LIST = "npToList"
     NUMPY_GETSUBARRAY = "npGetSubArray"
     NUMPY_SLICE_FIRST_AXIS = "npSliceFirstAxis"
+    JOIN = "join"
+    LEN = "len"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
@@ -44,7 +47,10 @@ _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.CREATE_ARRAY.value, DraftASTFuncType.CONCAT.value,
     DraftASTFuncType.COLOR_SLICE.value, DraftASTFuncType.COLOR_NAME.value,
     DraftASTFuncType.NUMPY_TO_LIST.value, DraftASTFuncType.NUMPY_GETSUBARRAY.value,
-    DraftASTFuncType.NUMPY_SLICE_FIRST_AXIS.value
+    DraftASTFuncType.NUMPY_SLICE_FIRST_AXIS.value,
+    DraftASTFuncType.JOIN.value,
+    DraftASTFuncType.LEN.value
+
 }
 
 @dataclasses.dataclass
@@ -154,7 +160,8 @@ def _draft_ast_to_pfl_path_recursive(node: DraftASTNode) -> str:
         if isinstance(node.value, (int, float)):
             return f"{node.value}"
         else:
-            return f"{(node.value)}"
+            # convert intenum/strenum to int/str.
+            return f"{json.loads(json.dumps(node.value))}"
     elif node.type == DraftASTType.STRING_LITERAL:
         return f"'{node.value}'"
     elif node.type in _GET_ITEMS:
@@ -174,6 +181,14 @@ def _draft_ast_to_pfl_path_recursive(node: DraftASTNode) -> str:
             return f"{child_value}[{node.value}]"
     elif node.type == DraftASTType.FUNC_CALL:
         assert node.value in _FRONTEND_SUPPORTED_FUNCS, f"unsupported func {node.value}, only support {_FRONTEND_SUPPORTED_FUNCS}"
+        # TODO implement built-in if exp support in draft
+        if node.value == DraftASTFuncType.WHERE.value:
+            # use x if cond and y
+            assert len(node.children) == 3
+            cond = _draft_ast_to_pfl_path_recursive(node.children[0])
+            x = _draft_ast_to_pfl_path_recursive(node.children[1])
+            y = _draft_ast_to_pfl_path_recursive(node.children[2])
+            return f"(({x}) if ({cond}) else ({y}))"
         return f"{node.value}(" + ",".join([
             _draft_ast_to_pfl_path_recursive(child) for child in node.children
         ]) + ")"
@@ -184,7 +199,7 @@ def _draft_ast_to_pfl_path_recursive(node: DraftASTNode) -> str:
             op = "and"
         elif op == "||":
             op = "or"
-        return f"({_draft_ast_to_pfl_path_recursive(node.children[0])}{op}{_draft_ast_to_pfl_path_recursive(node.children[1])})"
+        return f"({_draft_ast_to_pfl_path_recursive(node.children[0])} {op} {_draft_ast_to_pfl_path_recursive(node.children[1])})"
     elif node.type == DraftASTType.UNARY_OP:
         op = node.value
         return f"{op}{_draft_ast_to_pfl_path_recursive(node.children[0])}"
@@ -305,6 +320,8 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
             return [evaluate_draft_ast(child, obj) for child in node.children]
         elif node.value == "concat":
             return sum([evaluate_draft_ast(child, obj) for child in node.children], [])
+        elif node.value == "len":
+            return len(evaluate_draft_ast(node.children[0], obj))
         else:
             raise NotImplementedError(f"func {node.value} not implemented")
     else:
@@ -393,11 +410,17 @@ class DraftASTCompiler:
                 cond = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
                 x = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
                 y = self._compile_draft_ast_to_py_expr(node.children[2], first_pass)
-                res =  f"({x} if {cond} else {y})"
+                res =  f"(({x}) if ({cond}) else ({y}))"
             elif node.value == "array":
                 res =  f"[{','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}]"
             elif node.value == "concat":
                 res =  f"sum({','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}, [])"
+            elif node.value == "len":
+                res =  f"len({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)})"
+            elif node.value == "join":
+                sep = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+                arr = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
+                res = f"({sep}).join({arr})"
             else:
                 raise NotImplementedError(f"func {node.value} not implemented")
         else:

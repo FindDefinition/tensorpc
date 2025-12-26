@@ -211,7 +211,7 @@ class MarkdownTutorial(mui.FlexBox):
                 if block.type == "markdown":
                     if block.content.strip() == "":
                         continue
-                    blocks.append(mui.Markdown(block.content))
+                    blocks.append(mui.Markdown(block.content).prop(codeHighlight=True))
                 elif block.type == "code":
                     blocks.append(
                         CodeBlock(block.content.lstrip()).prop(height="200px",
@@ -224,7 +224,7 @@ class MarkdownTutorial(mui.FlexBox):
                 if block.type == "markdown":
                     if block.content.strip() == "":
                         continue
-                    blocks.append(mui.Markdown(block.content))
+                    blocks.append(mui.Markdown(block.content).prop(codeHighlight=True))
                 elif block.type == "code":
                     blocks.append(
                         AppInMemory(f"{path_uid}-{i}",

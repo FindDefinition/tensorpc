@@ -45,7 +45,7 @@ def concat(*arrs: Any) -> Any:
     return sum(arrs, [])
 
 @register_pfl_std(mapped_name="matchCase", backend="js")
-def matchCase(cond, items) -> Any:
+def matchCase(cond: Any, items: Any) -> Any:
     if not isinstance(items, list):
         return None
     for pair in items:
@@ -56,7 +56,7 @@ def matchCase(cond, items) -> Any:
     return None 
 
 @register_pfl_std(mapped_name="matchCaseVarg", backend="js")
-def matchCaseVarg(cond, *items) -> Any:
+def matchCaseVarg(cond: Any, *items: Any) -> Any:
     if len(items) == 0 or len(items) % 2 != 0:
         return None
     for i in range(0, len(items), 2):
@@ -65,7 +65,7 @@ def matchCaseVarg(cond, *items) -> Any:
     return None 
 
 @register_pfl_std(mapped_name="npToList", backend="js")
-def npToList(obj):
+def npToList(obj: Any):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     return None 

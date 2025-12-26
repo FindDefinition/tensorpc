@@ -5,6 +5,7 @@ from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core import inspecttools
 from tensorpc.apps.dbg.constants import BreakpointType, FrameLocMeta, TracerType, TraceResult, TracerConfig, TraceMetrics, RecordMode
 from tensorpc.core.datamodel.draft import DraftFieldMeta
+from tensorpc.utils.uniquename import UniqueNamePool
 
 
 @dataclasses.dataclass
@@ -79,9 +80,10 @@ class Breakpoint:
         cur_frame: Optional[FrameType] = frame
         frame_select_opts: list[dict[str, Any]] = []
         offset = 0
+        uid_pool = UniqueNamePool()
         while cur_frame is not None:
             info = Breakpoint.get_frame_info_from_frame(cur_frame)
-            frame_select_opts.append({"label": info.qualname, "offset": offset, **dataclasses.asdict(info)})
+            frame_select_opts.append({"label": uid_pool(info.qualname), "offset": offset, **dataclasses.asdict(info)})
             offset += 1
             cur_frame = cur_frame.f_back
         return frame_select_opts

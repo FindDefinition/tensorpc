@@ -3,9 +3,8 @@ import traceback
 from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
-
 import rich
-
+from typing_extensions import Self
 from tensorpc.apps.cflow.logger import CFLOW_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined
@@ -14,14 +13,17 @@ from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_
 from tensorpc.core.datamodel.events import DraftChangeEvent, DraftEventType
 from tensorpc.dock.core.datamodel import DataModel
 from tensorpc.dock.jsonlike import Undefined
-from tensorpc.dock.components.flowui import FlowInternals, XYPosition, NodeBase, EdgeBase, Node, Edge, Flow, EventSelection
+from tensorpc.dock.components.flowui import FlowInternals, XYPosition, NodeBase, EdgeBase, Node, Edge, Flow, EventSelection, NodeData
 from tensorpc.core.annolib import undefined
+
+
 @dataclasses.dataclass
 class BaseNodeModel(NodeBase):
     width: Union[Undefined, Union[int, float]] = undefined
     height: Union[Undefined, Union[int, float]] = undefined
     position: XYPosition = dataclasses.field(
         default_factory=lambda: XYPosition(0, 0))
+
 
 @dataclasses.dataclass
 class BaseEdgeModel(EdgeBase):
@@ -49,7 +51,7 @@ def _default_to_model_edge(edge: EdgeBase):
         edge.sourceHandle, edge.targetHandle)
 
 class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
-    def __init__(self, flow_comp: Flow, model_getter: Callable[[], T_flow_model], draft: Any, 
+    def __init__(self, flow_comp: Flow, model_getter: Callable[[], Any], draft: Any, 
             to_ui_node: Callable[[T_flow_model, str], Node], to_ui_edge: Optional[Callable[[T_edge_model], Edge]] = None,
             to_model_edge: Optional[Callable[[Edge], T_edge_model]] = None,
             flow_uid_getter: Optional[Callable[[], str]] = None,
@@ -93,6 +95,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
 
     def _get_cur_model_may_nested(self):
         root_model = self._model_getter()
+        # print(root_model, self._draft)
         cur_model = evaluate_draft_ast_noexcept(get_draft_ast_node(self._draft), root_model)
         return cast(Optional[T_flow_model], cur_model)
 
@@ -103,10 +106,8 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         cur_ui_edge_ids = set([n.id for n in self._flow_comp.edges])
         cur_model = self._get_cur_model_may_nested()
         if cur_model is None:
-            CFLOW_LOGGER.warning("Flow %s clear triggered.", self._debug_id)
-            # eval failed, use empty flow
+            # eval failed, this usually means current node don't have a sub flow.
             await self._flow_comp.clear()
-            
         else:
             try:
                 cur_model_edges_ids = set(cur_model.edges.keys())
@@ -132,7 +133,9 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         cur_ui_node_ids = set([n.id for n in self._flow_comp.nodes])
         cur_model = self._get_cur_model_may_nested()
         if cur_model is None:
-            # eval failed, use empty flow
+            # print(self._model_getter())
+            # CFLOW_LOGGER.warning("_sync_ui_nodes_to_model: Flow %s eval failed, use empty flow.", self._debug_id)
+            # eval failed, this usually means current node don't have a sub flow.
             await self._flow_comp.clear()
         else:
             cur_model_node_ids = set(cur_model.nodes.keys())
@@ -238,6 +241,12 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         return flow_user_uid == event_flow_uid
 
     async def _handle_draft_change(self, ev: DraftChangeEvent):
+        # we observe draft.nodes and draft.edges, there will be two kind of change:
+        # 1. whole nodes/edges changed (ObjectIdChange), this means evaluated nodes/edges dict is changed.
+        # usually this is caused by flow change, so we need to reset the whole flow ui.
+        # 2. user change nodes/edges dict by pop/clear/update etc. (DictChange), so we compare changed
+        # nodes/edges with previous and sync to flow ui.
+        # keep in mind that nested change (e.g. nodes["id"].content = ...) won't trigger `DictChange`.
         node_change_type = ev.type_dict["nodes"]
         edge_change_type = ev.type_dict["edges"]
         if node_change_type == DraftEventType.ObjectIdChange or edge_change_type == DraftEventType.ObjectIdChange:
@@ -281,7 +290,8 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             if issubclass(draft_type.origin_type, str):
                 assert draft_type.is_optional, "selected node must be Optional[str]"
             elif draft_type.is_sequence_type():
-                assert issubclass(draft_type.origin_type, str), "selected node must be List[str] if is list"
+                assert issubclass(draft_type.child_types[0], str), "selected node must be List[str] if is list"
+                assert not draft_type.is_optional, "selected node not be Optional if it's list[str]"
             else:
                 raise ValueError("selected node must be Optional[str] or List[str]")
             self._flow_comp.event_selection_change.on(partial(self._handle_node_selection, draft=selected_node_draft))

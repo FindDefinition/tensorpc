@@ -553,7 +553,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         ops = await self._update_with_jmes_ops_backend(backend_ops)
         if need_freeze:
             frontend_ops = [op.freeze_assign_data(is_json_only) for op in frontend_ops]
-        frontend_ops = [op.to_pfl_path_op().to_dict() for op in frontend_ops]
+        frontend_ops = [op.to_pfl_frontend_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({
                 "type": 0,

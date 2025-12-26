@@ -2160,6 +2160,7 @@ class AutocompletePropsBase(MUIComponentBaseProps, SelectBaseProps):
     textFieldProps: Union[Undefined, TextFieldProps] = undefined
     labelKey: Union[Undefined, str] = undefined
     newValueKey: Union[Undefined, str] = undefined
+    optionKey: Union[Undefined, str] = undefined
 
 
 @dataclasses.dataclass
@@ -4032,6 +4033,60 @@ class JsonViewer(MUIComponentBase[JsonViewerProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class JsonEditorProps(JsonViewerProps):
+    restrictEdit: Union[Undefined, bool] = undefined
+    restrictDelete: Union[Undefined, bool] = undefined
+    restrictAdd: Union[Undefined, bool] = undefined
+    restrictDrag: Union[Undefined, bool] = undefined
+    indent: Union[Undefined, int] = undefined
+    collapse: Union[Undefined, bool, int] = undefined
+    rootName: Union[Undefined, str] = undefined
+    containerProps: Union[Undefined, FlexBoxProps] = undefined
+
+class JsonEditor(MUIComponentBase[JsonViewerProps]):
+
+    def __init__(
+        self,
+        init_data: Any = None,
+    ) -> None:
+        super().__init__(UIType.JsonEditor, JsonViewerProps)
+        self.props.data = init_data
+
+    async def write(self, data: Any):
+        await self.send_and_wait(self.update_event(data=data))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+class JsonFastViewer(MUIComponentBase[JsonViewerProps]):
+
+    def __init__(
+        self,
+        init_data: Any = None,
+    ) -> None:
+        super().__init__(UIType.JsonFastViewer, JsonViewerProps)
+        self.props.data = init_data
+
+    async def write(self, data: Any):
+        await self.send_and_wait(self.update_event(data=data))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class _TreeControlType(enum.IntEnum):
     UpdateSubTree = 0

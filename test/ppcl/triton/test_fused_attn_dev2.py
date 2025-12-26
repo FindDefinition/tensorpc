@@ -17,6 +17,7 @@ torch._dynamo.config.recompile_limit = 10000
 # np.seterr(all='raise')
 def _attn_fwd_grid(META, q_shape):
     res = (triton.cdiv(q_shape[2], META["BLOCK_M"]), q_shape[0] * q_shape[1], 1)
+    print("FWD GRID", res)
     return res
 
 def _pad_seq_tensor(q: np.ndarray, pad_length: int) -> np.ndarray:
@@ -61,7 +62,7 @@ def _prepare_blockwise_causal_attn_mask(
                                        KV_LEN=total_length, _compile=True, device=device)
         return block_mask
 
-def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype = torch.float32, 
+def _attn_fwd_kernel_test_fn(N_CTX: int = 3000, HEAD_DIM: int = 64, H = 2, dtype = torch.float32, 
         is_fwd: bool = True, head_first: bool = True,
          Q_TRANSPOSED: bool = True, 
         KV_TRANSPOSED: bool = True, 
@@ -72,9 +73,9 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
         block_causal: Optional[int] = None) -> pfl.PFLInlineRunEnv:
     # TODO triton code don't support BLOCK_M < BLOCK_N
     BATCH = 1
-    BLOCK_M = 64
-    BLOCK_N = 32
-    is_causal = True or block_causal is not None
+    BLOCK_M = 128
+    BLOCK_N = 64
+    is_causal = True or block_causal > 1
     stage = 3 if is_causal else 1
     sm_scale = 0.5
     M = torch.empty((BATCH, H, N_CTX), dtype=torch.float32)
@@ -186,6 +187,7 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
             "SM_SCALE": sm_scale,
             "IS_DIVISIBLE": IS_DIVISIBLE,
             "OUT_USE_TMA": OUT_USE_TMA,
+            "block_causal": block_causal,
         }
     else:
         assert head_first
@@ -223,9 +225,8 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
             "BLOCK_N": BLOCK_N,
             "SM_SCALE": sm_scale,
             "IS_DIVISIBLE": IS_DIVISIBLE,
+            "block_causal": block_causal,
         }
-    if block_causal is not None:
-        fwd_kwargs["block_causal"] = block_causal
     if is_fwd:
         if is_tma:  
             if OUT_USE_TMA:
@@ -274,7 +275,7 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
         # when we run real triton kernel, we shouldn't run slow fwd kernel in simulation.
         
         # if N_CTX <= 1000:
-        if block_causal is not None:
+        if block_causal > 1:
             q_fl = q.cuda()
             k_fl = k.cuda()
             v_fl = v.cuda()
@@ -320,9 +321,9 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
         PRE_BLOCK = 128
         # assert N_CTX % PRE_BLOCK == 0
         # pre_grid = (N_CTX // PRE_BLOCK, BATCH * H)
-        DQ_ATOMIC = False # faster in Hopper, slower in Ampere
+        DQ_ATOMIC = True # faster in Hopper, slower in Ampere
         if DQ_ATOMIC:
-            BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 128, 128, 64
+            BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
         else:
             if HEAD_DIM == 64:
                 BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
@@ -418,7 +419,7 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
             "BLOCK_M2": BLOCK_M2,
             "BLOCK_N2": BLOCK_N2,
             "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
-            "num_warps": 8 if DQ_ATOMIC else 8,
+            "num_warps": 8 if DQ_ATOMIC else 4,
             "num_stages": 3 if DQ_ATOMIC else 3,
             "MASK_VARIANT": "causal" if is_causal else "full",
             "is_head_first": head_first,
@@ -433,11 +434,9 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
             "PADDED_QKV": PADDED_QKV,
             "PADDED_OUTPUTS": PADDED_OUTPUTS,
             "IS_TMA": is_tma,
+            "block_causal": block_causal,
         }
-        if block_causal is not None:
-            test_kwargs.update({
-                "block_causal": block_causal,
-            })
+        print(Q_TRANSPOSED, KV_TRANSPOSED, SCORE_TRANSPOSED, DQ_TRANSPOSED, PARALLEL_DQ, is_tma, block_causal)
         if is_tma: 
             test_kwargs.update({
                 "Q": tritonstd.HostTensorDescriptor(q_np_padded.reshape(-1, HEAD_DIM), block_shape=[BLOCK_M1, HEAD_DIM]),
@@ -735,6 +734,7 @@ def _attn_fwd_inner_single(acc, l_i, m_i, q,  #
     m_ij = tl.maximum(m_i, tl.max(qk, 1))
     # -- update m_i and l_i
     alpha = tl.math.exp2(m_i - m_ij)
+
     p = tl.math.exp2(qk - m_ij[:, None])
     l_i = l_i * alpha + tl.sum(p, 1)
     # -- update output accumulator --
@@ -1051,7 +1051,7 @@ def _attn_fwd_inner_tma_bshd_v2(acc, l_i, m_i, q,  #
 @triton.autotune(list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM"])
 @triton.jit
 @tritonstd.mark_triton_compilable(inline_run_env_fn=_attn_fwd_kernel_test_fn, 
-    real_kwargs={"N_CTX": 30000, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
+    real_kwargs={"N_CTX": 61440, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
     raw_fn=_xformers_bench_fn_fwd,
 )
 def _attn_fwd(Q, K, V, M, Out,  #
@@ -1916,131 +1916,6 @@ def _attn_bwd_dqdkdv_single_blockcausal(q_ptrs, dq_ptrs, do_ptrs,
             p_or_pT = tl.where(((offs_m[None, :] // block_causal) >= (offs_n[:, None] // block_causal)), p_or_pT, 0.0)
         else:
             p_or_pT = tl.where(((offs_m[:, None] // block_causal) >= (offs_n[None, :] // block_causal)), p_or_pT, 0.0)
-    if IS_DIVISIBLE or PADDED_QKV:
-        do = tl.load(do_ptrs)
-    else:
-        do = tl.load(do_ptrs, mask=offs_m[:, None] < N_CTX, other=0.0)
-    if CALC_DP_PRE_LOAD_DELTA:
-        if SCORE_TRANSPOSED:
-            # dpT
-            dp_or_dpT = tl.dot(_may_trans(v, KV_TRANSPOSED), tl.trans(do))
-        else:
-            dp_or_dpT = tl.dot(do, _may_trans(v, not KV_TRANSPOSED))
-
-    p_p_or_pT = p_or_pT
-    p_p_or_pT = p_p_or_pT.to(tl.float16)
-    dv += tl.dot(_may_trans(p_p_or_pT, not SCORE_TRANSPOSED), do)
-    # D (= delta) is pre-divided by ds_scale.
-    # if IS_DIVISIBLE:
-    Di = tl.load(D + offs_m)
-    # else:
-    #     Di = tl.load(D + offs_m, mask=offs_m < N_CTX)
-    # Compute dV.
-    if not CALC_DP_PRE_LOAD_DELTA:
-        if SCORE_TRANSPOSED:
-            # dpT
-            dp_or_dpT = tl.dot(_may_trans(v, KV_TRANSPOSED), tl.trans(do))
-        else:
-            dp_or_dpT = tl.dot(do, _may_trans(v, not KV_TRANSPOSED), )
-
-    if SCORE_TRANSPOSED:
-        # dsT
-        ds_or_dsT = p_or_pT * (dp_or_dpT - Di[None, :])
-    else:
-        # ds
-        ds_or_dsT = p_or_pT * (dp_or_dpT - Di[:, None])
-    ds_or_dsT = ds_or_dsT.to(tl.float16)
-    dk += tl.dot(_may_trans(ds_or_dsT, not SCORE_TRANSPOSED), _may_trans(q_or_qT, Q_TRANSPOSED))
-
-    if DQ_ATOMIC:
-        if DQ_TRANSPOSED:
-            dq_or_dqT = tl.dot(_may_trans(k, not KV_TRANSPOSED), _may_trans(ds_or_dsT, not SCORE_TRANSPOSED)).to(tl.float32)
-        else:
-            dq_or_dqT = tl.dot(_may_trans(ds_or_dsT, SCORE_TRANSPOSED), _may_trans(k, KV_TRANSPOSED)).to(tl.float32)
-        if IS_DIVISIBLE or PADDED_OUTPUTS:
-            tl.atomic_add(
-                dq_ptrs,
-                dq_or_dqT,
-                sem="relaxed",
-            )
-        else:
-            if DQ_TRANSPOSED:
-                mask = offs_m[None, :] < N_CTX
-            else:
-                mask = offs_m[:, None] < N_CTX
-            tl.atomic_add(
-                dq_ptrs,
-                dq_or_dqT,
-                sem="relaxed",
-                mask=mask,
-            )
-
-    return dk, dv
-@triton.jit
-@tritonstd.mark_triton_compilable(is_template=True)
-def _attn_bwd_dqdkdv_single_blockcausal_dynamic(q_ptrs, dq_ptrs, do_ptrs, 
-                   dk, dv,  #
-                   k, v,  #
-                   LSE, D,  #
-                   start_m, offs_n,
-                   # shared by Q/K/V/DO.
-                   N_CTX, 
-                   block_causal,
-                   # Filled in by the wrapper.
-                   BLOCK_M: tl.constexpr,
-                   QK_SCALE: tl.constexpr,
-                   DQ_ATOMIC: tl.constexpr,
-                   Q_TRANSPOSED: tl.constexpr,
-                   KV_TRANSPOSED: tl.constexpr,
-                   SCORE_TRANSPOSED: tl.constexpr,
-                   DQ_TRANSPOSED: tl.constexpr,
-                   IS_DIVISIBLE: tl.constexpr,
-                   CHECK_BLOCK_BOUNDARY: tl.constexpr,
-                   MASK_VARIANT: tl.constexpr,
-                   PADDED_QKV: tl.constexpr,
-                   PADDED_OUTPUTS: tl.constexpr,
-                   CALC_DP_PRE_LOAD_DELTA: tl.constexpr):
-    offs_m = start_m + tl.arange(0, BLOCK_M)
-
-    if IS_DIVISIBLE or PADDED_QKV:
-        if Q_TRANSPOSED:
-            q_or_qT = tl.load(q_ptrs)
-        else:
-            q_or_qT = tl.load(q_ptrs)
-    else:
-        if Q_TRANSPOSED:
-            q_or_qT = tl.load(q_ptrs, mask=offs_m[None, :] < N_CTX, other=0.0)
-        else:
-            q_or_qT = tl.load(q_ptrs, mask=offs_m[:, None] < N_CTX, other=0.0)
-    # if IS_DIVISIBLE:
-    m = tl.load(LSE + offs_m)
-    # else:
-    #     m = tl.load(LSE + offs_m, mask=offs_m < N_CTX)
-    # m = tl.where(m == -float("inf"), 0.0, m)
-
-    # Load m before computing qk to reduce pipeline stall.
-    # qkT = tl.dot(k, qT)
-    if SCORE_TRANSPOSED:
-        qk_or_qkT = tl.dot(_may_trans(k, KV_TRANSPOSED), _may_trans(q_or_qT, not Q_TRANSPOSED))
-    else:
-        qk_or_qkT = tl.dot(_may_trans(q_or_qT, Q_TRANSPOSED), _may_trans(k, not KV_TRANSPOSED))
-    if MASK_VARIANT == "causal":
-        if SCORE_TRANSPOSED:
-            qk_or_qkT = tl.where((offs_n[:, None] < N_CTX) & ((offs_m[None, :] // block_causal) >= (offs_n[:, None] // block_causal)), qk_or_qkT, float("-inf"))
-        else:
-            qk_or_qkT = tl.where((offs_n[None, :] < N_CTX) & ((offs_m[:, None] // block_causal) >= (offs_n[None, :] // block_causal)), qk_or_qkT, float("-inf"))
-    else:
-        if SCORE_TRANSPOSED:
-            qk_or_qkT = tl.where((offs_n[:, None] < N_CTX), qk_or_qkT, float("-inf"))
-        else:
-            qk_or_qkT = tl.where((offs_n[None, :] < N_CTX), qk_or_qkT, float("-inf"))
-
-    if SCORE_TRANSPOSED:
-        # pT
-        p_or_pT = tl.math.exp2(qk_or_qkT - m[None, :])
-    else:
-        # p
-        p_or_pT = tl.math.exp2(qk_or_qkT - m[:, None])
     if IS_DIVISIBLE or PADDED_QKV:
         do = tl.load(do_ptrs)
     else:
@@ -3218,12 +3093,11 @@ def _attn_bwd_dq_v2(dq, q, K, V,  #
                  # shared by Q/K/V/DO.
                  stride_tok, stride_d,  #
                  H, N_CTX,  #
-                 start_m, start_n, num_steps,  #
-
                  BLOCK_M2: tl.constexpr,  #
                  BLOCK_N2: tl.constexpr,  #
                  HEAD_DIM: tl.constexpr,
                  # Filled in by the wrapper.
+                 start_m, start_n, num_steps,  #
                  MASK_VARIANT: tl.constexpr,
                  Q_TRANSPOSED: tl.constexpr,
                  SCORE_TRANSPOSED: tl.constexpr,
@@ -3352,10 +3226,8 @@ def _attn_bwd(Q, K, V, #
     K += adj_pad
     V += adj_pad
     DO += adj_pad
-    if PARALLEL_DQ:
-        DQ += adj
-    else:
-        DQ += adj_pad
+    
+    DQ += adj_pad
     DK += adj
     DV += adj
     M += off_chz
@@ -3532,8 +3404,8 @@ def _attn_bwd(Q, K, V, #
                 do, m, D,  #
                 stride_tok, stride_d,  #
                 H, N_CTX,  #
-                start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,  #
                 BLOCK_M2, MASK_BLOCK_N2, HEAD_DIM,  #
+                start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,  #
                 MASK_VARIANT="causal",
                 Q_TRANSPOSED=DQ_TRANSPOSED,
                 SCORE_TRANSPOSED=DQ_TRANSPOSED,
@@ -3549,8 +3421,8 @@ def _attn_bwd(Q, K, V, #
                 do, m, D,  #
                 stride_tok, stride_d,  #
                 H, N_CTX,  #
-                start_m, end_n - num_steps * BLOCK_N2, num_steps,  #
                 BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
+                start_m, end_n - num_steps * BLOCK_N2, num_steps,  #
                 MASK_VARIANT="full",
                 Q_TRANSPOSED=DQ_TRANSPOSED,
                 SCORE_TRANSPOSED=DQ_TRANSPOSED,
@@ -3566,8 +3438,8 @@ def _attn_bwd(Q, K, V, #
                 do, m, D,  #
                 stride_tok, stride_d,  #
                 H, N_CTX,  #
-                start_m, 0, num_steps,  #
                 BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
+                start_m, 0, num_steps,  #
                 MASK_VARIANT="full",
                 Q_TRANSPOSED=DQ_TRANSPOSED,
                 SCORE_TRANSPOSED=DQ_TRANSPOSED,
@@ -3607,7 +3479,7 @@ def _attn_bwd(Q, K, V, #
             H, N_CTX,  #
             BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
             start_m, 0, num_steps,  #
-            MASK_VARIANT="full",
+            MASK=False,
             Q_TRANSPOSED=DQ_TRANSPOSED,
             SCORE_TRANSPOSED=DQ_TRANSPOSED,
             IS_DIVISIBLE=IS_DIVISIBLE,  #
@@ -3623,171 +3495,8 @@ def _attn_bwd(Q, K, V, #
             tl.store(dq_ptrs, dq, mask=offs_m[:, None] < N_CTX)
 
 @triton.jit
-@tritonstd.mark_triton_compilable(is_template=True)
-def _attn_bwd_dq_bc_single(dq, q, k_ptrs, v_ptrs,  #
-                 do, m, Di,
-                 N_CTX,  #
-                 offs_m, start_n,
-                 block_causal,
-                 # Filled in by the wrapper.
-                 BLOCK_N: tl.constexpr,
-                 Q_TRANSPOSED: tl.constexpr,
-                 SCORE_TRANSPOSED: tl.constexpr,
-                IS_DIVISIBLE: tl.constexpr,
-                CHECK_BLOCK_BOUNDARY: tl.constexpr,
-                MASK_VARIANT: tl.constexpr,
-                PADDED_QKV: tl.constexpr):
-    offs_n = start_n + tl.arange(0, BLOCK_N)
-    if IS_DIVISIBLE or PADDED_QKV:
-        k = tl.load(k_ptrs)
-        v = tl.load(v_ptrs)
-    else:
-        k = tl.load(k_ptrs, mask=offs_n[:, None] < N_CTX, other=0.0)
-        v = tl.load(v_ptrs, mask=offs_n[:, None] < N_CTX, other=0.0)
-
-    if SCORE_TRANSPOSED:
-        if not Q_TRANSPOSED:
-            qk_or_qkT = tl.dot(k, tl.trans(q))
-        else:
-            qk_or_qkT = tl.dot(k, q)
-    else:
-        if not Q_TRANSPOSED:
-            qk_or_qkT = tl.dot(q, tl.trans(k))
-        else:
-            qk_or_qkT = tl.dot(tl.trans(q), tl.trans(k))
-    if CHECK_BLOCK_BOUNDARY:
-        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        if SCORE_TRANSPOSED:
-            qk_or_qkT = tl.where(offs_n[:, None] < N_CTX, qk_or_qkT, float("-inf"))
-        else:
-            qk_or_qkT = tl.where(offs_n[None, :] < N_CTX, qk_or_qkT, float("-inf"))
-
-    if SCORE_TRANSPOSED:
-        p_or_pT = tl.math.exp2(qk_or_qkT - m[None, :])
-    else:
-        p_or_pT = tl.math.exp2(qk_or_qkT - m[:, None])
-    # Autoregressive masking.
-    if MASK_VARIANT == "causal":
-        if SCORE_TRANSPOSED:
-            mask = ((offs_m[None, :] // block_causal) >= (offs_n[:, None] // block_causal))
-        else:
-            mask = ((offs_m[:, None] // block_causal) >= (offs_n[None, :] // block_causal))
-        p_or_pT = tl.where(mask, p_or_pT, 0.0)
-    # Compute dP and dS.
-    if SCORE_TRANSPOSED:
-        dp_or_dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
-        ds_or_dsT = (p_or_pT * (dp_or_dpT - Di[None, :])).to(q.dtype)
-        dq = tl.dot(tl.trans(ds_or_dsT), k, dq)
-    else:
-        dp_or_dpT = tl.dot(do, tl.trans(v)).to(tl.float32)
-        ds_or_dsT = (p_or_pT * (dp_or_dpT - Di[:, None])).to(q.dtype)
-        dq = tl.dot(ds_or_dsT, k, dq)
-    return dq
-
-@triton.jit
-@tritonstd.mark_triton_compilable(is_template=True)
-def _attn_bwd_dq_bc(dq, q, K, V,  #
-                 do, m, D,
-                 # shared by Q/K/V/DO.
-                 stride_tok, stride_d,  #
-                 H, N_CTX,  #
-                 start_m, start_n, num_steps,  #
-                 block_causal,
-                 BLOCK_M2: tl.constexpr,  #
-                 BLOCK_N2: tl.constexpr,  #
-                 HEAD_DIM: tl.constexpr,
-                 # Filled in by the wrapper.
-                 MASK_VARIANT: tl.constexpr,
-                 Q_TRANSPOSED: tl.constexpr,
-                 SCORE_TRANSPOSED: tl.constexpr,
-                 IS_DIVISIBLE: tl.constexpr,
-                 PADDED_QKV: tl.constexpr,
-                 PADDED_OUTPUTS: tl.constexpr):
-    offs_m = start_m + tl.arange(0, BLOCK_M2)
-    offs_n = start_n + tl.arange(0, BLOCK_N2)
-    offs_k = tl.arange(0, HEAD_DIM)
-    # kT_ptrs = K + offs_n[None, :] * stride_tok + offs_k[:, None] * stride_d
-    # vT_ptrs = V + offs_n[None, :] * stride_tok + offs_k[:, None] * stride_d
-    k_ptrs = K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    v_ptrs = V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-
-    # D (= delta) is pre-divided by ds_scale.
-    if IS_DIVISIBLE or PADDED_QKV:
-        Di = tl.load(D + offs_m)
-    else:
-        Di = tl.load(D + offs_m, mask=offs_m < N_CTX)
-    # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
-    tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
-    if Q_TRANSPOSED:
-        q2 = tl.trans(q)
-    else:
-        q2 = q
-    cur_n = start_n
-    if not IS_DIVISIBLE:
-        if num_steps >= 1:
-            for blk_idx in range(num_steps - 1):
-                dq = _attn_bwd_dq_bc_single(
-                    dq, q2, k_ptrs, v_ptrs,  #
-                    do, m, Di,
-                    N_CTX,  #
-                    offs_m, cur_n,
-                    block_causal,
-                    # Filled in by the wrapper.
-                    BLOCK_N2,
-                    Q_TRANSPOSED,
-                    SCORE_TRANSPOSED,
-                    IS_DIVISIBLE=True,  # IS_DIVISIBLE
-                    CHECK_BLOCK_BOUNDARY=False,  # CHECK_BLOCK_BOUNDARY
-                    MASK_VARIANT=MASK_VARIANT,
-                    PADDED_QKV=PADDED_QKV,
-                )
-                # Increment pointers.
-                k_ptrs += BLOCK_N2 * stride_tok
-                v_ptrs += BLOCK_N2 * stride_tok
-                cur_n += BLOCK_N2
-            dq = _attn_bwd_dq_bc_single(
-                dq, q2, k_ptrs, v_ptrs,  #
-                do, m, Di,
-                N_CTX,  #
-                offs_m, cur_n,
-                block_causal,
-                # Filled in by the wrapper.
-                BLOCK_N2,
-                Q_TRANSPOSED,
-                SCORE_TRANSPOSED,
-                IS_DIVISIBLE=False,
-                CHECK_BLOCK_BOUNDARY=True,
-                MASK_VARIANT=MASK_VARIANT,
-                PADDED_QKV=PADDED_QKV,
-            )
-    else:
-        for blk_idx in range(num_steps):
-            dq = _attn_bwd_dq_bc_single(
-                dq, q2, k_ptrs, v_ptrs,  #
-                do, m, Di,
-                N_CTX,  #
-                offs_m, cur_n,
-                block_causal,
-                # Filled in by the wrapper.
-                BLOCK_N2,
-                Q_TRANSPOSED,
-                SCORE_TRANSPOSED,
-                IS_DIVISIBLE=True,  # IS_DIVISIBLE
-                CHECK_BLOCK_BOUNDARY=False,  # CHECK_BLOCK_BOUNDARY
-                MASK_VARIANT=MASK_VARIANT,
-                PADDED_QKV=PADDED_QKV,
-
-            )
-            # Increment pointers.
-            k_ptrs += BLOCK_N2 * stride_tok
-            v_ptrs += BLOCK_N2 * stride_tok
-            cur_n += BLOCK_N2
-    return dq
-
-
-@triton.jit
 @tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_fwd=False, block_causal=32),
-    real_kwargs={"N_CTX": 30000, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16, "block_causal": 3000},
+    real_kwargs={"N_CTX": 30720, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16, "block_causal": 3072},
     raw_fn=_torch_bench_fn_bwd_bc,
 )
 def _attn_bwd_blockcausal(Q, K, V, #
@@ -3829,17 +3538,18 @@ def _attn_bwd_blockcausal(Q, K, V, #
     K += adj_pad
     V += adj_pad
     DO += adj_pad
-    if PARALLEL_DQ:
-        DQ += adj
-    else:
-        DQ += adj_pad
+    
+    DQ += adj_pad
     DK += adj
     DV += adj
     M += off_chz
     D += off_chz
     offs_k = tl.arange(0, HEAD_DIM)
+
     num_kv_block = tl.cdiv(N_CTX, BLOCK_N1)
     if not PARALLEL_DQ or pid < num_kv_block:
+    # if True:
+
         # load scales
         start_n = pid * BLOCK_N1
 
@@ -3968,87 +3678,6 @@ def _attn_bwd_blockcausal(Q, K, V, #
             tl.store(dk_ptrs, dk)
         else:
             tl.store(dk_ptrs, dk, mask=offs_n[:, None] < N_CTX)
-    else:
-        off_pid = pid - num_kv_block
-        start_m = off_pid * BLOCK_M2
-        offs_m = start_m + tl.arange(0, BLOCK_M2)
-        dq = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
-        if IS_DIVISIBLE or PADDED_QKV:
-            q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
-            do = tl.load(DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
-
-            m = tl.load(M + offs_m)
-        else:
-            q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d, mask=offs_m[:, None] < N_CTX, other=0.0)
-            do = tl.load(DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d, mask=offs_m[:, None] < N_CTX, other=0.0)
-
-            m = tl.load(M + offs_m, mask=offs_m < N_CTX, other=0.0)
-
-        bc_right_top = tl.cdiv((start_m), block_causal) * block_causal
-
-        bc_right_down = tl.cdiv((start_m + BLOCK_M2), block_causal) * block_causal
-        total_cnt = tl.cdiv(N_CTX, BLOCK_N2)
-
-        if MASK_VARIANT == "causal":
-            lo, hi = min(bc_right_top // BLOCK_N2, total_cnt), min(tl.cdiv(bc_right_down, BLOCK_N2), total_cnt)
-
-            dq = _attn_bwd_dq_bc(
-                dq, q, K, V,  #
-                do, m, D,  #
-                stride_tok, stride_d,  #
-                H, N_CTX,  #
-                start_m, lo * BLOCK_N2, hi - lo,  #
-                block_causal,
-                BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                MASK_VARIANT="causal",
-                Q_TRANSPOSED=DQ_TRANSPOSED,
-                SCORE_TRANSPOSED=DQ_TRANSPOSED,
-                IS_DIVISIBLE=IS_DIVISIBLE,  #
-                PADDED_QKV=PADDED_QKV,  #
-                PADDED_OUTPUTS=PADDED_OUTPUTS,
-            )
-            # stage 2
-            dq = _attn_bwd_dq_bc(
-                dq, q, K, V,  #
-                do, m, D,  #
-                stride_tok, stride_d,  #
-                H, N_CTX,  #
-                start_m, 0, lo,  #
-                block_causal,
-                BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                MASK_VARIANT="full",
-                Q_TRANSPOSED=DQ_TRANSPOSED,
-                SCORE_TRANSPOSED=DQ_TRANSPOSED,
-                IS_DIVISIBLE=IS_DIVISIBLE,  #
-                PADDED_QKV=PADDED_QKV,  #
-                PADDED_OUTPUTS=PADDED_OUTPUTS,
-            )
-
-        else:
-            num_steps = tl.cdiv(N_CTX, BLOCK_N2)
-            dq = _attn_bwd_dq_bc(
-                dq, q, K, V,  #
-                do, m, D,  #
-                stride_tok, stride_d,  #
-                H, N_CTX,  #
-                BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                start_m, 0, num_steps,  #
-                block_causal,
-                MASK_VARIANT="full",
-                Q_TRANSPOSED=DQ_TRANSPOSED,
-                SCORE_TRANSPOSED=DQ_TRANSPOSED,
-                IS_DIVISIBLE=IS_DIVISIBLE,  #
-                PADDED_QKV=PADDED_QKV,  #
-                PADDED_OUTPUTS=PADDED_OUTPUTS,
-            )
-        # Write back dQ.
-        # print(DQ, stride_tok, stride_d)
-        dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
-        dq *= LN2
-        if IS_DIVISIBLE or PADDED_OUTPUTS:
-            tl.store(dq_ptrs, dq)
-        else:
-            tl.store(dq_ptrs, dq, mask=offs_m[:, None] < N_CTX)
 
 
 @triton.jit
@@ -4386,7 +4015,7 @@ def _attn_fwd_inner_blockcausal(acc, l_i, m_i, q,  #
 
 @triton.autotune(list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM"])
 @triton.jit
-@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_tma=False, block_causal=48, N_CTX=384, H=1),
+@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_tma=False, block_causal=192, N_CTX=384, H=1),
     real_kwargs={"N_CTX": 30000, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16, "block_causal": 3000},
     raw_fn=_flex_bench_fn_fwd,
 )
@@ -4581,10 +4210,10 @@ def test_attn_fwd_tma_bc():
 
 def test_attn_bwd():
     runner = tritonstd.parse_triton_compilable_to_runner(_attn_bwd)
-    asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd, run_triton=False))
+    asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd, run_triton=True))
     # for DKV_VARIANT in [3, 2, 1, 0]:
     #     for DQ_VARIANT in [0, 1]:
-    return
+    # return
     kwargs_set: dict[str, dict[str, Any]] = {}
     q_tr_args = [True, False]
     kv_tr_args = [True, False]
@@ -4657,10 +4286,10 @@ def test_attn_bwd_tma():
     asyncio.run(runner.bench_kernel_in_triton_process(_attn_bwd_tma, override_kwargs_set=kwargs_set))
 
 def test_attn_bwd_bc():
-    # runner = tritonstd.parse_triton_compilable_to_runner(_attn_bwd_tma_blockcausal)
-    # asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd_tma_blockcausal, run_triton=False))
     runner = tritonstd.parse_triton_compilable_to_runner(_attn_bwd_blockcausal)
     asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd_blockcausal, run_triton=False))
+    # runner = tritonstd.parse_triton_compilable_to_runner(_attn_bwd_blockcausal)
+    # asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd_blockcausal, run_triton=True))
 
     # for DKV_VARIANT in [3, 2, 1, 0]:
     #     for DQ_VARIANT in [0, 1]:
@@ -4704,10 +4333,10 @@ def _main():
 
     # test_attn_fwd_tma_v2()
     # test_attn_fwd_tma_bc()
-    test_attn_bwd()
+    # test_attn_bwd()
     # test_attn_bwd_tma()
     # test_attn_fwd_tma_bshd_v2()
-    # test_attn_bwd_bc()
+    test_attn_bwd_bc()
 if __name__ == "__main__":
     # mask = _prepare_blockwise_causal_attn_mask("cuda", 16, 4)
     # print(mask)

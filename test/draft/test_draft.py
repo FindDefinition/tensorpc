@@ -66,6 +66,10 @@ def modify_func(mod: Model):
     })
     mod.f["d"] = 6
     del mod.f["a"]
+    if isinstance(mod, DraftObject):
+        mod.e[D.length(mod.e) - 1] = 10
+    else:
+        mod.e[len(mod.e) - 1] = 10
 
 def _draft_expr_examples(mod: Model, is_draft: bool):
     return {

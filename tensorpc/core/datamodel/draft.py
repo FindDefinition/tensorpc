@@ -174,7 +174,15 @@ class DraftUpdateOp:
 
     def to_pfl_path_op(self) -> PFLPathOp:
         # app internal will handle non-dict data in self.opData.
-        return PFLPathOp(pflpath.compile_pflpath_to_compact_str(self.node.get_pfl_path()), self.op, self.opData)
+        return PFLPathOp(self.node.get_pfl_path(), self.op, self.opData)
+    
+    def to_pfl_frontend_path_op(self) -> PFLPathOp:
+        # app internal will handle non-dict data in self.opData.
+        op_data = self.opData
+        if "keyPath" in self.opData:
+            op_data = op_data.copy()
+            op_data["keyPath"] = pflpath.compile_pflpath_to_compact_str(self.opData["keyPath"])
+        return PFLPathOp(pflpath.compile_pflpath_to_compact_str(self.node.get_pfl_path()), self.op, op_data)
 
     def to_userdata_removed(self) -> "DraftUpdateOp":
         return dataclasses.replace(self, userdata=None, node=self.node.to_userdata_removed())
@@ -485,25 +493,58 @@ class DraftBase:
         return self._tensorpc_draft_dispatch(
             self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
 
-    def _tensorpc_draft_binary_op(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
-        if not isinstance(other, DraftComparableScalar):
-            if isinstance(other, str):
-                ast_type = DraftASTType.STRING_LITERAL
-            else:
-                # obj must be json serializable
-                json.dumps(other)
-                ast_type = DraftASTType.JSON_LITERAL
-            new_node = DraftASTNode(ast_type, [], other)
-        else:
-            new_node = other._tensorpc_draft_attr_cur_node
-        this_node = self._tensorpc_draft_attr_cur_node
-        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
-                                [this_node, new_node], op)
+    def _tensorpc_draft_binary_op(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<=", "+", "-", "*", "/", "//"]):
+        binary_ops = set(["==", "!=", ">", "<", ">=", "<="])
+        math_ops = set(["+", "-", "*", "/", "//"])
+        if op in math_ops:
+            assert isinstance(self, DraftMutableScalar) and isinstance(
+                other, (DraftMutableScalar, int, float)), "only support arithmetic op for DraftMutableScalar or number"
         
-        if self._tensorpc_draft_attr_anno_state.is_type_only:
-            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
-        return self._tensorpc_draft_dispatch(
-            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+            self_type = self._tensorpc_draft_attr_anno_state.anno_type
+            assert self_type is not None
+            other_is_float = False
+            if isinstance(other, DraftMutableScalar):
+                other_annotype = other._tensorpc_draft_attr_anno_state.anno_type
+                assert other_annotype is not None
+                other_is_float = issubclass(other_annotype.origin_type, float)
+                other_node = other._tensorpc_draft_attr_cur_node
+            else:
+                other_node = DraftASTNode(DraftASTType.JSON_LITERAL, [], other)
+
+            self_is_float = issubclass(self_type.origin_type, float)
+            if other_is_float or self_is_float:
+                res_annotype = AnnotatedType(float, [])
+            else:
+                res_annotype = AnnotatedType(int, [])
+            this_node = self._tensorpc_draft_attr_cur_node
+            ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                    [this_node, other_node], op)
+            if self._tensorpc_draft_attr_anno_state.is_type_only:
+                return self._tensorpc_draft_dispatch(None, ast_node, res_annotype)
+            return self._tensorpc_draft_dispatch(
+                self._tensorpc_draft_attr_real_obj, ast_node, res_annotype)
+
+        elif op in binary_ops:
+            if not isinstance(other, DraftComparableScalar):
+                if isinstance(other, str):
+                    ast_type = DraftASTType.STRING_LITERAL
+                else:
+                    # obj must be json serializable
+                    json.dumps(other)
+                    ast_type = DraftASTType.JSON_LITERAL
+                new_node = DraftASTNode(ast_type, [], other)
+            else:
+                new_node = other._tensorpc_draft_attr_cur_node
+            this_node = self._tensorpc_draft_attr_cur_node
+            ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                    [this_node, new_node], op)
+            
+            if self._tensorpc_draft_attr_anno_state.is_type_only:
+                return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
+            return self._tensorpc_draft_dispatch(
+                self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+        else:
+            raise NotImplementedError
 
     def __eq__(self, other: Any): # type: ignore
         assert other is None, "only allow compare with None for all draft object"
@@ -561,9 +602,19 @@ class DraftObject(DraftBase):
                     if inspecttools.isstaticmethod(dcls_type, name):
                         return unbound_func
                     return types.MethodType(unbound_func, self)
-            raise AttributeError(
-                f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
-            )
+                else:
+                    raw_type = self._tensorpc_draft_attr_anno_state.anno_type.raw_type
+                    raise AttributeError(
+                        f"field `{name}` doesn't exist in {self}({raw_type})."
+                    )
+            if self._tensorpc_draft_attr_real_obj is None:
+                raise AttributeError(
+                    f"want to get {self}.{name}, but {self} don't have annotated type"
+                )
+            else:
+                raise AttributeError(
+                    f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
+                )
         anno_type = None
         field_id = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
@@ -744,6 +795,14 @@ class DraftSequence(DraftBase):
     def __radd__(self, other: Any):
         return _draft_seq_add(self, other, True)
 
+    def _get_length(self):
+        ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
+                                [self._tensorpc_draft_attr_cur_node], "len")
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(int, []))
+        return self._tensorpc_draft_dispatch(
+            len(self._tensorpc_draft_attr_real_obj), ast_node, AnnotatedType(int, []))
+
 def _draft_seq_add(x: Any, other: Any, is_reverse: bool):
     assert isinstance(x, DraftSequence)
     if not isinstance(other, DraftSequence):
@@ -780,7 +839,6 @@ class DraftDict(DraftBase):
             else:
                 anno_type = self._tensorpc_draft_attr_anno_state.anno_type.get_child_annotated_type(
                     1)
-
         if isinstance(key, DraftBase):
             ast_node = DraftASTNode(
                 DraftASTType.FUNC_CALL, [
@@ -793,7 +851,7 @@ class DraftDict(DraftBase):
 
             return self._tensorpc_draft_dispatch(
                 self._tensorpc_draft_attr_real_obj[
-                    key._tensorpc_draft_attr_real_obj], ast_node)
+                    key._tensorpc_draft_attr_real_obj], ast_node, anno_type)
         ast_node = DraftASTNode(DraftASTType.DICT_GET_ITEM,
                                 [self._tensorpc_draft_attr_cur_node], key,
                                 self._tensorpc_draft_attr_anno_state.anno_type)
@@ -869,43 +927,23 @@ class DraftUnion(DraftBase):
     pass
 
 class DraftComparableScalar(DraftBase):
-    def _tensorpc_draft_compare(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
-        if not isinstance(other, DraftComparableScalar):
-            if isinstance(other, str):
-                ast_type = DraftASTType.STRING_LITERAL
-            else:
-                # obj must be json serializable
-                json.dumps(other)
-                ast_type = DraftASTType.JSON_LITERAL
-            new_node = DraftASTNode(ast_type, [], other)
-        else:
-            new_node = other._tensorpc_draft_attr_cur_node
-        this_node = self._tensorpc_draft_attr_cur_node
-        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
-                                [this_node, new_node], op)
-        
-        if self._tensorpc_draft_attr_anno_state.is_type_only:
-            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
-        return self._tensorpc_draft_dispatch(
-            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
-
     def __eq__(self, other: Any): # type: ignore
-        return self._tensorpc_draft_compare(other, "==")
+        return self._tensorpc_draft_binary_op(other, "==")
     
     def __ne__(self, other: Any): # type: ignore
-        return self._tensorpc_draft_compare(other, "!=")
+        return self._tensorpc_draft_binary_op(other, "!=")
 
     def __gt__(self, other: Any):
-        return self._tensorpc_draft_compare(other, ">")
+        return self._tensorpc_draft_binary_op(other, ">")
 
     def __lt__(self, other: Any):
-        return self._tensorpc_draft_compare(other, "<")
+        return self._tensorpc_draft_binary_op(other, "<")
     
     def __ge__(self, other: Any):
-        return self._tensorpc_draft_compare(other, ">=")
+        return self._tensorpc_draft_binary_op(other, ">=")
 
     def __le__(self, other: Any):
-        return self._tensorpc_draft_compare(other, "<=")
+        return self._tensorpc_draft_binary_op(other, "<=")
     
 class DraftImmutableString(DraftComparableScalar):
     """string object, only support c-style format.
@@ -936,9 +974,37 @@ class DraftImmutableString(DraftComparableScalar):
         return self._tensorpc_draft_dispatch(
             self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(str, []))
 
+    def join(self, arg: Any):
+        assert isinstance(arg, DraftSequence), "only support join DraftSequence"
+        res_nodes: list[DraftASTNode] = [
+            self._tensorpc_draft_attr_cur_node,
+            arg._tensorpc_draft_attr_cur_node,
+        ]
+        ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
+                                res_nodes, DraftASTFuncType.JOIN.value)
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(str, []))
+        # FIXME we shouldn't eval ast here to get real obj.
+        return self._tensorpc_draft_dispatch(
+            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(str, []))
 
 
 class DraftMutableScalar(DraftComparableScalar):
+
+    def __add__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "+")
+
+    def __sub__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "-")
+
+    def __mul__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "*")
+
+    def __truediv__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "/")
+
+    def __floordiv__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "//")
 
     def __iadd__(self, other: Union[int, float]):
         _assert_not_draft(other)

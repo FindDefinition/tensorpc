@@ -12,7 +12,7 @@ from tensorpc.dock.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
 import tensorpc.core.datamodel as D
-from ..base import BaseNodeWrapper
+from .base import BaseNodeWrapper
 
 def _error_function() -> None:
     raise NotImplementedError("This function should not be called")
@@ -23,7 +23,7 @@ class ComputeNodeIOHandles:
     handle_name_to_out_handle: dict[str, IOHandle]
 
 @dataclasses_plain.dataclass
-class ComputeNodeWrapperComps:
+class FragmentNodeUIComps:
     node_obj: Optional[ComputeNodeBase]
     header: mui.FlexBox
     input_args: mui.Fragment
@@ -47,7 +47,7 @@ def _error_layout_creator(draft):
         mui.Typography("Error Node").prop(variant="body2")
     ])
 
-class ComputeNodeWrapper(BaseNodeWrapper):
+class FragmentNodeUI(BaseNodeWrapper):
 
     def __init__(self, node_id: str, cnode_cfg: ComputeNodeDesc, node_state: Any, cnode: ComputeNodeBase,
                  node_model_draft: ComputeFlowNodeDrafts):
@@ -179,7 +179,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             handle_name_to_inp_handle=handle_name_to_inp_handle,
             handle_name_to_out_handle=handle_name_to_out_handle
         )
-        res = ComputeNodeWrapperComps(node_obj,
+        res = FragmentNodeUIComps(node_obj,
                                        header_container, input_args,
                                        middle_node_container, output_args,
                                        status_box, _resizer_container, io_handles)

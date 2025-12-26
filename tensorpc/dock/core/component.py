@@ -188,6 +188,8 @@ class UIType(enum.IntEnum):
     VideoBasicStream = 0x41
     TaskLoop = 0x42
     VideoRTCStream = 0x43
+    JsonEditor = 0x44
+    JsonFastViewer = 0x45
 
     RANGE_CHART_START = 0x50
     Plotly = 0x51

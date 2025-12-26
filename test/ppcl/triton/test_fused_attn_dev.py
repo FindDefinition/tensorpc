@@ -17,6 +17,7 @@ torch._dynamo.config.recompile_limit = 10000
 # np.seterr(all='raise')
 def _attn_fwd_grid(META, q_shape):
     res = (triton.cdiv(q_shape[2], META["BLOCK_M"]), q_shape[0] * q_shape[1], 1)
+    print("FWD GRID", res)
     return res
 
 def _pad_seq_tensor(q: np.ndarray, pad_length: int) -> np.ndarray:
@@ -63,18 +64,18 @@ def _prepare_blockwise_causal_attn_mask(
 
 def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype = torch.float32, 
         is_fwd: bool = True, head_first: bool = True,
-         Q_TRANSPOSED: bool = True, 
+         Q_TRANSPOSED: bool = False, 
         KV_TRANSPOSED: bool = True, 
-        SCORE_TRANSPOSED: bool = True, 
-        DQ_TRANSPOSED: bool = False,
+        SCORE_TRANSPOSED: bool = False, 
+        DQ_TRANSPOSED: bool = True,
         PARALLEL_DQ: bool = True,
         is_tma: bool = False,
         block_causal: Optional[int] = None) -> pfl.PFLInlineRunEnv:
     # TODO triton code don't support BLOCK_M < BLOCK_N
     BATCH = 1
-    BLOCK_M = 64
-    BLOCK_N = 32
-    is_causal = True or block_causal is not None
+    BLOCK_M = 128
+    BLOCK_N = 64
+    is_causal = False or block_causal is not None
     stage = 3 if is_causal else 1
     sm_scale = 0.5
     M = torch.empty((BATCH, H, N_CTX), dtype=torch.float32)
@@ -274,27 +275,27 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
         # when we run real triton kernel, we shouldn't run slow fwd kernel in simulation.
         
         # if N_CTX <= 1000:
-        if block_causal is not None:
-            q_fl = q.cuda()
-            k_fl = k.cuda()
-            v_fl = v.cuda()
-            _, lse = flex_attention(
-                q_fl, k_fl, v_fl, scale=sm_scale, block_mask=block_mask,
-                return_lse=True, kernel_options={
-                    "USE_TMA": False,
-                    "num_stages": 1,
-                }
-            )
-            M_np = lse.detach().cpu().numpy()[..., :N_CTX]
+        # if block_causal is not None:
+        q_fl = q.cuda()
+        k_fl = k.cuda()
+        v_fl = v.cuda()
+        _, lse = flex_attention(
+            q_fl, k_fl, v_fl, scale=sm_scale, block_mask=block_mask,
+            return_lse=True, kernel_options={
+                "USE_TMA": False,
+                "num_stages": 1,
+            }
+        )
+        M_np = lse.detach().cpu().numpy()[..., :N_CTX]
 
         # print(lse)
-        else:
-            from xformers.ops import fmha
-            q_xf = q.transpose(1, 2).contiguous().cuda()
-            k_xf = k.transpose(1, 2).contiguous().cuda()
-            v_xf = v.transpose(1, 2).contiguous().cuda()
-            _, lse_xf = fmha.memory_efficient_attention_forward_requires_grad(q_xf, k_xf, v_xf, scale=sm_scale, attn_bias=fmha.LowerTriangularMask() if is_causal else None)
-            M_np = lse_xf.detach().cpu().numpy()[..., :N_CTX]
+        # else:
+        #     from xformers.ops import fmha
+        #     q_xf = q.transpose(1, 2).contiguous().cuda()
+        #     k_xf = k.transpose(1, 2).contiguous().cuda()
+        #     v_xf = v.transpose(1, 2).contiguous().cuda()
+        #     _, lse_xf = fmha.memory_efficient_attention_forward_requires_grad(q_xf, k_xf, v_xf, scale=sm_scale, attn_bias=fmha.LowerTriangularMask() if is_causal else None)
+        #     M_np = lse_xf.detach().cpu().numpy()[..., :N_CTX]
         # # print(lse)
         # # print(M_np)
 
@@ -322,12 +323,12 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
         # pre_grid = (N_CTX // PRE_BLOCK, BATCH * H)
         DQ_ATOMIC = False # faster in Hopper, slower in Ampere
         if DQ_ATOMIC:
-            BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 128, 128, 64
+            BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
         else:
             if HEAD_DIM == 64:
                 BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
             else:
-                BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 128, 128, 64
+                BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
         if DQ_ATOMIC:
             PARALLEL_DQ = False
         pdq = 1
@@ -418,7 +419,7 @@ def _attn_fwd_kernel_test_fn(N_CTX: int = 256, HEAD_DIM: int = 64, H = 1, dtype 
             "BLOCK_M2": BLOCK_M2,
             "BLOCK_N2": BLOCK_N2,
             "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
-            "num_warps": 8 if DQ_ATOMIC else 8,
+            "num_warps": 8 if DQ_ATOMIC else 4,
             "num_stages": 3 if DQ_ATOMIC else 3,
             "MASK_VARIANT": "causal" if is_causal else "full",
             "is_head_first": head_first,
@@ -735,6 +736,7 @@ def _attn_fwd_inner_single(acc, l_i, m_i, q,  #
     m_ij = tl.maximum(m_i, tl.max(qk, 1))
     # -- update m_i and l_i
     alpha = tl.math.exp2(m_i - m_ij)
+
     p = tl.math.exp2(qk - m_ij[:, None])
     l_i = l_i * alpha + tl.sum(p, 1)
     # -- update output accumulator --
@@ -1051,8 +1053,8 @@ def _attn_fwd_inner_tma_bshd_v2(acc, l_i, m_i, q,  #
 @triton.autotune(list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM"])
 @triton.jit
 @tritonstd.mark_triton_compilable(inline_run_env_fn=_attn_fwd_kernel_test_fn, 
-    real_kwargs={"N_CTX": 30000, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
-    raw_fn=_xformers_bench_fn_fwd,
+    real_kwargs={"N_CTX": 61440, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
+    # raw_fn=_xformers_bench_fn_fwd,
 )
 def _attn_fwd(Q, K, V, M, Out,  #
               stride_qz, stride_qh, stride_qm, stride_qk,  #
@@ -1769,6 +1771,7 @@ def _attn_bwd_dqdkdv_single(q_ptrs, dq_ptrs, do_ptrs,
         qk_or_qkT = tl.dot(_may_trans(k, KV_TRANSPOSED), _may_trans(q_or_qT, not Q_TRANSPOSED))
     else:
         qk_or_qkT = tl.dot(_may_trans(q_or_qT, Q_TRANSPOSED), _may_trans(k, not KV_TRANSPOSED))
+    # memory_fence(qk_or_qkT)
     if CHECK_BLOCK_BOUNDARY:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         if SCORE_TRANSPOSED:
@@ -3308,11 +3311,17 @@ def _attn_bwd_dq_v2(dq, q, K, V,  #
             cur_n += BLOCK_N2
     return dq
 
+# @triton.jit
+# @tritonstd.mark_triton_compilable(is_template=True)
+# def memory_fence(acc):
+#     tl.inline_asm_elementwise(
+#         "mov $0, $0;", "=r,+f,memory", [acc], dtype=tl.float32, is_pure=False, pack=1
+#     )
 
 @triton.jit
 @tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_fwd=False),
     real_kwargs={"N_CTX": 30720, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16},
-    raw_fn=_torch_bench_fn_bwd_xformer,
+    raw_fn=_torch_bench_fn_bwd,
 )
 def _attn_bwd(Q, K, V, #
               DO,  #
@@ -4386,7 +4395,7 @@ def _attn_fwd_inner_blockcausal(acc, l_i, m_i, q,  #
 
 @triton.autotune(list(filter(keep, configs)), key=["N_CTX", "HEAD_DIM"])
 @triton.jit
-@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_tma=False, block_causal=48, N_CTX=384, H=1),
+@tritonstd.mark_triton_compilable(inline_run_env_fn=partial(_attn_fwd_kernel_test_fn, is_tma=False, block_causal=192, N_CTX=384, H=1),
     real_kwargs={"N_CTX": 30000, "HEAD_DIM": 128, "H": 16, "dtype": torch.float16, "block_causal": 3000},
     raw_fn=_flex_bench_fn_fwd,
 )
@@ -4584,17 +4593,17 @@ def test_attn_bwd():
     asyncio.run(runner.validate_kernel_by_test_data(_attn_bwd, run_triton=False))
     # for DKV_VARIANT in [3, 2, 1, 0]:
     #     for DQ_VARIANT in [0, 1]:
-    return
+    # return
     kwargs_set: dict[str, dict[str, Any]] = {}
     q_tr_args = [True, False]
     kv_tr_args = [True, False]
     s_tr_args = [True, False]
     dq_tr_args = [False, True]
     # fast cfg
-    # q_tr_args = [False]
-    # kv_tr_args = [True]
-    # s_tr_args = [False]
-    # dq_tr_args = [True]
+    q_tr_args = [False]
+    kv_tr_args = [True]
+    s_tr_args = [False]
+    dq_tr_args = [True]
 
 
     for Q_TRANSPOSED in q_tr_args:

@@ -1,0 +1,174 @@
+from tensorpc.constants import PACKAGE_ROOT
+from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
+from tensorpc.core import dataclass_dispatch as dataclasses
+from tensorpc.core.datamodel.draft import create_literal_draft
+import tensorpc.core.datamodel.funcs as D
+from functools import partial
+from tensorpc.core.tree_id import UniqueTreeIdForTree
+
+from typing import Optional, Any
+from tensorpc.apps.adv.model import ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.core.datamodel.draft import (get_draft_pflpath)
+
+class App:
+    @mark_create_layout
+    def my_layout(self):
+        adv_proj = {
+            "project": ADVProject(
+                flow=ADVFlowModel(nodes={
+                    "n1": ADVNodeModel(id="n1", position=flowui.XYPosition(0, 0), name="Node 1",
+                        impl=InlineCode()),
+
+                    "n2": ADVNodeModel(id="n2", position=flowui.XYPosition(0, 100), name="Node 2 (Nested)",
+                        flow=ADVFlowModel(nodes={
+                            "n2_1": ADVNodeModel(id="n2_1", position=flowui.XYPosition(0, 0), name="Nested Node 1"),
+                        }, edges={}),
+                    ),
+                    "n1-ref": ADVNodeModel(id="n1-ref", position=flowui.XYPosition(0, 200), name="Node 1 (ref)",
+                        ref_node_id="n1"),
+
+
+                }, edges={}),
+                import_prefix="tensorpc.adv.test_project",
+                path=str(PACKAGE_ROOT / "adv" / "test_project"),
+            )
+        }
+        nid_to_path, nid_to_fpath = adv_proj["project"].assign_path_to_all_node()
+        adv_proj["project"].node_id_to_path = nid_to_path
+        adv_proj["project"].node_id_to_frontend_path = nid_to_fpath
+        adv_proj["project"].update_ref_path(nid_to_fpath)
+        model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
+        node_cm_items = [
+            mui.MenuItem(id="nested", label="Enter Nested"),
+        ]
+        items = [
+            mui.MenuItem(id="plain", label="Add Plain Node"),
+            mui.MenuItem(id="nested", label="Add Nested Flow Node"),
+        ]
+
+        self.graph = flowui.Flow([], [], [
+            flowui.MiniMap(),
+            flowui.Controls(),
+            flowui.Background(),
+        ]).prop(nodeContextMenuItems=node_cm_items, paneContextMenuItems=items)
+
+        self.graph.event_node_context_menu.on(self.handle_node_cm)
+        path_breadcrumb = mui.Breadcrumbs([]).prop(keepHistoryPath=True)
+        detail = mui.JsonEditor()
+        editor = mui.MonacoEditor("", "markdown", "default").prop(flex=1, minHeight=0, minWidth=0)
+        editor_ct = mui.MatchCase.binary_selection(True, mui.VBox([
+            editor.prop(flex=1),
+        ]).prop(flex=1, overflow="hidden"))
+
+        detail_ct = mui.MatchCase.binary_selection(True, mui.VBox([
+            mui.HBox([
+                detail,
+            ]).prop(flex=1, overflow="hidden"),
+            editor_ct,
+        ]).prop(flex=1, overflow="hidden"))
+
+        self.dm = mui.DataModel(model, [
+            mui.VBox([
+                mui.HBox([
+                    path_breadcrumb
+                ]).prop(minHeight="24px"),
+                self.graph,
+            ]).prop(flex=1),
+            detail_ct,
+        ])
+
+        draft = self.dm.get_draft()
+        cur_root_proj = draft.draft_get_cur_adv_project()
+        cur_model_draft = draft.draft_get_cur_model()
+        # self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=cur_model_draft))
+        # self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=preview_model_draft))
+        # draft only support raw path, so we use [1::3] to convert from raw path to real node path
+        # we also need to add root to the beginning
+        path_breadcrumb.bind_fields(value=f"[\"root\"] + {cur_root_proj.cur_path}[1::3]")
+        path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
+        # since we may switch preview flow repeatedly, we need to set a unique flow id to avoid handle wrong frontend event
+        # e.g. the size/position change event is debounced
+        detail_ct.bind_fields(condition=f"{cur_root_proj.draft_get_selected_node()} is not None")
+
+        binder = models.flow.BaseFlowModelBinder(
+            self.graph, 
+            self.dm.get_model,
+            cur_model_draft, 
+            self.model_to_ui_node,
+            flow_uid_getter=lambda: self.dm.get_model().get_cur_flow_uid(),
+            debug_id="main_flow")
+        binder.bind_flow_comp_with_base_model(self.dm, cur_model_draft.selected_nodes)
+        detail.bind_fields(data=cur_root_proj.draft_get_selected_node())
+        has_code, code_draft, path_draft = cur_root_proj.draft_get_node_impl_editor(cur_root_proj.draft_get_selected_node().id)
+        editor.bind_draft_change_uncontrolled(code_draft, path_draft=path_draft)
+        editor_ct.bind_fields(condition=has_code)
+        self.dm.debug_print_draft_change(has_code)
+
+        return mui.HBox([
+            self.dm,
+        ]).prop(width="100%", height="100%", overflow="hidden")
+    
+    def _get_preview_flow_uid(self, path_draft):
+        path = D.evaluate_draft(path_draft, self.dm.model)
+        if path is None:
+            return "root"
+        return UniqueTreeIdForTree.from_parts(path).uid_encoded
+
+    def model_to_ui_node(self, flow: ADVFlowModel, node_id: str):
+        node = flow.nodes[node_id]
+        # draft = self.dm.get_draft()
+        comp = mui.VBox([
+            mui.Typography(f"Node-{node.name}" if node.flow is None else "Nested Flow"),
+        ])
+        ui_node = flowui.Node(type="app", 
+            id=node.id, 
+            data=flowui.NodeData(component=comp, label=node.name), 
+            position=node.position)
+        return ui_node
+
+    async def handle_node_cm(self, data: flowui.NodeContextMenuEvent):
+        item_id = data.itemId
+        node_id = data.nodeId
+
+        cur_path_val = self.dm.model.get_cur_adv_project().cur_path
+        new_path_val = cur_path_val + ['nodes', node_id, 'flow']
+        new_logic_path = new_path_val[1::3]
+        # validate node contains nested flow
+        cur_model = self.dm.model.get_cur_adv_project().flow
+        for item in new_logic_path:
+            cur_model = cur_model.nodes[item].flow
+            if cur_model is None:
+                return
+
+        draft = self.dm.get_draft().draft_get_cur_adv_project()
+        # we have to clear selection before switch flow because xyflow don't support controlled selection.
+        # xyflow will clear previous selection and send clear-selection event when flow is switched.
+        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_node = None
+        draft.cur_path = new_path_val
+
+    def handle_breadcrumb_click(self, data: list[str]):
+        logic_path = data[1:] # remove root
+        res_path: list[str] = []
+        for item in logic_path:
+            res_path.extend(['nodes', item, 'flow'])
+        draft = self.dm.get_draft().draft_get_cur_adv_project()
+        # we have to clear selection before switch flow because xyflow don't support controlled selection.
+        # xyflow will clear previous selection and send clear-selection event when flow is switched.
+        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_node = None
+        draft.cur_path = res_path
+
+    # def add_node(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
+    #     item_id = data.itemId
+    #     node_type = item_id
+    #     pos = data.flowPosition
+    #     print(f"Add Node: {node_type} at {pos}")
+    #     if pos is None:
+    #         return 
+    #     node_id = self.graph.create_unique_node_id(node_type)
+    #     draft = self.dm.get_draft()
+    #     if node_type == "nested":
+    #         new_node = NodeModel(id=node_id, position=pos, flow=ADVFlowModel({}, {}))
+    #     else:
+    #         new_node = NodeModel(id=node_id, position=pos, label="Plain")
+    #     target_flow_draft.nodes[node_id] = new_node
+

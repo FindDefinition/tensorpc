@@ -85,3 +85,7 @@ def logical_or(a: Any, b: Any) -> bool:
 def dict_get_item(a: Any, attr: str):
     assert isinstance(a, DraftDict)
     return cast(Any, a[attr])
+
+def length(a: Any) -> int:
+    assert isinstance(a, DraftSequence), "length should be used with DraftSequence objects"
+    return cast(int, a._get_length())

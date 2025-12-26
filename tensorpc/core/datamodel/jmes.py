@@ -56,6 +56,12 @@ class _JMESCustomFunctions(functions.Functions):
                 return pair[1]
         return None 
 
+    @functions.signature({'types': ["array"]})
+    def _func_len(self, arr):
+        if not isinstance(arr, list):
+            return None
+        return len(arr) 
+
     @functions.signature({'types': []}, {'types': [], 'variadic': True},)
     def _func_matchcase_varg(self, cond, *items):
         if len(items) == 0 or len(items) % 2 != 0:
