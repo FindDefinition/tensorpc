@@ -4,7 +4,10 @@ import json
 
 
 def main():
-    run("--stdio")
+    try:
+        run("--stdio")
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

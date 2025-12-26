@@ -15,6 +15,7 @@
 import enum
 from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
 from tensorpc.constants import TENSORPC_SPLIT
+from . import pfl
 
 class BuiltinServiceKeys(enum.Enum):
     FileOps = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"

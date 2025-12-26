@@ -34,7 +34,9 @@ from functools import wraps
 
 from tensorpc.constants import TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.rprint_dispatch import rprint
+from tensorpc.utils.rich_logging import get_logger
 
+LOGGER = get_logger("tensorpc.service")
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -707,7 +709,7 @@ class ObjectReloadManager:
         because we want to use importlib.import_module
         if possible instead of reload from raw path.
         """
-        rprint("<ObjectReloadManager> prepare load", type)
+        LOGGER.warning(f"prepare reload {type}")
         try:
             uid = self.get_type_unique_id(type)
         except:
@@ -736,7 +738,7 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
-        rprint("<ObjectReloadManager> do load", type)
+        LOGGER.warning(f"do load {type}")
         res = meta.get_reloaded_module(self.in_memory_fs)
         if res is None:
             raise ValueError("can't reload this type", type)
@@ -953,18 +955,15 @@ class DynamicClass:
         module_cls = module_name.split(TENSORPC_SPLIT)
         if code != "":
             assert len(module_cls) == 1, "you only need to specify class name"
-
-        self.module_path = module_cls[0]
-        self.alias: Optional[str] = None
+        module_path, cls_name, alias = DynamicClass.split_module_name(
+            module_name)
+        self.module_path = module_path
+        self.alias = alias
+        self.cls_name = cls_name
         self.is_standard_module = False
         self.standard_module: Optional[types.ModuleType] = None
         self.file_path = ""
         self.is_dynamic_code = False
-        if len(module_cls) == 3:
-            self.alias = module_cls[-1]
-            self.cls_name = module_cls[-2]
-        else:
-            self.cls_name = module_cls[-1]
         try:
             if code != "":
                 # TODO we need to redesign whole dynamic load
@@ -977,6 +976,7 @@ class DynamicClass:
                 self.standard_module = module
                 codeobj = compile(code, "<dynamic>", "exec")
                 exec(codeobj, module.__dict__)
+                sys.modules[mod_name] = self.standard_module
                 self.module_dict = self.standard_module.__dict__
 
             else:
@@ -1016,6 +1016,18 @@ class DynamicClass:
         self.obj_type = obj_type
         self.module_key = f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
 
+    @staticmethod 
+    def split_module_name(module_name: str):
+        module_cls = module_name.split(TENSORPC_SPLIT)
+        if len(module_cls) == 3:
+            alias = module_cls[-1]
+            cls_name = module_cls[-2]
+        else:
+            alias = None
+            cls_name = module_cls[-1]
+        module_path = module_cls[0]
+        return module_path, cls_name, alias
+
 
 class ReloadableDynamicClass(DynamicClass):
 
@@ -1025,9 +1037,9 @@ class ReloadableDynamicClass(DynamicClass):
                  code: str = "") -> None:
         super().__init__(module_name, code)
         if reload_mgr is not None:
-            self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type, include_base=True)
+            self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type, include_base=True, no_code=code != "")
         else:
-            self.serv_metas = self.get_metas_of_regular_methods(self.obj_type, include_base=True)
+            self.serv_metas = self.get_metas_of_regular_methods(self.obj_type, include_base=True, no_code=code != "")
 
     @staticmethod
     def get_metas_of_regular_methods(
@@ -1356,8 +1368,6 @@ class ServiceUnit(DynamicClass):
 
     @identity_wrapper
     def get_service_unit_ids(self) -> List[str]:
-        a = 1 + 3
-        c = a + 4
         if self.alias is not None:
             return [self.module_key, self.alias]
         else:
@@ -1373,6 +1383,11 @@ class ServiceUnit(DynamicClass):
         self.init_service()
         meta = self.services[serv_key]
         return meta.get_binded_fn(), meta
+
+    def get_service_and_meta_by_local_key(self, local_key: str):
+        serv_key = f"{self.module_key}.{local_key}"
+        return self.get_service_and_meta(serv_key)
+
 
     def get_service_meta_only(self, serv_key: str):
         self.init_service()

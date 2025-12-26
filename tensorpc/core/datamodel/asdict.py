@@ -1,5 +1,6 @@
 from functools import partial
 from typing import Any, Callable, Dict, Generic, Hashable, Optional, Type, TypeVar, Union, cast
+from tensorpc.core.core_io import JsonSpecialData
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 
 from tensorpc.core.annolib import Undefined, BackendOnlyProp, undefined
@@ -40,10 +41,14 @@ class _DataclassSer:
     obj: Any
 
 
-def as_dict_no_undefined(obj: Any):
+def as_dict_no_undefined_v1(obj: Any):
     return dataclasses.asdict(_DataclassSer(obj),
                               dict_factory=undefined_dict_factory)["obj"]
 
+
+def as_dict_no_undefined(obj: Any):
+    return _asdict_inner(_DataclassSer(obj),
+                              dict_factory=undefined_dict_factory)["obj"]
 
 def asdict_field_only(obj,
                       *,
@@ -167,7 +172,7 @@ def asdict_no_deepcopy_with_field(obj,
         raise TypeError("asdict() should be called on dataclass instances")
     return _asdict_inner_with_field(obj, dict_factory_with_field, obj_factory)
 
-def _asdict_inner(obj, dict_factory, obj_factory=None):
+def _asdict_inner(obj, dict_factory, obj_factory=None) -> Any:
     if dataclasses.is_dataclass(obj):
         result = []
         for f in dataclasses.fields(obj):
@@ -207,12 +212,14 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
         return type(obj)((_asdict_inner(k, dict_factory, obj_factory),
                           _asdict_inner(v, dict_factory, obj_factory))
                          for k, v in obj.items())
+    elif isinstance(obj, JsonSpecialData):
+        return obj.replace_data(_asdict_inner(obj.data, dict_factory, obj_factory))
     else:
         if obj_factory is not None:
             obj = obj_factory(obj)
         return obj
 
-def _asdict_inner_with_field(obj, dict_factory, obj_factory=None):
+def _asdict_inner_with_field(obj, dict_factory, obj_factory=None) -> Any:
     if dataclasses.is_dataclass(obj):
         result = []
         for f in dataclasses.fields(obj):
@@ -233,6 +240,8 @@ def _asdict_inner_with_field(obj, dict_factory, obj_factory=None):
         return type(obj)((_asdict_inner_with_field(k, dict_factory, obj_factory),
                           _asdict_inner_with_field(v, dict_factory, obj_factory))
                          for k, v in obj.items())
+    elif isinstance(obj, JsonSpecialData):
+        return obj.replace_data(_asdict_inner_with_field(obj.data, dict_factory, obj_factory))
     else:
         if obj_factory is not None:
             obj = obj_factory(obj)

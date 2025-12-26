@@ -48,8 +48,7 @@ class ObjectPreview(ObjectPreviewBase):
                 flexFlow="column nowrap",
                 flex=1,
                 width="100%",
-                height="100%",
-                border="1px solid red",)
+                height="100%")
 
         self._cached_preview_handler = ObjectPreviewLayoutHandleManager()
         self._current_preview_layout: Optional[mui.FlexBox] = None

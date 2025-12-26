@@ -1074,12 +1074,12 @@ class PlotApp:
     def my_layout(self):
         self.plot = chart.Plotly().prop(
             data=[
-                chart.Trace(x=[1, 2, 3],
+                chart.PlotlyTrace(x=[1, 2, 3],
                              y=[2, 7, 3],
                              type="scatter",
                              mode="lines")
             ],
-            layout=chart.Layout(
+            layout=chart.PlotlyLayout(
                 height=240,
                 autosize=True,
                 margin=chart.Margin(l=0, r=0, b=0, t=0),
@@ -1093,13 +1093,13 @@ class PlotApp:
 
     async def _show_plot(self):
         data = [
-            chart.Trace(x=[1, 2, 3],
+            chart.PlotlyTrace(x=[1, 2, 3],
                          y=[6, 2, 3],
                          type="scatter",
                          mode="lines",
                          marker=chart.Marker(color="red"))
         ]
-        layout = chart.Layout(
+        layout = chart.PlotlyLayout(
             height=240,
             autosize=True,
             margin=chart.Margin(l=0, r=0, b=0, t=0),
@@ -1283,7 +1283,7 @@ class DataGridApp:
                                    cell=cbox),
             mui.DataGrid.ColumnDef("btn", cell=btn),
         ]
-        master_detail = mui.JsonViewer().bind_fields(data="$")
+        master_detail = mui.JsonViewer().bind_fields(data="getRoot()")
         master_detail = mui.VBox([
             mui.Typography("Master Detail").prop(variant="h4"),
             mui.DataGrid([

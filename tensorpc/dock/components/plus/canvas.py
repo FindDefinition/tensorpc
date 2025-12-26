@@ -30,7 +30,7 @@ from tensorpc.dock.core.coretypes import TreeDragTarget
 from tensorpc.dock.core import colors
 from tensorpc.dock.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
-from tensorpc.dock.components.core import get_tensor_container
+from tensorpc.dock.components.plus.tensorutil import get_tensor_container
 
 UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[
     Callable[[Any, str, "SimpleCanvas"],
@@ -165,7 +165,7 @@ class SimpleCanvas(mui.FlexBox):
             self,
             camera: Optional[three.PerspectiveCamera] = None,
             screenshot_callback: Optional[Callable[[bytes, Any],
-                                                   mui._CORO_NONE]] = None,
+                                                   mui.CORO_NONE]] = None,
             transparent_canvas: bool = False,
             init_canvas_childs: Optional[List[
                 three.ThreeComponentType]] = None,

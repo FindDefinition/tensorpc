@@ -79,9 +79,9 @@ class ComputeNodeWrapper(BaseNodeWrapper):
 
         self.bind_fields(
             borderColor=
-            f"matchcase({node_model_draft.node.status}, {D.literal_val(status_to_border_color)})",
+            f"matchCase({node_model_draft.node.status}, {D.literal_val(status_to_border_color)})",
             boxShadow=
-            f"matchcase({node_model_draft.node.status}, {D.literal_val(status_to_border_shadow)})",
+            f"matchCase({node_model_draft.node.status}, {D.literal_val(status_to_border_shadow)})",
         )
         self._ctx = ComputeFlowNodeContext(node_id, node_state, node_model_draft.node_state)
         self.set_flow_event_context_creator(
@@ -127,7 +127,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             ])
         cached_icon = mui.Icon(mui.IconType.Cached).prop(iconSize="small")
         # print(str(node_model_draft.node.isCached))
-        cached_icon.bind_fields(muiColor=f"where(not_null({node_model_draft.node.isCached}, `true`), 'success', 'disabled')")
+        cached_icon.bind_fields(muiColor=f"'success' if not_null({node_model_draft.node.isCached}, True) else 'disabled'")
         header_icons = mui.HBox(
             [
                 cached_icon,
@@ -143,6 +143,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             node_obj.get_compute_func(), cnode_cfg.is_dynamic_cls)
         handle_name_to_inp_handle: dict[str, IOHandle] = {}
         handle_name_to_out_handle: dict[str, IOHandle] = {}
+        print("???", inp_handles, out_handles)
 
         input_args = mui.Fragment([*inp_handles])
         output_args = mui.Fragment([*out_handles])

@@ -49,7 +49,7 @@ def get_mro_qualnames_of_type(klass: Type) -> Set[str]:
 def is_lambda(obj: Callable):
     if not inspect.isfunction(obj) and not inspect.ismethod(obj):
         return False
-    return obj.__qualname__ == "<lambda>"
+    return "<lambda>" in obj.__qualname__
 
 def is_tensorpc_fname(fname: str):
     return fname.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}") and fname.endswith(">")

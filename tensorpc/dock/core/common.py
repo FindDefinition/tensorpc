@@ -55,6 +55,11 @@ _ONEARG_EDITOR_EVENTS = set([
     FrontendEventType.EditorSaveState.value,
     FrontendEventType.EditorAction.value,
     FrontendEventType.EditorCursorSelection.value,
+    FrontendEventType.EditorInlayHintsQuery.value,
+    FrontendEventType.EditorHoverQuery.value,
+    FrontendEventType.EditorCodelensQuery.value,
+    FrontendEventType.EditorDecorationsChange.value,
+    FrontendEventType.EditorBreakpointChange.value,
 ])
 
 _ONEARG_SPECIAL_EVENTS = set([
@@ -69,8 +74,8 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.FlowPaneContextMenu.value,
     FrontendEventType.FlowNodeLogicChange.value, 
     FrontendEventType.FlowVisChange.value, 
-
-    
+    FrontendEventType.HudGroupLayoutChange.value, 
+    FrontendEventType.MeshPoseChange.value, 
 
 ])
 
@@ -90,10 +95,24 @@ _ONEARG_TERMINAL_EVENTS = set([
     FrontendEventType.TerminalFrontendMount.value,
 ])
 
-_ONEARG_EVENTS = set(
+_ONEARG_CHART_EVENTS = set([
+    FrontendEventType.ChartAreaClick.value,
+    FrontendEventType.ChartAxisClick.value,
+    FrontendEventType.ChartItemClick.value,
+    FrontendEventType.ChartLineClick.value,
+    FrontendEventType.ChartMarkClick.value,
+])
+
+_ONEARG_VIDEO_STREAM_EVENTS = set([
+    FrontendEventType.VideoStreamReady.value,
+    FrontendEventType.RTCSdpRequest.value,
+])
+
+_ONEARG_EVENTS = (set(
     ALL_POINTER_EVENTS
-) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
-_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS | _ONEARG_KEYBOARD_EVENTS
+) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS | _ONEARG_CHART_EVENTS)
+_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS | _ONEARG_KEYBOARD_EVENTS | _ONEARG_VIDEO_STREAM_EVENTS
+
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
@@ -101,6 +120,7 @@ _NOARG_EVENTS = set([
     FrontendEventType.DoubleClick.value,
     FrontendEventType.EditorQueryState.value,
     FrontendEventType.Delete.value,
+    FrontendEventType.PointerLockReleased.value,
 ])
 
 async def handle_raw_event(event: Event,
@@ -132,17 +152,23 @@ async def handle_standard_event(comp: Component,
                                 sync_status_first: bool = False,
                                 sync_state_after_change: bool = True,
                                 is_sync: bool = False,
-                                change_status: bool = True,
+                                change_status: bool = False,
                                 capture_draft: bool = True):
     """ common event handler
     """
     # print("WTF", event.type, event.data, comp._flow_comp_status)
     if comp._flow_comp_status == UIRunStatus.Running.value:
         flowuid = comp._flow_uid
+        event_type_str = str(event.type)
+        try:
+            event_type_str = FrontendEventType(event.type).name 
+        except:
+            pass
+        
         if flowuid is not None:
-            LOGGER.warning("Component (%s) %s is running, ignore user event %s", type(comp).__name__, flowuid, event.type)
+            LOGGER.warning("Component (%s) %s is running, ignore user event %s", type(comp).__name__, flowuid, event_type_str)
         else:
-            LOGGER.warning("Component (%s) is running, ignore user event %s", type(comp).__name__, event.type)
+            LOGGER.warning("Component (%s) is running, ignore user event %s", type(comp).__name__, event_type_str)
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
         return
@@ -161,18 +187,25 @@ async def handle_standard_event(comp: Component,
             handlers = comp.get_event_handlers(event.type)
             sync_state = False
             # for data model components, we don't need to sync state.
+            # run state change (assign value) after user callbacks to
+            # make sure user can access both old value and new value.
+            finish_callback = None 
             if isinstance(event.keys, Undefined):
-                comp.state_change_callback(event.data, event.type)
+                finish_callback = partial(comp.state_change_callback, event.data, event.type)
+                # comp.state_change_callback(event.data, event.type)
                 sync_state = sync_state_after_change
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:
-                    return await comp.run_callbacks(
+                    res = await comp.run_callbacks(
                         handlers.get_bind_event_handlers(event),
                         sync_state,
-                        sync_status_first=False,
+                        sync_status_first=sync_status_first,
                         change_status=change_status,
-                        capture_draft=capture_draft)
+                        capture_draft=capture_draft,
+                        finish_callback=finish_callback)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(
@@ -180,9 +213,12 @@ async def handle_standard_event(comp: Component,
                             sync_state,
                             sync_status_first=sync_status_first,
                             change_status=change_status,
-                            capture_draft=capture_draft))
+                            capture_draft=capture_draft,
+                            finish_callback=finish_callback))
             else:
                 # all controlled component must sync state after state change
+                if finish_callback is not None:
+                    finish_callback()
                 if sync_state_after_change:
                     await comp.sync_status(sync_state)
         elif event.type in _NOARG_EVENTS:
@@ -191,9 +227,12 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs,
-                                                    sync_status_first=False,
-                                                    capture_draft=capture_draft)
+                    res = await comp.run_callbacks(run_funcs,
+                                                    sync_status_first=sync_status_first,
+                                                    capture_draft=capture_draft,
+                                                    change_status=change_status)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,
@@ -206,11 +245,14 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers(event)
                 if is_sync:
-                    return await comp.run_callbacks(
+                    res = await comp.run_callbacks(
                         run_funcs,
-                        sync_status_first=False,
+                        sync_status_first=sync_status_first,
                         change_status=change_status,
                         capture_draft=capture_draft)
+                    # when event is sync (frontend rpc), we only return first one.
+                    return res[0]
+
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,

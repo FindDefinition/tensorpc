@@ -42,6 +42,11 @@ class _ServiceNames:
     def FLOW_QUERY_APP_NODE_URLS(self):
         from tensorpc.dock.serv.core import Flow
         return get_service_key_by_type(Flow, Flow.query_app_node_urls.__name__)
+    
+    @property
+    def FLOW_QUERY_ALL_RUNNING_APPS(self):
+        from tensorpc.dock.serv.core import Flow
+        return get_service_key_by_type(Flow, Flow.query_all_running_app_nodes.__name__)
 
     @property
     def FLOW_PUT_APP_EVENT(self):
@@ -54,6 +59,16 @@ class _ServiceNames:
         return get_service_key_by_type(Flow, Flow.put_app_event_stream.__name__)
 
     @property
+    def FLOW_RUN_APP_SERVICE(self):
+        from tensorpc.dock.serv.core import Flow
+        return get_service_key_by_type(Flow, Flow.run_app_service.__name__)
+
+    @property
+    def FLOW_RUN_APP_ASYNC_GEN_SERVICE(self):
+        from tensorpc.dock.serv.core import Flow
+        return get_service_key_by_type(Flow, Flow.run_app_async_gen_service.__name__)
+
+    @property
     def APP_RUN_SINGLE_EVENT(self):
         from tensorpc.dock.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
@@ -63,6 +78,16 @@ class _ServiceNames:
     def APP_SIMPLE_RPC(self):
         from tensorpc.dock.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp, FlowApp.handle_simple_rpc.__name__)
+    
+    @property
+    def APP_RUN_SERVICE(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp, FlowApp.run_app_service.__name__)
+    
+    @property
+    def APP_RUN_ASYNC_GEN_SERVICE(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp, FlowApp.run_app_async_gen_service.__name__)
 
     @property
     def APP_RELAY_APP_EVENT_FROM_REMOTE(self):
@@ -181,16 +206,6 @@ class _ServiceNames:
     def REMOTE_COMP_SIMPLE_RPC(self):
         from tensorpc.dock.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.handle_simple_rpc.__name__)
-
-    @property
-    def REMOTE_COMP_MOUNT_APP(self):
-        from tensorpc.dock.serv.remote_comp import RemoteComponentService
-        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.mount_app.__name__)
-
-    @property
-    def REMOTE_COMP_UNMOUNT_APP(self):
-        from tensorpc.dock.serv.remote_comp import RemoteComponentService
-        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.unmount_app.__name__)
 
     @property
     def REMOTE_COMP_GET_LAYOUT(self):

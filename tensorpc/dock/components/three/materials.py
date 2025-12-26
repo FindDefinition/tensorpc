@@ -425,9 +425,12 @@ class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
     #include <colorspace_fragment>
     """
 
-    def __init__(self, ) -> None:
+    def __init__(self, uniforms: list[ShaderUniform], vertex_shader: str, fragment_shader: str) -> None:
         super().__init__(UIType.ThreeMeshShaderMaterial,
                          MeshShaderMaterialProps)
+        self.prop(uniforms=uniforms,
+                  vertexShader=vertex_shader,
+                  fragmentShader=fragment_shader)
 
     @property
     def prop(self):

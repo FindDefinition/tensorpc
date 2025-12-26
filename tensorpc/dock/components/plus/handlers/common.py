@@ -363,7 +363,7 @@ class DefaultHandler(ObjectPreviewHandler):
         await self._objscript_editor.write("")
         await self._objscript_show.set_new_layout([])
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         if self.obj is not None and self.obj_uid is not None:
             _, layouts = get_frame_obj_layout_from_code(self.obj_uid, ev.value, self.obj)
             if layouts is not None:
@@ -502,12 +502,17 @@ class PytorchModuleHandler(DefaultHandler):
             await self._graph.do_dagre_layout(dagre)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
+        from torch.distributed.tensor import DTensor
         await super().bind(obj, uid)
         # obj is nn.Module
         # get weight size
         total_size = 0
         for name, param in obj.named_parameters():
-            total_size += param.numel() * param.element_size()
+            if isinstance(param.data, DTensor):
+                local = param.data._local_tensor
+                total_size += local.numel() * local.element_size()
+            else:
+                total_size += param.numel() * param.element_size()
         total_size_str = humanize.naturalsize(total_size)
         await self._model_size.write(f"Model Size: {total_size_str}")
 

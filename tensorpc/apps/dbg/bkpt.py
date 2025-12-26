@@ -19,24 +19,27 @@ from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core import prim
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.tracers.targettracer import TargetTracer
-from tensorpc.apps.dbg.core.bkpt_events import BreakpointEvent, BkptLeaveEvent, BkptLaunchTraceEvent
+from tensorpc.apps.dbg.core.bkpt_events import BreakpointEvent, BkptLeaveEvent, BkptLaunchTraceEvent, BkptRunScriptEvent
 from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY,
                                     TENSORPC_ENV_DBG_ENABLE,
                                     BreakpointType, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
-                                    RecordFilterConfig, DebugDistributedInfo)
+                                    RecordFilterConfig, DebugDistributedInfo,
+                                    LOGGER)
 from tensorpc.apps.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
-from tensorpc.utils.rich_logging import get_logger
 import sys
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
+
 from .serv_names import serv_names
 
-LOGGER = get_logger("tensorpc.dbg")
 
 RECORDING = False
 
 _TRACER_WRAPPER = DebugTracerWrapper()
 
+class _BkptExitByRaise(Exception):
+    pass
 
 def _try_get_distributed_meta():
     # try find torch dist (only support torchrun since it set enought env)
@@ -409,6 +412,7 @@ def breakpoint(name: Optional[str] = None,
     is_launch_trace = False
     is_manual_scope: bool = False
     result_data: Any = None
+    should_raise: bool = False
     while True:
         ev = event_q.get(timeout=timeout)
         if isinstance(ev, BkptLaunchTraceEvent):
@@ -437,7 +441,17 @@ def breakpoint(name: Optional[str] = None,
                 )
         elif isinstance(ev, BkptLeaveEvent):
             result_data = ev.data
+            should_raise = ev.should_raise
             break
+        elif isinstance(ev, BkptRunScriptEvent):
+            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-distributed-tmp>"
+            code_comp = compile(ev.code, fname, "exec")
+            try:
+                exec(code_comp, frame.f_globals, frame.f_locals)
+            except:
+                traceback.print_exc()
+    if should_raise:
+        raise _BkptExitByRaise("Exit Breakpoint By Raise")
     if is_launch_trace and not is_manual_scope:
         RECORDING = True
         _TRACER_WRAPPER.start()

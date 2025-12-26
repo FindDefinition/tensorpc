@@ -318,6 +318,8 @@ def determine_code_common_indent(code: str):
             indent = line_indent
         else:
             indent = min(indent, line_indent)
+    if indent is None:
+        indent = 0
     return indent
 
 

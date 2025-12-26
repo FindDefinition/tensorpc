@@ -42,6 +42,11 @@ class _ServiceNames:
     def DBG_SET_SKIP_BREAKPOINT(self):
         from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_skip_breakpoint.__name__)
+    
+    @property
+    def DBG_RUN_FRAME_SCRIPT(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.run_frame_script.__name__)
 
     @property
     def DBG_BKGD_GET_CURRENT_FRAME(self):

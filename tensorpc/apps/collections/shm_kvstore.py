@@ -333,7 +333,7 @@ class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
             for path, ten in path_with_var_to_load_dict.items():
                 if isinstance(ten, torch.Tensor):
                     if path in path_with_var_dict:
-                        index = path_with_var_dict[path][_JSON_INDEX_KEY]
+                        index = path_with_var_dict[path][_JSON_INDEX_KEY][0]
                         store_arr_descs_need_load.append(store_arr_descs[index])
                         ten, info = _get_tensor_info_from_tensor(ten)
                         load_arr_descs.append(info)

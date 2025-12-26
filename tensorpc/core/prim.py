@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from typing import Optional
 
 from tensorpc.core import serviceunit
 from tensorpc.core.server_core import (get_server_context,
@@ -27,6 +28,9 @@ def get_shutdown_event() -> threading.Event:
 def get_async_shutdown_event() -> asyncio.Event:
     return get_server_exposed_props().async_shutdown_event
 
+def get_async_rpc_done_event() -> Optional[asyncio.Event]:
+    return get_server_context().rpc_end_event
+
 def check_is_service_available(service: str):
     su = get_service_units()
     return su.has_service_unit(service) 
@@ -41,6 +45,8 @@ def is_loopback_call():
     """tell service whether rpc is a loopback call, 
     i.e. call from the same process without RPC/socket.
     """
+    if not is_in_server_context():
+        return True 
     return get_server_context().is_loopback_call
 
 def get_service(key):

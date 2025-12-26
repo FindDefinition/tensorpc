@@ -4,6 +4,7 @@ from collections.abc import MutableMapping
 import enum
 from functools import partial
 import inspect
+import sys
 import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional, Union
@@ -332,7 +333,9 @@ class AsyncSSHTerminal(Terminal):
                  manual_disconnect: bool = False,
                  line_raw_ev_max_length: int = 10000,
                  init_size: Optional[tuple[int, int]] = (80, 24),
-                 terminalId: Optional[str] = None) -> None:
+                 terminalId: Optional[str] = None,
+                 min_size: Optional[tuple[int, int]] = (25, 15),
+                 log_to_stdout: bool = False) -> None:
         super().__init__(init_data, terminalId=terminalId)
         if desc is None:
             assert manual_connect, "Cannot auto connect/disconnect when mount without url_with_port(ip:port), username, and password."
@@ -347,6 +350,7 @@ class AsyncSSHTerminal(Terminal):
         self._manual_disconnect = manual_disconnect
         self.event_terminal_input.on(self._on_input)
         self.event_terminal_resize.on(self._on_resize)
+        self._min_size = min_size
 
         self._backend_ssh_conn_inited_event_key = "__backend_ssh_conn_inited"
         self._backend_ssh_conn_close_event_key = "__backend_ssh_conn_close"
@@ -368,6 +372,7 @@ class AsyncSSHTerminal(Terminal):
         self._raw_data_ts: int = 0
         self._line_raw_ev_max_length = line_raw_ev_max_length
         self._line_raw_event_buffer: deque[bytes] = deque(maxlen=line_raw_ev_max_length)
+        self._log_to_stdout = log_to_stdout
 
     async def connect(self,
                       event_callback: Optional[Callable[[SSHEvent],
@@ -487,6 +492,12 @@ class AsyncSSHTerminal(Terminal):
 
     async def _on_resize(self, data: TerminalResizeEvent):
         self._size_state = data
+        if self._min_size is not None:
+            if data.width < self._min_size[0]:
+                LOGGER.warning("Terminal resize width %d is less than min size %s, ignore resize.",
+                                 data.width, self._min_size)
+                # reject small resize. this usually caused by unmount of tab.
+                return
         if self._ssh_state is not None:
             assert self._ssh_state.inp_queue is not None 
             await self._ssh_state.inp_queue.put(
@@ -548,6 +559,13 @@ class AsyncSSHTerminal(Terminal):
                             # await self.flow_event_emitter.emit_async(
                             #     self._backend_ssh_conn_inited_event_key,
                             #     Event(self._backend_ssh_conn_inited_event_key, None))
+                    if self._log_to_stdout:
+                        data = event.line.decode("utf-8", errors="replace")
+                        if not isinstance(self.props.terminalId, Undefined):
+                            print(f"[{self.props.terminalId}]{data}", end="")
+                        else:
+                            print(data, end="")
+
                 elif isinstance(event, (CommandEvent)):
                     if event.type == CommandEventType.CURRENT_COMMAND:
                         if event.arg is not None:

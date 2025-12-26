@@ -19,13 +19,13 @@ def get_tight_icon_tab_theme(size: str = "28px"):
     return tab_theme
 
 
-def get_tight_icon_tab_theme_horizontal(size: str = "28px"):
+def get_tight_icon_tab_theme_horizontal(size: str = "28px", padding: str = "0px"):
     tab_theme = mui.Theme(
         components={
             "MuiTab": {
                 "styleOverrides": {
                     "root": {
-                        "padding": "0",
+                        "padding": padding,
                         "minWidth": size,
                         "minHeight": size,
                     }

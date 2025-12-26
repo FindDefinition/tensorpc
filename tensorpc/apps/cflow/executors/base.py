@@ -31,6 +31,7 @@ class RemoteExecutorServiceKeys(enum.Enum):
     GET_DESP = f"{NODE_EXEC_SERVICE}.get_desp"
     RUN_NODE = f"{NODE_EXEC_SERVICE}.run_node"
     IMPORT_REGISTRY_MODULES = f"{NODE_EXEC_SERVICE}.import_registry_modules"
+    SETUP_NODE = f"{NODE_EXEC_SERVICE}.setup_node"
 
 @dataclasses.dataclass
 class ExecutorRemoteDesc:
@@ -140,4 +141,7 @@ class NodeExecutorBase(abc.ABC):
         return None
 
     def is_local(self) -> bool: 
-        return False
+        return True
+
+    @abc.abstractmethod
+    async def setup_node(self, node: "ComputeNodeModel") -> None: ...

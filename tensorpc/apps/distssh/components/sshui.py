@@ -39,7 +39,7 @@ class WorkersStatusBox(mui.DataFlexBox):
                                 margin="2px")
         self._box_template.bind_fields(
             backgroundColor="color",
-            animation="where(num_bkpt_proc > `0`, 'animateOutline 3s ease infinite', 'none')",
+            animation="where(num_bkpt_proc > 0, 'animateOutline 3s ease infinite', 'none')",
             # border=
             # f"where(num_bkpt_proc > `0`, '2px solid red', where(selected, '2px solid lightpink', '2px solid transparent'))",
             border=
@@ -105,8 +105,8 @@ class CheckpointManager(mui.FlexBox):
                 ])).bind_fields(condition="type")),
         ]
         draft = master_dm.get_draft()
-        btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == `0`)"),)
-        save_btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == `0`)"),)
+        btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == 0)"),)
+        save_btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == 0)"),)
         footer = mui.HBox([
             save_btn
         ]).prop(padding="10px")
@@ -236,7 +236,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
             [FTStatusBoxState.from_ft_state(state, False) for state in states],
             self._on_status_box_click)
         dialog_debug = mui.Dialog([
-            mui.JsonViewer().bind_fields(data="$")
+            mui.JsonViewer().bind_fields(data="getRoot()")
         ])
         self._dialog_debug = dialog_debug
         self._pyspy_viewer = PyspyViewer()

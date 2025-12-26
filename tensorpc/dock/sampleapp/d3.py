@@ -25,128 +25,6 @@ import numpy as np
 from tensorpc.dock.marker import mark_did_mount
 from tensorpc import prim
 
-
-class BufferMeshApp:
-
-    @mark_create_layout
-    def my_layout(self):
-        import open3d as o3d
-
-        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
-        mesh = o3d.io.read_triangle_mesh(
-            "/root/tusimple/val_00800000_0.0001.ply")
-        mesh.compute_vertex_normals()
-
-        vert = np.asarray(mesh.vertices)
-        indices = np.asarray(mesh.triangles)
-        mesh_points = vert[indices.reshape(-1)].reshape(-1, 3)
-        normals = np.asarray(mesh.triangle_normals).reshape(-1, 1, 3)
-        normals = np.tile(normals, (1, 3, 1)).reshape(-1, 3)
-        colors = np.zeros_like(mesh_points).astype(np.uint8)
-        print(mesh_points.shape)
-        mesh_points = np.ascontiguousarray(mesh_points)
-        buffers = {
-            "position": mesh_points.astype(np.float32),
-            "normal": normals.astype(np.float32),
-            "color": colors.astype(np.float32),
-        }
-
-        buffer_mesh = three.BufferMesh(
-            buffers,
-            mesh_points.shape[0],
-            [
-                three.MeshPhongMaterial().prop(color="aqua",
-                                               specular="#ffffff",
-                                               shininess=250,
-                                               transparent=True),
-                # three.MeshDepthMaterial(),
-
-                # three.Edges(threshold=10, scale=1.1, color="black"),
-            ]).prop(castShadow=True, receiveShadow=True)
-        mesh_points = mesh_points[:500000]
-        random_pcs = np.random.randint(-10, 10, size=[100, 3])
-        random_pc_colors = np.random.uniform(0,
-                                             255,
-                                             size=[mesh_points.shape[0],
-                                                   3]).astype(np.uint8)
-        voxel_size = 0.1
-        voxel_mesh = three.VoxelMesh(
-            mesh_points.astype(np.float32),
-            voxel_size,
-            mesh_points.shape[0],
-            [
-                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
-                three.MeshBasicMaterial().prop(vertexColors=True),
-                # three.Edges(),
-            ],
-            colors=random_pc_colors).prop()
-        instanced_voxel_mesh = three.InstancedMesh(
-            mesh_points.astype(np.float32),
-            mesh_points.shape[0],
-            [
-                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
-                three.BoxGeometry(voxel_size, voxel_size, voxel_size),
-                three.MeshBasicMaterial().prop(),
-            ],
-            colors=random_pc_colors).prop()
-
-        for k, v in buffers.items():
-            print(k, v.shape)
-        print(vert.shape, indices.shape)
-        dirlight = three.DirectionalLight((64, 20, 15),
-                                          target_position=(0, 20, 0),
-                                          color=0xffffff,
-                                          intensity=5).prop(castShadow=True)
-        dirlight.update_raw_props({
-            "shadow-mapSize-height": 2048,
-            "shadow-mapSize-width": 2048,
-            # "shadow-camera-near": 0.5,
-            # "shadow-camera-far": 1000,
-            # "shadow-camera-left": -1000,
-            # "shadow-camera-right": 1000,
-            # "shadow-camera-top": 1000,
-            # "shadow-camera-bottom": -1000,
-        })
-        self.canvas = plus.SimpleCanvas(
-            cam,
-            init_canvas_childs=[
-                # three.Mesh([
-                #     three.BoxGeometry(),
-                #     three.MeshStandardMaterial().prop(color="red"),
-                #     # three.Edges(threshold=20, scale=1.1, color="black"),
-                # ]).prop(position=(0, 0, 1), castShadow=True),
-                # three.Mesh([
-                #     three.PlaneGeometry(50, 50),
-                #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-                # ]).prop(receiveShadow=True, position=(0, 0, -0.1)),
-                # three.AmbientLight(color=0xeeeeee, intensity=1),
-                # dirlight,
-
-                # dirlight.prop(helper_color=0x0f0f2a, helper_size=1.0),
-                three.AmbientLight(),
-                three.PointLight(color=0xffffff,
-                                 intensity=5).prop(position=(13, 3, 5),
-                                                   castShadow=True),
-                # buffer_mesh,
-                # voxel_mesh,
-                instanced_voxel_mesh,
-            ])
-        self.canvas.canvas.prop(shadows=True)
-        res = mui.VBox([
-            mui.Button("Add", self._on_btn),
-            self.canvas.prop(flex=1),
-        ]).prop(minHeight=0,
-                minWidth=0,
-                flex=1,
-                width="100%",
-                height="100%",
-                overflow="hidden")
-        return res
-
-    async def _on_btn(self):
-        pass
-
-
 class BufferMeshDevApp:
 
     @mark_create_layout
@@ -354,7 +232,7 @@ class EnvmapGroupdProjectionApp:
         cubecam = three.CubeCamera([]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1,
                 resolution=128)
         cubecam.init_add_layout([
-            three.DataPortal([car], [
+            three.DataPortal(car, [
                 three.Group([
                     three.Group([
                         three.Mesh([]).prop(

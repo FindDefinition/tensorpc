@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import atexit
 import collections
 import contextlib
@@ -119,6 +120,7 @@ class AsyncRemoteObject(object):
                           rpc_timeout: Optional[int] = None,
                           rpc_callback="",
                           rpc_flags: int = rpc_message_pb2.PickleArray,
+                          rpc_wait_for_ready: bool = False,
                           **kwargs) -> Any:
         data_to_be_send = core_io.data_to_pb((args, kwargs), rpc_flags)
         request = rpc_message_pb2.RemoteCallRequest(service_key=key,
@@ -126,7 +128,7 @@ class AsyncRemoteObject(object):
                                                     callback=rpc_callback,
                                                     flags=rpc_flags)
         return self.parse_remote_response(await self.stub.RemoteCall(
-            request, timeout=rpc_timeout))
+            request, timeout=rpc_timeout, wait_for_ready=rpc_wait_for_ready))
 
     async def remote_json_call(self,
                                key: str,
@@ -134,6 +136,7 @@ class AsyncRemoteObject(object):
                                rpc_timeout: Optional[int] = None,
                                rpc_callback="",
                                rpc_flags: int = rpc_message_pb2.JsonArray,
+                                rpc_wait_for_ready: bool = False,
                                **kwargs) -> Any:
         arrays, decoupled = core_io.data_to_json((args, kwargs), rpc_flags)
         request = rpc_message_pb2.RemoteJsonCallRequest(service_key=key,
@@ -143,7 +146,7 @@ class AsyncRemoteObject(object):
                                                         flags=rpc_flags)
 
         return self.parse_remote_json_response(await self.stub.RemoteJsonCall(
-            request, timeout=rpc_timeout))
+            request, timeout=rpc_timeout, wait_for_ready=rpc_wait_for_ready))
 
     def parse_remote_json_response(self, response):
         self._check_remote_exception(response.exception)
@@ -313,6 +316,7 @@ class AsyncRemoteObject(object):
         rpc_flags: int = rpc_message_pb2.PickleArray,
         rpc_timeout: Optional[int] = None,
         rpc_chunk_size: int = 256 * 1024,
+        rpc_wait_for_ready: bool = False,
         rpc_relay_urls: Optional[list[str]] = None,
     ) -> AsyncIterator[Any]:
         """Call a remote function (not generator) with stream data:
@@ -341,11 +345,11 @@ class AsyncRemoteObject(object):
                         ]
                         stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
+                        for s in stream:
+                            yield s
                     except:
                         traceback.print_exc()
                         continue
-                    for s in stream:
-                        yield s
 
             stream_generator_func = stream_generator_async
         else:
@@ -366,11 +370,11 @@ class AsyncRemoteObject(object):
                         ]
                         stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
+                        for s in stream:
+                            yield s
                     except:
                         traceback.print_exc()
                         continue
-                    for s in stream:
-                        yield s
 
             stream_generator_func = stream_generator
         from_stream = core_io.FromBufferStream()
@@ -379,7 +383,8 @@ class AsyncRemoteObject(object):
         else:
             serv_fn = self.stub.ChunkedRemoteCall
         async for response in serv_fn(stream_generator_func(),
-                                      timeout=rpc_timeout):
+                                      timeout=rpc_timeout,
+                                      wait_for_ready=rpc_wait_for_ready):
             self._check_remote_exception(response.exception)
             res = from_stream(response)
             if res is not None:
@@ -401,6 +406,7 @@ class AsyncRemoteObject(object):
                                   rpc_timeout: Optional[int] = None,
                                   rpc_chunk_size: int = 256 * 1024,
                                   rpc_relay_urls: Optional[list[str]] = None,
+                                  rpc_wait_for_ready: bool = False,
                                   **kwargs) -> Any:
 
         def stream_generator():
@@ -414,6 +420,7 @@ class AsyncRemoteObject(object):
                 rpc_flags=rpc_flags,
                 rpc_timeout=rpc_timeout,
                 rpc_chunk_size=rpc_chunk_size,
+                rpc_wait_for_ready=rpc_wait_for_ready,
                 rpc_relay_urls=rpc_relay_urls):
             count += 1
         assert count == 1
@@ -722,11 +729,11 @@ async def simple_chunk_call_async(addr,
                                   rpc_timeout=None,
                                   **kwargs):
     async with AsyncRemoteManager(addr) as robj:
-        # await robj.wait_for_channel_ready()
-        return await robj.chunked_remote_call(key,
+        res = await robj.chunked_remote_call(key,
                                               *args,
                                               rpc_timeout=rpc_timeout,
                                               **kwargs)
+    return res
 
 
 async def shutdown_server_async(addr):

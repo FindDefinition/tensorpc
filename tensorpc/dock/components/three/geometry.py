@@ -259,6 +259,18 @@ class Shape:
     def quadratic_curve_to(self, cpX: float, cpY: float, x: float, y: float):
         self.ops.append((PathOpType.QuadraticCurve.value, [cpX, cpY, x, y]))
 
+    @classmethod 
+    def from_aabb(cls, center_x: float, center_y: float, width: float, height: float):
+        x = center_x - width / 2
+        y = center_y - height / 2
+        ctx = cls()
+        ctx.move_to(x, y)
+        ctx.line_to(x + width, y)
+        ctx.line_to(x + width, y + height)
+        ctx.line_to(x, y + height)
+        ctx.line_to(x, y)
+        return ctx
+
 class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
 
     def __init__(self, shape: Shape) -> None:

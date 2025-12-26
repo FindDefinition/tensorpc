@@ -8,7 +8,7 @@ import copy
 import dataclasses
 from functools import partial
 from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, Generator, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard
+from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard, TypeIs, Self, ParamSpec, ParamSpecArgs
 from dataclasses import dataclass
 from dataclasses import Field, make_dataclass, field
 import inspect
@@ -79,6 +79,13 @@ def get_type_hints_with_cache(cls, include_extras: bool = False):
             cls, include_extras=include_extras)
     return _DCLS_GET_TYPE_HINTS_CACHE[cls]
 
+_DCLS_RESOLVE_TYPE_HINTS_CACHE: dict[Any, dict[str, Any]] = {}
+
+def resolve_type_hints_with_cache(cls):
+    if cls not in _DCLS_RESOLVE_TYPE_HINTS_CACHE:
+        _DCLS_RESOLVE_TYPE_HINTS_CACHE[cls] = resolve_type_hints(
+            cls)
+    return _DCLS_RESOLVE_TYPE_HINTS_CACHE[cls]
 
 class Undefined:
 
@@ -109,12 +116,14 @@ class Undefined:
         # for python 3.11
         return 0
 
-    def bool(self):
+    def __bool__(self):
         return False
 
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
 
+def is_undefined(val: object) -> TypeIs[Undefined]:
+    return isinstance(val, Undefined)
 
 T = TypeVar("T")
 
@@ -262,9 +271,29 @@ class AnnotatedType:
     is_optional: bool = False
     is_undefined: bool = False
     raw_type: Optional[Any] = None
+    # currently only used for tuple type
+    is_homogeneous: bool = False
+
+    def get_optional_undefined_removed(self):
+        return dataclasses.replace(
+            self,
+            is_optional=False,
+            is_undefined=False)
 
     def is_any_type(self) -> bool:
         return self.origin_type is Any
+
+    def is_type_var(self) -> bool:
+        return isinstance(self.origin_type, TypeVar)
+
+    def is_param_spec(self) -> bool:
+        return isinstance(self.origin_type, ParamSpec)
+
+    def is_param_spec_args(self) -> bool:
+        return isinstance(self.origin_type, ParamSpecArgs)
+
+    def is_tuple_type(self) -> bool:
+        return self.origin_type is tuple or self.origin_type is Tuple
 
     def is_union_type(self) -> bool:
         return origin_is_union(self.origin_type)
@@ -287,18 +316,26 @@ class AnnotatedType:
     def is_dataclass_type(self) -> bool:
         return dataclasses.is_dataclass(self.origin_type)
 
+    def _is_non_class_base_type(self):
+        return self.is_union_type() or self.is_any_type() or self.is_tuple_type() or self.is_type_var()
+
     def is_dict_type(self) -> bool:
-        if self.is_union_type():
+        if self._is_non_class_base_type():
             return False
         return issubclass(self.origin_type, dict)
 
+    def is_callable(self) -> bool:
+        if self._is_non_class_base_type():
+            return False
+        return self.origin_type is Callable
+
     def is_list_type(self) -> bool:
-        if self.is_union_type():
+        if self._is_non_class_base_type():
             return False
         return issubclass(self.origin_type, list)
 
     def is_sequence_type(self) -> bool:
-        if self.is_union_type() or self.is_any_type():
+        if self._is_non_class_base_type():
             return False
         assert inspect.isclass(
             self.origin_type
@@ -307,7 +344,7 @@ class AnnotatedType:
                           Sequence) and not issubclass(self.origin_type, str)
 
     def is_mapping_type(self) -> bool:
-        if self.is_union_type() or self.is_any_type():
+        if self._is_non_class_base_type():
             return False
         assert inspect.isclass(
             self.origin_type
@@ -369,16 +406,44 @@ class AnnotatedType:
             for field in dataclasses.fields(self.origin_type)
         }
 
+    def get_dataclass_fields_and_annotated_types(
+            self) -> dict[str, tuple["AnnotatedType", Field]]:
+        assert self.is_dataclass_type()
+        return self.get_dataclass_fields_and_annotated_types_static(self.origin_type)
+
+    @staticmethod
+    def get_dataclass_fields_and_annotated_types_static(
+            type: Any) -> dict[str, tuple["AnnotatedType", Field]]:
+        assert inspect.isclass(type) and dataclasses.is_dataclass(type), \
+            f"type must be a dataclass, but get {type}"
+        type_hints = get_type_hints_with_cache(type,
+                                               include_extras=True)
+        res: dict[str, tuple["AnnotatedType", Field]] = {}
+        for field in dataclasses.fields(type):
+            field_type = type_hints[field.name]
+            field_annotype = parse_type_may_optional_undefined(field_type)
+            res[field.name] = (field_annotype, field)
+        return res
+
+
     @staticmethod
     def get_any_type():
         return AnnotatedType(Any, [])
 
+    def get_annometa(self, metatype: Type[T]) -> Optional[T]:
+        """Get the annometa of the specified type, if not found, return None."""
+        if self.annometa is None:
+            return None
+        for meta in self.annometa:
+            if isinstance(meta, metatype):
+                return meta
+        return None
 
 def parse_type_may_optional_undefined(
         ann_type: Any,
         is_optional: Optional[bool] = None,
         is_undefined: Optional[bool] = None,
-        typevar_map: Optional[dict[TypeVar, type]] = None) -> AnnotatedType:
+        self_type: Optional[AnnotatedType] = None) -> AnnotatedType:
     """Parse a type. If is union, return its non-optional and non-undefined type list.
     else return the type itself.
 
@@ -386,10 +451,11 @@ def parse_type_may_optional_undefined(
     """
     raw_type = ann_type
     ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
-    if isinstance(ann_type, TypeVar):
-        assert typevar_map is not None and ann_type in typevar_map, f"TypeVar is not supported, but get {ann_type}"
-        ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
+    if isinstance(ann_type, (TypeVar, ParamSpec, ParamSpecArgs)):
+        return AnnotatedType(ann_type, [], ann_meta, False,
+                                 False, ann_type)
     # check ann_type is Union
+    assert not isinstance(ann_type, str), "you must evaluate your annotation"
     ty_origin = get_origin(ann_type)
     if ty_origin is not None:
         if origin_is_union(ty_origin):
@@ -414,10 +480,30 @@ def parse_type_may_optional_undefined(
                 return res
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
+            for i in range(len(ty_args)):
+                cur_ty_arg = ty_args[i]
+                if cur_ty_arg is Self:
+                    assert self_type is not None, "Self type must be provided when parsing Self type"
+                    ty_args[i] = self_type.raw_type
             return AnnotatedType(ty_origin, ty_args, ann_meta, is_optional,
                                  is_undefined, raw_type)
         else:
             ty_args = get_args(ann_type)
+            if ty_origin is tuple or ty_origin is Tuple:
+                # tuple type, we need to check if it is homogeneous
+                if len(ty_args) == 2 and ty_args[1] is Ellipsis:
+                    # Tuple[T, ...] is a homogeneous tuple type
+                    ty_args = [ty_args[0]]
+                    return AnnotatedType(ty_origin, ty_args, ann_meta,
+                                         raw_type=raw_type,
+                                         is_homogeneous=True)
+            elif ty_origin is Callable:
+                # flat args
+                assert len(ty_args) == 2
+                if isinstance(ty_args[0], Sequence):
+                    ty_args = list(ty_args[0]) + [ty_args[1]]
+                for arg in ty_args:
+                    assert not isinstance(arg, (ParamSpec, ParamSpecArgs))
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, list(ty_args), ann_meta, raw_type=raw_type)
@@ -440,25 +526,37 @@ def child_type_generator_with_dataclass(t: type):
     if dataclasses.is_dataclass(t):
         type_hints = get_type_hints_with_cache(t, include_extras=True)
         for field in dataclasses.fields(t):
-            yield from child_type_generator(type_hints[field.name])
+            yield from child_type_generator_with_dataclass(type_hints[field.name])
     else:
         args = get_args(t)
         if is_annotated(t):
-            yield from child_dataclass_type_generator(args[0])
+            yield from child_type_generator_with_dataclass(args[0])
         else:
             for arg in args:
-                yield from child_dataclass_type_generator(arg)
+                yield from child_type_generator_with_dataclass(arg)
+
+def _child_dataclass_type_generator_recursive(t: type, visited: set[Any]) -> Generator[type[DataclassType], None, None]:
+    if dataclasses.is_dataclass(t) and inspect.isclass(t):
+        if t in visited:
+            return
+        visited.add(t)
+        yield t
+        type_hints = get_type_hints_with_cache(t, include_extras=True)
+        for field in dataclasses.fields(t):
+            yield from _child_dataclass_type_generator_recursive(type_hints[field.name], visited)
+    else:
+        args = get_args(t)
+        if is_annotated(t):
+            yield from _child_dataclass_type_generator_recursive(args[0], visited)
+        else:
+            for arg in args:
+                yield from _child_dataclass_type_generator_recursive(arg, visited)
+
+
 
 def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], None, None]:
-    if dataclasses.is_dataclass(t):
-        yield t
-    else:
-        args = get_args(t)
-        if is_annotated(t):
-            yield from child_dataclass_type_generator(args[0])
-        else:
-            for arg in args:
-                yield from child_dataclass_type_generator(arg)
+    visited = set()
+    yield from _child_dataclass_type_generator_recursive(t, visited)
 
 def parse_annotated_function(
     func: Callable,
@@ -473,8 +571,13 @@ def parse_annotated_function(
 
     specs = inspect.signature(func)
     name_to_parameter = {p.name: p for p in specs.parameters.values()}
+    # print(name_to_parameter, annos.keys())
     anno_args: List[AnnotatedArg] = []
+    anno_args_map: dict[str, AnnotatedArg] = {}
     return_anno: Optional[AnnotatedReturn] = None
+    for name, param in name_to_parameter.items():
+        anno_args.append(AnnotatedArg(name, param, Any))
+        anno_args_map[name] = anno_args[-1]
     for name, anno in annos.items():
         if name == "return":
             anno, annotated_metas = extract_annotated_type_and_meta(anno)
@@ -483,13 +586,14 @@ def parse_annotated_function(
             param = name_to_parameter[name]
             anno, annotated_metas = extract_annotated_type_and_meta(anno)
 
-            arg_anno = AnnotatedArg(name, param, anno, annotated_metas)
-            anno_args.append(arg_anno)
-    for name, param in name_to_parameter.items():
-        if name not in annos and param.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD):
-            anno_args.append(AnnotatedArg(name, param, Any))
+            # arg_anno = AnnotatedArg(name, param, anno, annotated_metas)
+            anno_args_map[name].type = anno
+            anno_args_map[name].annometa = annotated_metas
+    # for name, param in name_to_parameter.items():
+    #     if name not in annos and param.kind in (
+    #             inspect.Parameter.POSITIONAL_ONLY,
+    #             inspect.Parameter.POSITIONAL_OR_KEYWORD):
+    #         anno_args.append(AnnotatedArg(name, param, Any))
     return anno_args, return_anno
 
 
@@ -591,6 +695,8 @@ def _main():
         print(at, at.is_list_type(), at.is_sequence_type(),
               at.is_mapping_type(), at.is_dict_type())
 
+def _main_test():
+    print(parse_type_may_optional_undefined(tuple[int, ...]))
 
 if __name__ == "__main__":
-    _main()
+    _main_test()

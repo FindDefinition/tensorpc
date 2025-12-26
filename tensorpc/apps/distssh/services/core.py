@@ -22,6 +22,7 @@ from tensorpc.dock import terminal
 import dataclasses
 import uuid
 from tensorpc.utils import get_service_key_by_type, rich_logging
+from tensorpc.utils.json_utils import json_load_from_bytes
 from tensorpc.utils.wait_tools import get_primary_ip 
 from tensorpc.core import BuiltinServiceKeys, marker, prim
 from tensorpc.core.moduleid import import_dynamic_func
@@ -84,12 +85,12 @@ class CmdTaskState:
 
 class FaultToleranceSSHServer:
     def __init__(self,
-                 config_dict: dict,
-                 default_url: str = "localhost:22") -> None:
+                 config_dict: dict) -> None:
         cfg = FTSSHServerArgs(**config_dict)
         self._cfg = cfg
-        self._conn_desc = SSHConnDesc(default_url, cfg.username, cfg.password)
-        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=True)
+        local_ssh_port = cfg.local_ssh_port
+        self._conn_desc = SSHConnDesc(f"localhost:{local_ssh_port}", cfg.username, cfg.password)
+        self._terminal = terminal.AsyncSSHTerminal(log_to_stdout=self._cfg.log_to_stdout).prop(disableStdin=True)
         self._master_rank = 0
         ip = get_primary_ip()
         state = FTState(
@@ -102,6 +103,7 @@ class FaultToleranceSSHServer:
             master_uuid="",
             master_ip=ip,
         )
+        LOGGER.warning(f"UUID {state.uuid} for rank {cfg.rank} Assigned")
         self._is_master = cfg.rank == self._master_rank
         if self._is_master:
             state.master_uuid = state.uuid
@@ -295,6 +297,10 @@ class FaultToleranceSSHServer:
             await self._terminal.disconnect()
             await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
                 term_line_event_callback=self._line_event_cb)
+            state = self._terminal.get_current_state()
+            assert state is not None
+            self._debug_panel.set_parent_pid(state.pid)
+
         elif act == MasterActions.CLEAR_ALL_CKPT:
             clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.clear")
             await clear_fn()
@@ -453,6 +459,7 @@ class FaultToleranceSSHServer:
                         LOGGER.warning(f"worker {rank}({poped_robj.url}) disconnected")
                         has_disconnect = True
                     else:
+                        draft.client_states[rank].status = FTStatus.OK
                         res_dict[rank] = r
                 if has_disconnect or not is_all_worker_conn:
                     draft.client_states[self._master_rank].status = FTStatus.WORKER_DISCONNECTED
@@ -476,9 +483,16 @@ class FaultToleranceSSHServer:
             self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(cmd, exit_ev)), exit_ev)
         return res
 
-    async def set_perf_data(self, step: int, data: list[list[dict]], metadata: list[Any], scale: Optional[float] = None):
+    async def _set_perf_data(self, rpc_done_ev: Optional[asyncio.Event], step: int, data: Union[list[list[dict]], bytes], metadata: list[Any], scale: Optional[float] = None):
+        if rpc_done_ev is not None:
+            await rpc_done_ev.wait()
+        if isinstance(data, bytes):
+            data = json_load_from_bytes(data)
+        return await self._debug_panel.perf_monitor.append_perf_data(step, data, metadata, scale)
+
+    def set_perf_data(self, step: int, data: Union[list[list[dict]], bytes], metadata: list[Any], scale: Optional[float] = None):
         if self._is_master:
-            await self._debug_panel.perf_monitor.append_perf_data(step, data, metadata, scale)
+            asyncio.create_task(self._set_perf_data(prim.get_async_rpc_done_event(), step, data, metadata, scale))
 
     async def cancel_cmd(self):
         if self._cmd_task is not None:
@@ -499,6 +513,10 @@ class FaultToleranceSSHServer:
     async def shutdown_or_kill_cmd(self, just_kill: bool = False):
         if self._cmd_task is not None:
             await self._cmd_shutdown_sequence(not just_kill)
+        else:
+            ft_state = self._get_ft_state()
+            LOGGER.warning(f"[Rank-{ft_state.rank}]no command is running, skip shutdown_or_kill_cmd. "
+                f"state: {ft_state.status}")
 
     async def client_run_cmd(self, cmd: str):
         assert self._cmd_task is None, "master can only run one command at a time" 
@@ -679,6 +697,12 @@ class FaultToleranceSSHServer:
             self._cmd_task = None
             LOGGER.warning("cmd waiter finished.")
 
+    def _get_ft_state(self):
+        if self._is_master:
+            return self._master_ui.dm.model.client_states[self._master_rank]
+        else:
+            return self._client_ui.dm.model
+
     async def _master_sync_cmd_status(self):
         prev_status = self._master_ui.dm.model.cmd_status
         if prev_status != CmdStatus.DURING_RESTART:
@@ -705,6 +729,10 @@ class FaultToleranceSSHServer:
         prev_client_state = self._master_ui.dm.model.client_states[state.rank]
         client_is_restart = (prev_client_state.uuid != state.uuid and prev_client_state.uuid != "")
         master_is_restart = (self.state.uuid != state.master_uuid and state.master_uuid != "")
+        if client_is_restart:
+            LOGGER.error(f"client uuid changed ({prev_client_state.uuid} -> {state.uuid}), may be restarted.")
+        if master_is_restart:
+            LOGGER.error(f"master uuid changed ({state.master_uuid} -> {self.state.uuid}), may be restarted.")
         if client_is_restart or master_is_restart:
             await self._master_start_cmd_restart_sequence()
         async with self._master_ui.dm.draft_update() as draft_master:
@@ -823,7 +851,10 @@ class FaultToleranceSSHServer:
                                 if res is not None:
                                     LOGGER.warning(f"Try to rerun all cmd:")
                                     print(self._master_ui.dm.model.cmd)
-                                    await self._master_run_cmd(self._master_ui.dm.model.cmd)
+                                    try:
+                                        await self._master_run_cmd(self._master_ui.dm.model.cmd)
+                                    except:
+                                        LOGGER.error("Restart Unexpected error.", exc_info=True)
                             await self._master_sync_cmd_status()
                     else:
                         if len(self._client_robjs) != self._cfg.world_size - 1:

@@ -1,4 +1,7 @@
+import ast
+from functools import partial
 import inspect
+import re
 import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type, Union
 
@@ -143,3 +146,106 @@ def get_co_qualname_from_frame(frame: types.FrameType):
         if "self" in frame.f_locals:
             qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
     return qname 
+
+def unwrap_fn_static_cls_property(fn: Callable):
+    fn = inspect.unwrap(fn)
+    if isinstance(fn, (classmethod, staticmethod)):
+        return fn.__func__
+    elif isinstance(fn, property):
+        assert fn.fget is not None 
+        return fn.fget
+    return fn
+
+
+class _ClassFinder(ast.NodeVisitor):
+
+    def __init__(self, qualname):
+        self.stack = []
+        self.qualname = qualname
+
+    def visit_FunctionDef(self, node):
+        self.stack.append(node.name)
+        self.stack.append('<locals>')
+        self.generic_visit(node)
+        self.stack.pop()
+        self.stack.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef # type: ignore[override]
+
+    def visit_ClassDef(self, node):
+        self.stack.append(node.name)
+        if self.qualname == '.'.join(self.stack):
+            # Return the decorator for the class if present
+            if node.decorator_list:
+                line_number = node.decorator_list[0].lineno
+            else:
+                line_number = node.lineno
+
+            # decrement by one since lines starts with indexing by zero
+            line_number -= 1
+            raise inspect.ClassFoundException(line_number)
+        self.generic_visit(node)
+        self.stack.pop()
+
+
+def findsource_by_lines(object, lines: list[str]):
+    """Return the entire source file and starting line number for an object.
+
+    The argument may be a module, class, method, function, traceback, frame,
+    or code object.  The source code is returned as a list of all the lines
+    in the file and the line number indexes a line in that list.  An OSError
+    is raised if the source code cannot be retrieved."""
+
+    if inspect.ismodule(object):
+        return lines, 0
+
+    if inspect.isclass(object):
+        qualname = object.__qualname__
+        source = ''.join(lines)
+        tree = ast.parse(source)
+        class_finder = _ClassFinder(qualname)
+        try:
+            class_finder.visit(tree)
+        except inspect.ClassFoundException as e:
+            line_number = e.args[0]
+            return lines, line_number
+        else:
+            raise OSError('could not find class definition')
+
+    if inspect.ismethod(object):
+        object = object.__func__
+    if inspect.isfunction(object):
+        object = object.__code__
+    if inspect.istraceback(object):
+        object = object.tb_frame
+    if inspect.isframe(object):
+        object = object.f_code
+    if inspect.iscode(object):
+        if not hasattr(object, 'co_firstlineno'):
+            raise OSError('could not find function definition')
+        lnum = object.co_firstlineno - 1
+        pat = re.compile(r'^(\s*def\s)|(\s*async\s+def\s)|(.*(?<!\w)lambda(:|\s))|^(\s*@)')
+        while lnum > 0:
+            try:
+                line = lines[lnum]
+            except IndexError:
+                raise OSError('lineno is out of bounds')
+            if pat.match(line):
+                break
+            lnum = lnum - 1
+        return lines, lnum
+    raise OSError('could not find code object')
+
+def getsourcelinesby_lines(object, lines: list[str]):
+    object = inspect.unwrap(object)
+    lines, lnum = findsource_by_lines(object, lines)
+
+    if inspect.istraceback(object):
+        object = object.tb_frame
+
+    # for module or frame that corresponds to module, return all source lines
+    if (inspect.ismodule(object) or
+        (inspect.isframe(object) and object.f_code.co_name == "<module>")):
+        return lines, 0
+    else:
+        return inspect.getblock(lines[lnum:]), lnum + 1

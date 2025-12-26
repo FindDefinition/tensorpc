@@ -87,9 +87,6 @@ class _RemoteObjectStateManager:
                 self._exec_id_to_robj[exec_desp.id] = AsyncRemoteManager(exec_desp.url)
         return self._exec_id_to_robj[exec_desp.id]
 
-# 0023350448
-
-
 class SingleProcNodeExecutor:
     def __init__(self, desc: ExecutorRemoteDesc):
         self._cached_data: dict[str, Any] = {}
@@ -116,6 +113,10 @@ class SingleProcNodeExecutor:
     def remove_cached_datas(self, data_ids: set[str]):
         for data_id in data_ids:
             self._cached_data.pop(data_id, None)
+
+    async def setup_node(self, node: ComputeNodeModel, 
+                node_impl_code: str):
+        await self._node_state_mgr.process_node(node, node_impl_code)
 
     async def run_node(self, node: ComputeNodeModel, 
                 node_impl_code: str,
@@ -215,7 +216,10 @@ class TorchDistNodeExecutor:
                 removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         raise NotImplementedError 
 
-
+    async def setup_node(self, node: ComputeNodeModel, 
+                node_impl_code: str):
+        raise NotImplementedError
+        
 class NodeExecutorService:
     def __init__(self, desc: dict[str, Any]):
         desp_obj = ExecutorRemoteDesc(**desc)
@@ -272,3 +276,7 @@ class NodeExecutorService:
                 inputs: dict[str, DataHandle], 
                 removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         return await self._executor.run_node(node, node_impl_code, node_state_dict, node_state_ast, inputs, removed_data_ids)
+
+    async def setup_node(self, node: ComputeNodeModel, 
+                node_impl_code: str):
+        await self._executor.setup_node(node, node_impl_code)

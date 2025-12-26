@@ -185,6 +185,9 @@ class InstancedMeshProps(Object3dContainerBaseProps):
     scales: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, Undefined] = undefined
     limit: Union[int, Undefined] = undefined
+    # when your data have special form such as 2d aabb, you can use faster raycaster.
+    # 2d_aabb: your transforms must be (n, 3) array and located in a z = constant plane.
+    raycaster: Union[Literal["2d_aabb"], Undefined] = undefined
 
 
 class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
@@ -210,7 +213,7 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
         assert transforms.shape[0] <= limit
         assert transforms.ndim == 2 or transforms.ndim == 3
         if transforms.ndim == 2:
-            assert transforms.shape[1] == 3 or transforms.shape[1] == 7
+            assert transforms.shape[1] == 3 or transforms.shape[1] == 2 or transforms.shape[1] == 7
         if transforms.ndim == 3:
             assert transforms.shape[1] == 4 and transforms.shape[2] == 4
         if transforms.dtype != np.float32:

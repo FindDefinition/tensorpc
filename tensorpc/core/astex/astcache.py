@@ -5,13 +5,17 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
 @dataclasses.dataclass
-class AstCacheItem:
+class SourceCacheItem:
     path: Path
     st_size: int
     st_mtime: float
     st_ctime: float
     content: str
     num_lines: int
+
+
+@dataclasses.dataclass
+class AstCacheItem(SourceCacheItem):
     tree: ast.AST
     all_nodes: List[ast.AST]
     code_range_to_nodes: Dict[Tuple[int, int, int, int], List[ast.AST]]
@@ -50,6 +54,32 @@ class AstCacheItem:
                 res.append(func_def)
         return res
 
+class SourceCache:
+    def __init__(self) -> None:
+        self._cache: Dict[Path, SourceCacheItem] = {}
+
+    def query_path(self, path: Path) -> SourceCacheItem:
+        # check mtime
+        path = path.resolve()
+        stat = path.stat()
+        if path in self._cache:
+            item = self._cache[path]
+            if item.st_mtime == stat.st_mtime:
+                return item
+        # read from file
+        res = self.read_from_file(path)
+        self._cache[path] = res
+        return res
+
+    def read_from_file(self, path: Path) -> SourceCacheItem:
+        path = path.resolve()
+        with open(path, "r") as f:
+            content = f.read()
+        num_lines = content.count("\n") + 1
+        item = SourceCacheItem(path, len(content),
+                            path.stat().st_mtime,
+                            path.stat().st_ctime, content, num_lines)
+        return item
 
 class AstCache:
     def __init__(self) -> None:

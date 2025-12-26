@@ -2,20 +2,23 @@ import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
 from functools import partial
+import inspect
+import io
+import json
 import time
-from typing import (Any, Callable, Coroutine, Generic, Optional, TypeVar,
+from typing import (Any, Callable, Coroutine, Generic, Optional, Type, TypeVar,
                     Union, cast)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
 from typing_extensions import Self, TypeAlias, override
 
-from tensorpc.core.annolib import AnnotatedFieldMeta, BackendOnlyProp, get_dataclass_field_meta_dict
+from tensorpc.core.annolib import AnnotatedFieldMeta, BackendOnlyProp, DataclassType, child_dataclass_type_generator, get_dataclass_field_meta_dict
 from tensorpc.core.datamodel.asdict import asdict_no_deepcopy_with_field
 from tensorpc.core.datamodel.draftast import DraftASTNode
 from tensorpc.core.datamodel.draftstore import DraftFileStorage, DraftStoreBackendBase
 import tensorpc.core.datamodel.jmes as jmespath
-from tensorpc.core import dataclass_dispatch as dataclasses
+from tensorpc.core import dataclass_dispatch as dataclasses, pfl
 from tensorpc.core.datamodel.draft import (
     DraftBase, DraftFieldMeta, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
@@ -24,6 +27,8 @@ from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
                                             update_model_with_change_event)
+from tensorpc.core.pfl import pflpath
+from tensorpc.core.pfl.parser import PFLLibrary
 from tensorpc.dock import appctx
 from tensorpc.dock.core.component import (Component, ContainerBase,
                                           ContainerBaseProps, DraftOpUserData,
@@ -41,8 +46,23 @@ _T = TypeVar("_T")
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
 @dataclasses.dataclass
+class DataModelUpdateSelf:
+    funcUid: str 
+    subModelPath: Union[Undefined, str] = undefined
+    dontUseImmer: Union[Undefined, bool] = undefined
+    partialTailArgs: Union[Undefined, list[Any]] = undefined
+
+@dataclasses.dataclass
+class DataModelPeriodUpdateSelf(DataModelUpdateSelf):
+    period: float = 1000.0
+
+@dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
+    # include all datamodel methods marked with pfl function.
+    pfllibrary: Union[Undefined, bytes] = undefined
+    modelUpdateCallbacks: Union[Undefined, dict[str, DataModelUpdateSelf]] = undefined
+    modelPeriodCallbacks: Union[Undefined, dict[str, DataModelPeriodUpdateSelf]] = undefined
 
 def _print_draft_change_event(ev: DraftChangeEvent, draft_expr_str_dict):
     print("DraftChangeEvent:")
@@ -65,6 +85,30 @@ def _dict_facto_with_exclude(x: list[tuple[str, Any, Any]], exclude_field_ids: s
         if not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
+
+def _compile_pfllibrary(model_type: type[DataclassType]) -> Optional[PFLLibrary]:
+    all_func_need_compile = []
+    for dcls in child_dataclass_type_generator(model_type):
+        dcls_fields = {f.name: f for f in dataclasses.fields(dcls)}
+        for key in dir(dcls):
+            if key in dcls_fields:
+                continue 
+            may_be_method = getattr(dcls, key, None)
+            if may_be_method is None:
+                continue 
+            if isinstance(may_be_method, (classmethod, property)):
+                continue
+
+            if isinstance(may_be_method, staticmethod):
+                may_be_method = may_be_method.__func__
+            meta = pfl.get_compilable_meta(may_be_method)
+            if meta is not None:
+                all_func_need_compile.append(may_be_method)
+    if not all_func_need_compile:
+        return 
+    parser = pfl.PFLParser()
+    lib = parser.parse_funcs_to_pfl_ast(all_func_need_compile)
+    return lib 
 
 class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     """DataModel is the model part of classic MVC pattern, child components can use `bind_fields` to query data from
@@ -110,12 +154,20 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_draft_update: EventSlotEmitter[
             list[DraftUpdateOp]] = self._create_emitter_event_slot(
                 self._backend_draft_update_event_key)
+        # arg is prev model.
         self.event_storage_fetched: EventSlotEmitter[_T] = self._create_emitter_event_slot(
             self._backend_storage_fetched_event_key)
 
         self._draft_store_handler_registered: bool = False
         self._draft_store_data_fetched = False
         model_type_real = type(model)
+        self._pfl_library: Optional[PFLLibrary] = None
+        if dataclasses.is_dataclass(model_type_real):
+            self._pfl_library = _compile_pfllibrary(model_type_real)
+            if self._pfl_library is not None:
+                lib_binary = json.dumps(self._pfl_library.dump_to_json_dict()).encode("utf-8")
+                self.prop(pfllibrary=lib_binary)
+
         self._debug = debug
         self._is_model_dataclass = dataclasses.is_dataclass(model_type_real)
         self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(
@@ -231,7 +283,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         for k, v in draft.items():
             assert isinstance(v, DraftBase)
             node = get_draft_ast_node(v)
-            path = node.get_jmes_path()
+            path = node.get_pfl_path()
             paths.append(path)
             draft_expr_dict[k] = node
         user_eval_vars_dict: Optional[dict[str, DraftASTNode]] = None
@@ -252,10 +304,38 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         # return effect_fn to let user remove the effect.
         return handler_obj, effect_fn
 
+    async def _model_change_cb_effect(self, key: str, update_cb: DataModelUpdateSelf):
+        new_cbs: dict[str, DataModelUpdateSelf] = {}
+        if not isinstance(self.props.modelUpdateCallbacks, Undefined):
+            new_cbs = self.props.modelUpdateCallbacks
+        assert key not in new_cbs, f"model update callback for {key} already exists, use another key."
+        new_cbs[key] = update_cb
+        await self.send_and_wait(self.update_event(modelUpdateCallbacks=new_cbs))
+        async def unmount():
+            new_cbs: dict[str, DataModelUpdateSelf] = {}
+            if not isinstance(self.props.modelUpdateCallbacks, Undefined):
+                new_cbs = self.props.modelUpdateCallbacks
+            if key in new_cbs:
+                new_cbs.pop(key)
+            await self.send_and_wait(self.update_event(modelUpdateCallbacks=new_cbs))
+        return unmount
+
+    def install_model_update_callback(
+            self,
+            key: str,
+            func: Callable[[T], None], 
+            submodel_draft: Optional[Any] = None, 
+            use_immer: bool = True):
+        cb = self._create_dm_update_self(func, submodel_draft, use_immer)
+        effect_fn = partial(self._model_change_cb_effect, key, cb)
+        self.use_effect(effect_fn)
+        # return effect_fn to let user remove the effect.
+        return effect_fn
+
     def debug_print_draft_change(self, draft: Union[Any, dict[str, Any]]):
         if not isinstance(draft, dict):
             draft = {"": draft}
-        draft_expr_str_dict = {k: get_draft_ast_node(v).get_jmes_path() for k, v in draft.items()}
+        draft_expr_str_dict = {k: get_draft_ast_node(v).get_pfl_path() for k, v in draft.items()}
         return self.install_draft_change_handler(draft, partial(_print_draft_change_event, draft_expr_str_dict=draft_expr_str_dict))
 
     def _lazy_get_mashumaro_coder(self):
@@ -286,7 +366,22 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         return self._update_props_base(propcls, exclude_field_ids=self._flow_exclude_field_ids)
 
     async def sync_model(self):
-        await self.send_and_wait(self.update_event(dataObject=self.model))
+        """Write whole model. this function will cause `modelUpdateCallbacks` to be called.
+        """
+        msg = {
+            "type": 2,
+            "model": self.model,
+        }
+        if self._flow_exclude_field_ids:
+            facto_fn = partial(_dict_facto_with_exclude, 
+                            exclude_field_ids=self._flow_exclude_field_ids)
+            msg_dict = asdict_no_deepcopy_with_field(
+                        _DataclassSer(obj=msg),
+                        dict_factory_with_field=facto_fn)
+            return await self.send_and_wait(self.create_comp_event_raw(msg_dict))
+        else:
+            return await self.send_and_wait(self.create_comp_event(msg))
+        # await self.send_and_wait(self.update_event(dataObject=self.model))
 
     def get_draft_from_object(self) -> _T:
         """Create draft object, the generated draft AST is depend on real object.
@@ -297,6 +392,20 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         return cast(_T, create_draft(self.model,
                                      userdata=DraftOpUserData(self),
                                      obj_type=self._model_type))
+
+    def create_external_draft_with_self(self, model_cls: Type[T]) -> T:
+        """Create draft object from external type with self as userdata.
+        usually used when you want to use draft in nested container (e.g. DataFlexbox)
+        """
+        return cast(T, create_draft_type_only(userdata=DraftOpUserData(self),
+                                               obj_type=model_cls))
+
+    @staticmethod 
+    def get_datamodel_from_draft(draft: Any):
+        assert isinstance(draft, DraftBase), "draft must be a DraftBase type."
+        userdata = draft._tensorpc_draft_attr_userdata
+        assert isinstance(userdata, DraftOpUserData), "draft userdata must be DraftOpUserData type."
+        return cast(DataModel, userdata.component)
 
     def get_draft(self):
         """Create draft object, but the generated draft AST is depend on annotation type instead of real object.
@@ -315,12 +424,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     async def _update_with_jmes_ops_backend(self, ops: list[DraftUpdateOp]):
         # convert dynamic node to static in op to avoid where op.
-        ops = ops.copy()
-        for i in range(len(ops)):
-            op = ops[i]
-            if op.has_dynamic_node_in_main_path():
-                ops[i] = stabilize_getitem_path_in_op_main_path(
-                    op, self.get_draft_type_only(), self._model)
         if not self._draft_change_event_handlers:
             apply_draft_update_ops(self.model, ops)
         else:
@@ -361,11 +464,82 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             await self._store.write_whole_model(new_model)
         await self.sync_model()
 
-    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
+    def _create_dm_update_self(self, func: Callable[[T], None], submodel_draft: Optional[Any] = None, use_immer: bool = True):
+        """Create a DataModelUpdateSelf object for model update callback.
+        This is used to create a model update callback that can be used in `install_model_update_callback`.
+        """
+        subpath = None
+        if submodel_draft is not None:
+            dm = self.get_datamodel_from_draft(submodel_draft)
+            assert dm is self, "submodel_draft must be a draft of this datamodel."
+            subpath = pfl.compile_pflpath_to_compact_str(str(submodel_draft))
+        
+        assert self._pfl_library is not None, "your datamodel must define pfl marked functions."
+        tail_kws = None
+        if isinstance(func, partial):
+            assert not func.args, "args isn't supported in partial, use keywords instead."
+            tail_kws = func.keywords
+            func = func.func
+        assert not inspect.ismethod(func), "use Class.method instead of obj.method"
+        fing_sig = inspect.signature(func)
+        for k, p in fing_sig.parameters.items():
+            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+        tail_args = None
+        if tail_kws is not None:
+            bind_args = fing_sig.bind_partial(**tail_kws)
+            bind_args.apply_defaults()
+            cnt = 0
+            tail_args = []
+            for k, p in fing_sig.parameters.items():
+                if cnt >= 1:
+                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                    tail_args.append(bind_args.arguments[k])
+                else:
+                    assert k not in tail_kws, "you can't use partial on first and second argument."
+                cnt += 1
+        else:
+            assert len(fing_sig.parameters) == 1, "func must have one arguments, first is self, second is event data."
+        func_specs = self._pfl_library.get_compiled_unit_specs(func)
+        assert len(func_specs) == 1, "func can't be template"
+        res = DataModelUpdateSelf(
+            funcUid=func_specs[0].uid,
+            dontUseImmer=not use_immer,
+        )
+        if subpath is not None:
+            res.subModelPath = subpath
+        if tail_args is not None:
+            res.partialTailArgs = tail_args
+        return res
+
+    async def run_pfl_func(self, func: Callable[[T], None], submodel_draft: Optional[Any] = None, use_immer: bool = True):
+        """Run a pfl function on this datamodel without event data.
+        usually used after you update the datamodel and want to use
+        frontend-only data to update the datamodel (e.g. do layout).
+        """
+        cb = self._create_dm_update_self(func, submodel_draft, use_immer)
+        msg = {
+            "type": 1,
+            "funcUid": cb.funcUid,
+            "dontUseImmer": cb.dontUseImmer,
+        }
+        if not isinstance(cb.subModelPath, Undefined):
+            msg["subModelPath"] = cb.subModelPath
+        if not isinstance(cb.partialTailArgs, Undefined):
+            msg["partialTailArgs"] = cb.partialTailArgs
+        return await self.send_and_wait(self.create_comp_event(msg))
+
+    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         # convert dynamic node to static in op to avoid where op.
-        ops = await self._update_with_jmes_ops_backend(ops)
-        # any modify on external field won't be included in frontend.
+        ops = ops.copy()
+        for i in range(len(ops)):
+            op = ops[i]
+            if op.has_dynamic_node_in_main_path():
+                ops[i] = stabilize_getitem_path_in_op_main_path(
+                    op, self.get_draft_type_only(), self._model)
         frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        backend_ops = [dataclasses.replace(op) for op in ops]
+
+        # any modify on external field won't be included in frontend.
         # any external field data will be omitted in opData.
         if self._flow_exclude_field_ids:
             facto_fn = partial(_dict_facto_with_exclude, 
@@ -375,7 +549,11 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             _DataclassSer(obj=op.opData),
                             dict_factory_with_field=facto_fn)
                 op.opData = cast(dict, opData)["obj"]
-        frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
+        frontend_ops = [op.to_data_deepcopied() for op in frontend_ops]
+        ops = await self._update_with_jmes_ops_backend(backend_ops)
+        if need_freeze:
+            frontend_ops = [op.freeze_assign_data(is_json_only) for op in frontend_ops]
+        frontend_ops = [op.to_pfl_frontend_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({
                 "type": 0,
@@ -384,13 +562,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         else:
             return None 
 
-    async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp]):
+    async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         if ops:
             async with self._lock:
                 await self.flow_event_emitter.emit_async(
                     self._backend_draft_update_event_key,
                     Event(self._backend_draft_update_event_key, ops))
-                ev_or_none = await self._update_with_jmes_ops_event(ops)
+                ev_or_none = await self._update_with_jmes_ops_event(ops, is_json_only, need_freeze)
                 if ev_or_none is not None:
                     return await self.send_and_wait(ev_or_none)
 
@@ -413,7 +591,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         raise NotImplementedError("you can't bind fields on DataModel")
 
     @contextlib.asynccontextmanager
-    async def draft_update(self):
+    async def draft_update(self, is_json_only: bool = False, need_freeze: bool = False):
         """Do draft update immediately after this context.
         We won't perform real update during draft operation because we need to keep state same between
         frontend and backend. if your update code raise error during draft operation, the real model in backend won't 
@@ -424,6 +602,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         update immediately.
 
         WARNING: draft change event handler will be called (if change) in each draft update.
+
+        Args:
+            is_json_only: if True, all updated data will be treated as json only object (no ndarray or bytes).
+            need_freeze: if True, we will freeze all assigned data. MAKE SURE YOU WON'T MODIFY FREEZED DATA!
         """
         draft = self.get_draft()
         cur_ctx = get_draft_update_context_noexcept()
@@ -431,7 +613,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             raise RuntimeError("Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler.")
         with capture_draft_update() as ctx:
             yield draft
-        await self._update_with_jmes_ops(ctx._ops)
+        await self._update_with_jmes_ops(ctx._ops, is_json_only, need_freeze)
 
     @staticmethod
     def get_draft_external(model: T) -> T:
@@ -439,7 +621,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     def connect_draft_store(self,
                             path: str,
-                            backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]]):
+                            backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]],
+                            clear_previous: bool = False):
         """Register event handler that store and send update info to your backend.
 
         **WARNING**: this function must be called before mount.
@@ -453,7 +636,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._store = DraftFileStorage(path, model, backend_map) # type: ignore
         self.event_after_mount.on(
             partial(self._fetch_internal_data_from_draft_store,
-                    store=self._store))
+                    store=self._store,
+                    clear_previous=clear_previous))
         self.event_draft_update.on(
             partial(self._handle_draft_store_update,
                     store=self._store))
@@ -465,11 +649,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     def _clear_draft_store_status(self):
         self._draft_store_data_fetched = False
 
-    async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage):
+    async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage, clear_previous: bool = False):
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
         prev_model = self._model
-        self._model = await store.fetch_model()
+        if clear_previous:
+            await store.write_whole_model(self._model)
+        else:
+            self._model = await store.fetch_model()
         self.props.dataObject = self._model
         # user should init their external fields in this event.
         # TODO should we capture draft here?
@@ -517,7 +704,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 @dataclasses.dataclass
 class DataPortalProps(ContainerBaseProps):
     comps: list[Component] = dataclasses.field(default_factory=list)
-    query: Union[Undefined, str] = undefined
 
 
 class DataPortal(ContainerBase[DataPortalProps, Component]):
@@ -527,7 +713,7 @@ class DataPortal(ContainerBase[DataPortalProps, Component]):
 
     def __init__(
         self,
-        sources: list[Component],
+        source: Component,
         children: Optional[Union[Sequence[Component],
                                  Mapping[str, Component]]] = None
     ) -> None:
@@ -537,9 +723,10 @@ class DataPortal(ContainerBase[DataPortalProps, Component]):
             UIType.DataModel, UIType.ThreeURILoaderContext,
             UIType.ThreeCubeCamera
         }
+        sources = [source]
         for comp in sources:
             assert comp._flow_comp_type in allowed_comp_types, "DataPortal only support DataModel and resource loaders."
-        assert len(sources) > 0, "DataPortal must have at least one source"
+        assert len(sources) == 1, "DataPortal only support one source."
         super().__init__(UIType.DataPortal,
                          DataPortalProps,
                          children,
@@ -575,7 +762,7 @@ class DataSubQueryProps(ContainerBaseProps):
     def jmes_query_validator(cls, v: Union[str, Undefined]):
         assert isinstance(v, str), "query must be string"
         # compile test
-        jmespath.compile(v)
+        pflpath.compile_pflpath(v)
 
 
 class DataSubQuery(ContainerBase[DataSubQueryProps, Component]):
@@ -587,13 +774,13 @@ class DataSubQuery(ContainerBase[DataSubQueryProps, Component]):
                                  Mapping[str, Component]]] = None
     ) -> None:
         # compile test
-        jmespath.compile(query)
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.DataSubQuery,
                          DataSubQueryProps,
                          children,
                          allowed_events=[])
+        query = pfl.compile_pflpath_to_compact_str(query)
         self.prop(query=query)
 
     @property

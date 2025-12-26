@@ -1,4 +1,51 @@
 # Changelog
+# [0.26.0] - 2025-12-24
+- [infra] better datamodel query impl.
+- [infra] BREAKING CHANGE: better language server impl, you must upgrade tensorpc to 0.26 to use language server.
+
+# [0.25.3] - 2025-12-10
+### Added
+- [ui] add pointer lock support for flex box.
+### Fixed 
+- [ui] fix small bug in video rtc.
+
+# [0.25.2] - 2025-12-09
+### Added
+- [ui] add `disableContextMenu` to video rtc component to disable right click context menu when run app in browser.
+
+# [0.25.1] - 2025-12-09
+### Added
+- [ui] add regular keyboard event to flex box.
+
+# [0.25.0] - 2025-12-09
+### Added
+- [ui] add video rtc component for low latency video streaming.
+
+# [0.24.0] - 2025-10-xx
+- [infra] pfl improvement: add class support. add multi-thread support for ast runner.
+- [infra] add distributed support (single-node only).
+- [ui] BREAKING CHANGE: add mui charts (line/bar/scatter/sparkline).
+- [ui] add distributed remote app.
+- [mls] triton sim improvement, add wrapper that run your real kernel in simulate mode.
+
+# [0.23.0] - 2025-07-16
+### Changed 
+- [infra] BREAKING CHANGE: change pfl ast format.
+- [infra] BREAKING CHANGE: datamodel pfl update now use library in `DataModel` prop instead of compile standalone function in each handler.
+### Added 
+- [mls] add triton simulator app
+
+# [0.20.0] - 2025-05-21
+### Added 
+- add json-only and need-freeze to websocket protocol. now user can send large frozen json object to frontend.
+### Changed
+- BREAKING CHANGE: change websocket protocol.
+
+## [0.19.0] - 2025-05-20
+### Added 
+- add `Python Frontend Language` support for `updateDataModel`, user can write python code, we will compile it to javascript and run it in frontend.
+- add `calc` support in `HudGroup`
+
 # [0.18.1] - 2025-05-12
 ### Fixed 
 - fix unexpected python 3.11+ grammar

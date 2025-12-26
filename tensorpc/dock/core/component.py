@@ -16,69 +16,79 @@ import abc
 import asyncio
 import builtins
 import collections.abc
-from contextlib import nullcontext
-import time
-from typing import TYPE_CHECKING, Mapping, Sequence, cast
 import copy
 import dataclasses
 import enum
-from functools import partial
 import inspect
 import io
+import json
 import re
 import sys
 import threading
+import time
 import traceback
+from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
-from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Generator,
-                    Generic, Iterable, Optional, Set, Type, Union)
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
+                    Awaitable, Callable, Coroutine, Generator, Generic,
+                    Iterable, Mapping, Optional, Sequence, Set, Type, Union,
+                    cast)
 
 import grpc
-from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
-from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.datamodel.events import DraftChangeEvent
-import tensorpc.core.datamodel.jmes as jmespath
-from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
-from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
-from pydantic import (
-    BaseModel,
-    GetCoreSchemaHandler,
-    GetJsonSchemaHandler,
-    TypeAdapter,
-    ValidationError,
-)
+from pydantic import (BaseModel, GetCoreSchemaHandler, GetJsonSchemaHandler,
+                      TypeAdapter, ValidationError)
 from pydantic_core import PydanticCustomError, core_schema
-from tensorpc.dock.client import AppLocalMeta, MasterMeta
-from tensorpc.dock.core.uitypes import ALL_KEY_CODES
-from tensorpc.dock.serv_names import serv_names
+from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
+                               Self, TypeAlias, TypeVar)
 
-from tensorpc.core.core_io import JsonOnlyData
+import tensorpc.core.datamodel.jmes as jmespath
+from tensorpc.core import dataclass_dispatch as dataclasses_strict
+from tensorpc.core import pfl, prim
+from tensorpc.core.annolib import DataclassType
+from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.core_io import JsonSpecialData
+from tensorpc.core.datamodel.asdict import (DataClassWithUndefined,
+                                            as_dict_no_undefined_with_exclude,
+                                            asdict_no_deepcopy,
+                                            asdict_no_deepcopy_with_field)
+from tensorpc.core.datamodel.draft import (DraftASTType, DraftBase,
+                                           DraftObject, DraftUpdateOp,
+                                           capture_draft_update, create_draft,
+                                           get_draft_jmespath,
+                                           get_draft_pflpath,
+                                           insert_assign_draft_op)
+from tensorpc.core.datamodel.events import DraftChangeEvent
+from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
-from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
+from tensorpc.core.tree_id import (UniqueTreeId, UniqueTreeIdForComp,
+                                   UniqueTreeIdForTree)
 from tensorpc.dock import appctx, marker
-from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
-
-from tensorpc.dock.core.appcore import EventHandler, EventHandlers, enter_batch_event_context
+from tensorpc.dock.constants import (TENSORPC_APP_ROOT_COMP,
+                                     TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT,
+                                     TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+from tensorpc.dock.core.appcore import (EventHandler, EventHandlers,
+                                        enter_batch_event_context)
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.dock.core.uitypes import ALL_KEY_CODES
+from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
+from tensorpc.dock.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
-from tensorpc.utils.uniquename import UniqueNamePool
-
-from tensorpc.core import dataclass_dispatch as dataclasses_strict, prim
-from tensorpc.core.annolib import DataclassType
-from tensorpc.utils.wait_tools import get_primary_ip
-from tensorpc.core.datamodel.asdict import DataClassWithUndefined, asdict_no_deepcopy, as_dict_no_undefined_with_exclude, asdict_no_deepcopy_with_field, undefined_dict_factory_with_field
-from ..jsonlike import (BackendOnlyProp, Undefined,
-                        as_dict_no_undefined,
-                        camel_to_snake, snake_to_camel,
-                        split_props_to_undefined, undefined,
-                        undefined_dict_factory)
-from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
-from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT
 from tensorpc.utils.rich_logging import get_logger
+from tensorpc.utils.uniquename import UniqueNamePool
+from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
+
+from ..jsonlike import (BackendOnlyProp, Undefined, as_dict_no_undefined,
+                        camel_to_snake, snake_to_camel,
+                        split_props_to_undefined, undefined)
+from .appcore import (Event, EventDataType, NumberType, RemoteCompEvent,
+                      SimpleEventType, ValueType, enter_event_handling_conetxt,
+                      get_app, get_event_handling_context)
+
 if TYPE_CHECKING:
     from .datamodel import DataModel
-LOGGER = get_logger("tensorpc.ui")
+LOGGER = get_logger("tensorpc.ui", log_time_format="%X|")
 
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -116,14 +126,14 @@ class UIType(enum.IntEnum):
     Select = 0x3
     Slider = 0x4
     RadioGroup = 0x5
-    # CodeEditor = 0x6
+    FlexBox = 0x6
     Button = 0x7
     ListItemButton = 0x8
     ListItemText = 0x9
     Image = 0xa
     Dialog = 0xb
-    Plotly = 0xc
-    ChartJSLine = 0xd
+    TooltipFlexBox = 0xc
+    # ChartJSLine = 0xd
     MultipleSelect = 0xe
     Paper = 0xf
     Typography = 0x10
@@ -134,10 +144,10 @@ class UIType(enum.IntEnum):
     Alert = 0x15
     AccordionSummary = 0x16
     AccordionDetail = 0x17
-    # TabContext = 0x18
-    # Tab = 0x19
-    # TabPanel = 0x1a
-    # TabList = 0x1b
+    MUIList = 0x18
+    Divider = 0x19
+    AppTerminal = 0x1a
+    ThemeProvider = 0x1b
     Checkbox = 0x1c
     AppBar = 0x1d
     Toolbar = 0x1e
@@ -175,17 +185,21 @@ class UIType(enum.IntEnum):
     Pagination = 0x3e
     VideoPlayer = 0x3f
     GridLayout = 0x40
+    VideoBasicStream = 0x41
+    TaskLoop = 0x42
+    VideoRTCStream = 0x43
+    JsonEditor = 0x44
+    JsonFastViewer = 0x45
 
-    # special
-    TaskLoop = 0x100
-    FlexBox = 0x101
-    MUIList = 0x102
-    Divider = 0x103
-    AppTerminal = 0x104
-    ThemeProvider = 0x105
-    Handle = 0x106
-    TooltipFlexBox = 0x107
+    RANGE_CHART_START = 0x50
+    Plotly = 0x51
 
+    MUIBarChart = 0x52
+    MUILineChart = 0x53
+    MUIScatterChart = 0x54
+    MUISparkLineChart = 0x55
+    
+    RANGE_CHART_END = 0x90
     # special containers
     # react fragment
     Fragment = 0x200
@@ -267,6 +281,9 @@ class UIType(enum.IntEnum):
     ThreeGizmoHelper = 0x1043
     ThreeSelectionContext = 0x1044
     ThreeOutlines = 0x1045
+    ThreeInstancedBufferMesh = 0x1046
+    ThreeDataListGroup = 0x11047
+    ThreeHudGroup = 0x1048
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
@@ -286,6 +303,7 @@ class UIType(enum.IntEnum):
 
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
+    ThreeLineShape = 0x1103
 
     ThreeEffectComposer = 0x1200
     ThreeEffectOutline = 0x1201
@@ -344,6 +362,8 @@ class UIType(enum.IntEnum):
     FlowNodeResizer = 0x8004
     FlowNodeToolBar = 0x8005
     FlowBackground = 0x8006
+    # special
+    FlowHandle = 0x8007
 
 
 class AppEventType(enum.IntEnum):
@@ -414,6 +434,10 @@ class FrontendEventType(enum.IntEnum):
     KeyHold = 12
     KeyDown = 13
     KeyUp = 14
+    CanvasViewportChange = 15
+    HudGroupLayoutChange = 16
+    MeshPoseChange = 17
+    PointerLockReleased = 18
 
     Change = 20
     Delete = 21
@@ -446,12 +470,13 @@ class FrontendEventType(enum.IntEnum):
     EditorChange = 51
     EditorQueryState = 52
     EditorSaveState = 53
+    EditorDecorationsChange = 54
     EditorAction = 55
     EditorCursorSelection = 56
-
-    # leaflet events
-    MapZoom = 60
-    MapMove = 61
+    EditorInlayHintsQuery = 57
+    EditorHoverQuery = 58
+    EditorCodelensQuery = 59
+    EditorBreakpointChange = 60
 
     # data grid events
     DataGridRowSelection = 70
@@ -486,11 +511,27 @@ class FrontendEventType(enum.IntEnum):
     # data box events
     DataBoxSecondaryActionClick = 120
 
+    # leaflet events
+    MapZoom = 150
+    MapMove = 151
+
+    # chart events 
+    # used by bar and scatter
+    ChartItemClick = 160
+    # used by line/area line
+    ChartAreaClick = 161
+    ChartLineClick = 162
+    ChartMarkClick = 163
+    ChartAxisClick = 164
+
+    VideoStreamReady = 170
+    RTCSdpRequest = 171
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
     UIType.Allotment, UIType.GridLayout, UIType.MenuList,
-    UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown
+    UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown,
+    UIType.MonacoEditor, UIType.ThreeDataListGroup
 }
 
 
@@ -509,6 +550,7 @@ ALL_POINTER_EVENTS = [
     FrontendEventType.Click.value,
     FrontendEventType.DoubleClick.value,
     FrontendEventType.ContextMenu.value,
+    FrontendEventType.Wheel.value,
 ]
 
 
@@ -826,7 +868,7 @@ class UIUpdateEvent:
 
     def to_dict(self):
         if self.json_only:
-            return JsonOnlyData(self.uid_to_data_undefined)
+            return JsonSpecialData.from_option(self.uid_to_data_undefined, is_json_only=True, need_freeze=False)
         else:
             return self.uid_to_data_undefined
 
@@ -835,8 +877,14 @@ class UIUpdateEvent:
             self.uid_to_data_undefined, prefixes)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]):
-        return cls(data)
+    def from_dict(cls, data: Union[dict[str, Any], JsonSpecialData]):
+        json_only = False
+        if isinstance(data, JsonSpecialData):
+            json_only = True
+            data_dict = data.data
+        else:
+            data_dict = data
+        return cls(data_dict, json_only)
 
     def merge_new(self, new):
         assert isinstance(new, UIUpdateEvent)
@@ -979,7 +1027,7 @@ class CopyToClipboardEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.InitLSPClient.value)
 class InitLSPClientEvent:
 
-    def __init__(self, port: int, init_cfg: dict) -> None:
+    def __init__(self, port: Union[int, str], init_cfg: dict) -> None:
         self.port = port
         self.init_cfg = init_cfg
 
@@ -1055,7 +1103,8 @@ class AppEvent:
                  sent_event: Optional[asyncio.Event] = None,
                  event_id: str = "",
                  is_loopback: bool = False,
-                 remote_prefixes: Optional[list[str]] = None) -> None:
+                 remote_prefixes: Optional[list[str]] = None,
+                 after_send_callback: Optional[Callable[[], Awaitable[None]]] = None) -> None:
         # node uid, not component uid
         self.uid = uid
         self.type_to_event = type_to_event
@@ -1069,7 +1118,7 @@ class AppEvent:
         # RemoteCompEvent: only available in remote component.
         self._additional_events: list[RemoteCompEvent] = []
         # currently only used for app init
-        self._after_send_callback: Optional[Callable[[], Awaitable[None]]] = None
+        self._after_send_callback = after_send_callback
 
     def is_empty(self):
         return not self.type_to_event and not self._additional_events
@@ -1199,11 +1248,10 @@ TEventData = TypeVar("TEventData")
 
 def _draft_expr_or_str_to_str(draft_expr: Any) -> str:
     if isinstance(draft_expr, DraftBase):
-        draft_expr_str = get_draft_jmespath(draft_expr)
+        draft_expr_str = get_draft_pflpath(draft_expr)
     else:
         draft_expr_str = draft_expr
-    jmespath.compile(draft_expr_str)
-    return draft_expr_str
+    return pfl.compile_pflpath_to_compact_str(draft_expr_str)
 
 class _EventSlotBase(Generic[TEventData]):
 
@@ -1227,15 +1275,31 @@ class _EventSlotBase(Generic[TEventData]):
                   stop_propagation: Optional[bool] = None,
                   throttle: Optional[NumberType] = None,
                   debounce: Optional[NumberType] = None,
-                  dont_send_to_backend: Optional[bool] = None,
-                  key_codes: Optional[list[str]] = None) -> Self:
+                  key_codes: Optional[list[str]] = None,
+                  set_pointer_capture: bool = False,
+                  release_pointer_capture: bool = False,
+                  key_hold_interval_delay: Optional[NumberType] = None) -> Self:
+        """configure event handlers.
+        Args:
+            stop_propagation: whether to stop propagation of the event.
+            throttle: throttle time in milliseconds.
+            debounce: debounce time in milliseconds.
+            key_codes: list of key codes to filter the event.
+            set_pointer_capture: whether to set pointer capture on pointer down event.
+            release_pointer_capture: whether to release pointer capture on pointer up event.
+            key_hold_interval_delay: interval delay for key hold event in milliseconds.
+        Returns:
+            Self: the event slot itself.
+        """
         self.comp.configure_event_handlers(
             self.event_type,
             stop_propagation,
             throttle,
             debounce,
-            dont_send_to_backend=dont_send_to_backend,
-            key_codes=key_codes)
+            key_codes=key_codes,
+            set_pointer_capture=set_pointer_capture,
+            release_pointer_capture=release_pointer_capture,
+            key_hold_interval_delay=key_hold_interval_delay)
         return self
 
     def set_frontend_draft_change(self, update_ops: list["EventFrontendUpdateOp"]) -> Self:
@@ -1264,6 +1328,59 @@ class _EventSlotBase(Generic[TEventData]):
             ))
         return self
 
+    def add_frontend_handler(self, dm: "DataModel", func: Callable[[Any, TEventData], None], use_immer: bool = True, targetPath: str = "") -> Self:
+        """use Python Frontend Language (subset of python) to handle event in frontend directly.
+
+        the func must be a function defined in DataModel, and the first argument must be self, the second argument is event data.
+        we only use func as a key here (and tail arg calculation), the whole library is already compiled in DataModel.
+        """
+        # TODO use string targetPath can cause unexpected bugs, consider use draft expr and type check.
+        assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
+        assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
+        tail_kws = None
+        
+        if isinstance(func, partial):
+            assert not func.args, "args isn't supported in partial, use keywords instead."
+            tail_kws = func.keywords
+            func = func.func
+        assert not inspect.ismethod(func), "use Class.method instead of obj.method"
+        fing_sig = inspect.signature(func)
+        for k, p in fing_sig.parameters.items():
+            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+        tail_args = undefined
+        if tail_kws is not None:
+            bind_args = fing_sig.bind_partial(**tail_kws)
+            bind_args.apply_defaults()
+            cnt = 0
+            tail_args = []
+            for k, p in fing_sig.parameters.items():
+                if cnt >= 2:
+                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                    tail_args.append(bind_args.arguments[k])
+                else:
+                    assert k not in tail_kws, "you can't use partial on first and second argument."
+                cnt += 1
+        else:
+            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
+        
+        func_specs = dm._pfl_library.get_compiled_unit_specs(func)
+        assert len(func_specs) == 1, "func can't be template"
+        if targetPath != "":
+            targetPath = _draft_expr_or_str_to_str(targetPath)
+
+        op = EventFrontendUpdateOp(
+            attr="",
+            targetPath=undefined if targetPath == "" else targetPath,
+            partialTailArgs=tail_args,
+            pflFuncUid=func_specs[0].uid,
+        )
+        if not use_immer:
+            op.dontUseImmer = True
+        self.comp._append_event_handler_update_op(
+            self.event_type,
+            update_op=op)
+        return self
+
     def add_frontend_draft_set_none(self, target_draft: Any, attr: Union[str, int], target_comp: Union["Component", Undefined] = undefined) -> Self:
         """Set draft exprs to change frontend datamodel directly.
         """
@@ -1280,8 +1397,7 @@ class _EventSlotBase(Generic[TEventData]):
 
     def disable_and_stop_propagation(self) -> Self:
         self.comp.configure_event_handlers(self.event_type,
-                                           stop_propagation=True,
-                                           dont_send_to_backend=True)
+                                           stop_propagation=True)
         return self
 
     def clear(self):
@@ -1399,9 +1515,15 @@ class EventSlotNoArgEmitter(_EventSlotEmitterBase):
 @dataclasses.dataclass
 class EventFrontendUpdateOp:
     attr: Union[str, int]
-    targetPath: str 
+    targetPath: Union[Undefined, str] = undefined 
     targetComp: Union[Undefined, "Component"] = undefined
     srcPath: Optional[Union[Undefined, str]] = undefined
+    pflAstJson: Union[Undefined, str] = undefined
+    pflCode: Union[Undefined, str] = undefined
+    dontUseImmer: Union[Undefined, bool] = undefined
+    partialTailArgs: Union[Undefined, list[Any]] = undefined
+    pflFuncUid: Union[Undefined, str] = undefined
+    isPFLPath: Union[Undefined, bool] = undefined
 
 T_child_structure = TypeVar("T_child_structure",
                             default=Any,
@@ -1753,6 +1875,39 @@ class Component(Generic[T_base_props, T_child]):
     def get_raw_props(self):
         return self.__raw_props
 
+    def _get_dm_props_for_frontend(self, model_paths):
+        dm_paths_new = {}
+        for k, v in model_paths.items():
+            if not isinstance(v, str):
+                dm_paths_new[k] = (v[0]._flow_uid, v[1])
+            else:
+                dm_paths_new[k] = v
+        # group dm props by container to speed up query in frontend.
+        dm_paths_new_grouped = {}
+        id_to_containers = {}
+        for k, v in model_paths.items():
+            if not isinstance(v, str):
+                container = id(v[0])
+                id_to_containers[id(v[0])] = v[0]
+            else:
+                container = None
+            if container not in dm_paths_new_grouped:
+                dm_paths_new_grouped[container] = []
+            if not isinstance(v, str):
+                dm_paths_new_grouped[container].append((k, v[1]))
+            else:
+                dm_paths_new_grouped[container].append((k, v))
+        grouped_res = []
+        for container_id, paths in dm_paths_new_grouped.items():
+            if container_id is not None:
+                container = id_to_containers[container_id]
+                grouped_res.append(
+                    (container._flow_uid, paths))
+            else:
+                grouped_res.append(
+                    ("", paths))
+        return dm_paths_new, grouped_res
+
     def to_dict(self):
         """undefined will be removed here.
         if you reimplement to_dict, you need to use 
@@ -1768,26 +1923,22 @@ class Component(Generic[T_base_props, T_child]):
             "props": props,
         }
         if self._flow_data_model_paths:
-            dm_paths_new = {}
-            for k, v in self._flow_data_model_paths.items():
-                if not isinstance(v, str):
-                    dm_paths_new[k] = (v[0]._flow_uid, v[1])
-                else:
-                    dm_paths_new[k] = v
+            dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)
             res["dmProps"] = dm_paths_new
+            res["dmPropsGrouped"] = dm_paths_new_grouped
+
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
         if self._flow_json_only:
-            res["props"] = JsonOnlyData(props)
+            res["props"] = JsonSpecialData.from_option(props, is_json_only=True, need_freeze=False)
         return res
 
     def _get_used_events_dict(self):
         evs = []
         for k, v in self._flow_event_handlers.items():
             if not isinstance(v, Undefined) and not v.backend_only:
-                disable_and_stop = (v.stop_propagation
-                                  and v.dont_send_to_backend)
+                disable_and_stop = (v.stop_propagation)
                 if v.handlers or disable_and_stop or v.update_ops:
                     d = v.to_dict()
                     d["type"] = k
@@ -1864,33 +2015,33 @@ class Component(Generic[T_base_props, T_child]):
             assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
         return self.bind_fields_unchecked(**kwargs)
 
-    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
+    def bind_fields_unchecked_dict(self, kwargs: dict[str, Union[str, tuple["Component", Union[str, Any]], Any]]):
         new_kwargs: dict[str, Union[str, tuple["Component", str]]] = {}
         for k, v_may_draft in kwargs.items():
-            # validate expr
             if isinstance(v_may_draft, DraftBase):
-                v = get_draft_jmespath(v_may_draft)
+                v = get_draft_pflpath(v_may_draft)
             else:
                 v = v_may_draft
             if isinstance(v, str):
-                jmespath.compile(v)
-                new_kwargs[k] = v
+                # print("PFL", v)
+                new_kwargs[k] = pfl.compile_pflpath_to_compact_str(v)
             else:
                 assert isinstance(v, tuple) and len(v) == 2
                 assert isinstance(v[0], Component)
                 vv = v[1] 
                 if isinstance(vv, DraftBase):
-                    vp = get_draft_jmespath(vv)
-                    jmespath.compile(vp)
+                    vp = get_draft_pflpath(vv)
+                    vp = pfl.compile_pflpath_to_compact_str(vp)
                     new_kwargs[k] =  (v[0], vp)
                 else:
-                    jmespath.compile(vv)
-                    new_kwargs[k] = (v[0], vv)
+                    vp = pfl.compile_pflpath_to_compact_str(vv)
+                    new_kwargs[k] = (v[0], vp)
+
         self._flow_data_model_paths.update(new_kwargs)
         return self
 
-    def bind_fields_unchecked_dict(self, kwargs: dict[str, Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]]):
-        return self.bind_fields_unchecked(**kwargs)
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
+        return self.bind_fields_unchecked_dict(kwargs)
 
     @property
     def queue(self):
@@ -1908,9 +2059,11 @@ class Component(Generic[T_base_props, T_child]):
                                  throttle: Optional[NumberType] = None,
                                  debounce: Optional[NumberType] = None,
                                  backend_only: Optional[bool] = False,
-                                 dont_send_to_backend: Optional[bool] = False,
                                  update_ops: Optional[list[EventFrontendUpdateOp]] = None,
-                                 key_codes: Optional[list[str]] = None):
+                                 key_codes: Optional[list[str]] = None,
+                                set_pointer_capture: bool = False,
+                                release_pointer_capture: bool = False,
+                                key_hold_interval_delay: Optional[NumberType] = None):
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
@@ -1918,16 +2071,15 @@ class Component(Generic[T_base_props, T_child]):
         if type_value not in self._flow_event_handlers:
             self._flow_event_handlers[type_value] = EventHandlers([])
         handlers = self._flow_event_handlers[type_value]
-        if dont_send_to_backend:
-            assert not handlers.handlers, "you can't set dont_send_to_backend when handlers is not empty"
         if stop_propagation is not None:
             handlers.stop_propagation = stop_propagation
         handlers.throttle = throttle
         handlers.debounce = debounce
+        handlers.set_pointer_capture = set_pointer_capture
+        handlers.release_pointer_capture = release_pointer_capture
+        handlers.key_hold_interval_delay = key_hold_interval_delay
         if backend_only is not None:
             handlers.backend_only = backend_only
-        if dont_send_to_backend is not None:
-            handlers.dont_send_to_backend = dont_send_to_backend
         if update_ops is not None:
             handlers.update_ops = update_ops
         if key_codes is not None:
@@ -1959,7 +2111,6 @@ class Component(Generic[T_base_props, T_child]):
                                simple_event: bool = True,
                                converter: Optional[Callable[[Any],
                                                             Any]] = None,
-                               dont_send_to_backend: Optional[bool] = False,
                                update_ops: Optional[list[EventFrontendUpdateOp]] = None):
         if self._flow_allowed_events:
             if not backend_only:
@@ -1973,14 +2124,11 @@ class Component(Generic[T_base_props, T_child]):
         if type_value not in self._flow_event_handlers:
             self._flow_event_handlers[type_value] = EventHandlers([])
         handlers = self._flow_event_handlers[type_value]
-        if handlers.dont_send_to_backend:
-            raise ValueError(
-                "you can't add any handler when dont_send_to_backend is True")
         if type == FrontendEventType.DragCollect:
             assert len(
                 handlers.handlers) == 0, "DragCollect only support one handler"
         self.configure_event_handlers(type_value, stop_propagation, throttle,
-                                      debounce, backend_only, dont_send_to_backend,
+                                      debounce, backend_only,
                                       update_ops)
         handlers.handlers.append(evh)
         # self._flow_event_handlers[type_value] = evh
@@ -2051,9 +2199,12 @@ class Component(Generic[T_base_props, T_child]):
         data_unds = []
         if isinstance(dm_props, Undefined):
             data_unds.append("dmProps")
+            data_unds.append("dmPropsGrouped")
         else:
             if dm_props is not None:
-                data_no_und["dmProps"] = dm_props
+                dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(dm_props)
+                data_no_und["dmProps"] = dm_paths_new
+                data_no_und["dmPropsGrouped"] = dm_paths_new_grouped
         if isinstance(used_events, Undefined):
             data_unds.append("usedEvents")
         else:
@@ -2151,10 +2302,10 @@ class Component(Generic[T_base_props, T_child]):
                 UserMessage.from_exception(uid, e, tb)))
 
     async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
-        traceback.print_exc()
+        traceback.print_exception(exc_param.exc)
         e = exc_param.exc
         ss = io.StringIO()
-        traceback.print_exc(file=ss)
+        traceback.print_exception(exc_param.exc, file=ss)
         assert self._flow_uid is not None
         user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
                                             repr(e), ss.getvalue())
@@ -2253,7 +2404,8 @@ class Component(Generic[T_base_props, T_child]):
             sync_status_first: bool = False,
             res_callback: Optional[Callable[[Any], _CORO_NONE]] = None,
             change_status: bool = True,
-            capture_draft: bool = False):
+            capture_draft: bool = False,
+            finish_callback: Optional[Callable[[], _CORO_NONE]] = None):
         """
         Runs the given callback function and handles its result and potential exceptions.
 
@@ -2281,7 +2433,7 @@ class Component(Generic[T_base_props, T_child]):
         # otherwise don't use this because slow
         if sync_status_first:
             ev = asyncio.Event()
-            await self.sync_status(sync_state, ev)
+            await self.sync_status(False, ev)
             await ev.wait()
         res_list :list[Any] = []
         assert self._flow_uid is not None
@@ -2317,13 +2469,17 @@ class Component(Generic[T_base_props, T_child]):
                             self._flow_uid.uid_encoded, repr(e), ss.getvalue())
                         await self.put_app_event(
                             self.create_user_msg_event(user_exc))
+                        res_list.append(None)
                         # app = get_app()
                         # if app._flowapp_enable_exception_inspect:
                         #     await app._inspect_exception()
             # finally:
             if not batch_ev.is_empty():
                 await self.put_app_event(batch_ev)
-
+            if finish_callback is not None:
+                coro = finish_callback()
+                if inspect.iscoroutine(coro):
+                    await coro
             if change_status:
                 self._flow_comp_status = UIRunStatus.Stop.value
                 await self.sync_status(sync_state)
@@ -2364,14 +2520,16 @@ class Component(Generic[T_base_props, T_child]):
         async with comp.draft_update():
             insert_assign_draft_op(draft, value)
 
-    async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str):
-        # print("WTFWTF", type(self), prop_name, ev.new_value)
+    async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str, value_prep: Optional[Callable[[Any], Any]] = None):
+        new_value = ev.new_value
+        if value_prep is not None:
+            new_value = value_prep(new_value)
         await self.put_app_event(self._update_props_base(self.propcls)(**{
-            prop_name: ev.new_value
+            prop_name: new_value
         }))
 
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, uncontrolled: bool = False):
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, uncontrolled: bool = False, uncontrolled_prep: Optional[Callable[[Any], Any]] = None):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2386,7 +2544,7 @@ class Component(Generic[T_base_props, T_child]):
         assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
         comp: DataModel = cast(Any, draft._tensorpc_draft_attr_userdata.component)
         if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
-            raise ValueError("can't bind field with getitem or getattr result")
+            raise ValueError("can't bind field with getItem or getAttr result")
         assert FrontendEventType.Change.value in self._flow_allowed_events
         if not uncontrolled:
             self.bind_fields(**{field_name: draft})
@@ -2397,7 +2555,8 @@ class Component(Generic[T_base_props, T_child]):
             self.register_event_handler(FrontendEventType.Change, 
                 partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
         if uncontrolled:
-            comp.install_draft_change_handler(draft, partial(self.__uncontrolled_draft_change_handler, prop_name=field_name), installed_comp=self)
+            comp.install_draft_change_handler(draft, partial(self.__uncontrolled_draft_change_handler, 
+                prop_name=field_name, value_prep=uncontrolled_prep), installed_comp=self)
         return self 
 
     async def sync_status(self,
@@ -3079,6 +3238,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         return update_ev
 
     async def update_childs_complex(self):
+        """TODO: this function assume the child components isn't changed.
+        if you need to update child comps, you must use set_new_layout.
+        """
         await self.send_and_wait(self.update_childs_complex_event())
 
     async def update_childs_locally(self,
@@ -3187,6 +3349,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             assert k in self._child_comps
         return await self.update_childs(layout)
 
+    def create_comp_event_raw(self, raw_ev_data: dict):
+        assert self._flow_uid is not None
+        ev = ComponentEvent(
+                {self._flow_uid.uid_encoded: raw_ev_data})
+        return AppEvent("", {AppEventType.ComponentEvent: ev})
+
     def create_comp_event(self, data: dict[str, Any]):
         """create component control event for
         backend -> frontend direct communication
@@ -3211,7 +3379,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
     def __init__(self, url: str, port: int, key: str, base_type: UIType,
                  prop_cls: Type[T_container_props],
                  fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None,
-                 enable_fallback_layout: bool = True):
+                 enable_fallback_layout: bool = True,
+                 fastrpc_timeout: int = 5) -> None:
         super().__init__(base_type, prop_cls)
         self._url = url
         self._port = port
@@ -3228,10 +3397,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._shutdown_ev: asyncio.Event = asyncio.Event()
         self._remote_task: Optional[asyncio.Task] = None
 
-        self._patch_in_remote = False
         self._cur_ts = 0
 
-        self._fastrpc_timeout = 2
+        self._fastrpc_timeout = fastrpc_timeout
 
     @property
     def is_remote_mounted(self):
@@ -3301,10 +3469,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                         self._key, prefixes, url, port)
             res = await aiter_remote.__anext__()
             layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
-            _patch_in_remote = self._patch_in_remote
             root_comp_uid = root_comp_uid_before
-            if not _patch_in_remote:
-                layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
+            layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
             self.set_cur_child_uids(list(layout.keys()))
             for k, v in layout.items():
                 assert isinstance(v["uid"], UniqueTreeId), f"{layout}"
@@ -3317,11 +3483,10 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             # so we can't update stuff here, we must ensure
             # layout update done after set_new_layout.
             # so we use post_ev_creator here.
-            # print("LAYOUT", layout)
             await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
             self._is_remote_mounted = True
-            next_item_task = asyncio.create_task(aiter_remote.__anext__())
-            shutdown_task = asyncio.create_task(self._shutdown_ev.wait())
+            next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
+            shutdown_task = asyncio.create_task(self._shutdown_ev.wait(), name="rcomp-shutdown-wait")
             while True:
                 try:
                     done, pending = await asyncio.wait(
@@ -3349,40 +3514,21 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
                         else:
                             app_event_dict = ev
-                            if self._patch_in_remote:
-                                # sync some state from remote component
-                                for ev_type, ev_dict in app_event_dict["typeToEvents"]:
-                                    if ev_type == AppEventType.UpdateComponents:
-                                        # when layout in remote changed, we must keep comp uids in main app.
-                                        assert "remoteComponentAllChilds" in ev_dict
-                                        self.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
-                                app_ev = AppEvent.from_dict(app_event_dict)
-                            else:
-                                app_event = AppEvent.from_dict(app_event_dict)
-                                # ev._remote_prefixes = prefixes
-                                app_event.patch_keys_prefix_inplace(prefixes)
-                                for ui_ev in app_event.type_to_event.values():
-                                    if isinstance(ui_ev, UpdateComponentsEvent):
-                                        assert ui_ev.remote_component_all_childs is not None
-                                        ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
-                                            ui_ev.remote_component_all_childs, prefixes)
-                                        self.set_cur_child_uids(ui_ev.remote_component_all_childs)
-                                app_event_dict = app_event.to_dict()
-                                app_event_dict = patch_unique_id(app_event_dict, prefixes)
+                            app_event = AppEvent.from_dict(app_event_dict)
+                            # ev._remote_prefixes = prefixes
+                            app_event.patch_keys_prefix_inplace(prefixes)
+                            for ui_ev in app_event.type_to_event.values():
+                                if isinstance(ui_ev, UpdateComponentsEvent):
+                                    assert ui_ev.remote_component_all_childs is not None
+                                    ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
+                                        ui_ev.remote_component_all_childs, prefixes)
+                                    self.set_cur_child_uids(ui_ev.remote_component_all_childs)
+                            app_event_dict = app_event.to_dict()
+                            app_event_dict = patch_unique_id(app_event_dict, prefixes)
 
-                                # if get_app()._is_remote_component:
-                                #     print("---------REMOTE-------", self._flow_uid)
-                                #     print("REMOTE!!!", app_event_dict)
-                                #     print("---------REMOTE END-------")
-                                # else:
-                                #     print("---------LOCAL-------", self._flow_uid, self._cur_child_uids)
-
-                                #     print("LOCAL!!!", app_event_dict)
-                                #     print("---------LOCAL END-------")
-
-                                app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
+                            app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
                             await self.put_app_event(app_ev)
-                        next_item_task = asyncio.create_task(aiter_remote.__anext__())
+                        next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
                     except StopAsyncIteration:
                         break
 
@@ -3398,7 +3544,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             self._cur_ts = 0
 
     async def _reconnect_to_remote_comp(self):
-        _use_remote_generator: bool = True
         try:
             await self.shutdown_remote_object()
             await self._close_remote_loop()
@@ -3408,37 +3553,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             #                     master_meta.node_id)
             await self.setup_remote_object()
             prefixes = self._flow_uid.parts
-            if not _use_remote_generator:
-                master_meta = MasterMeta()
-                if self._url.strip() == "localhost" or self._url.strip(
-                ) == "127.0.0.1":
-                    app_url = "localhost"
-                else:
-                    app_url = get_primary_ip()
-
-                app_serv_meta = AppLocalMeta()
-                assert app_serv_meta.grpc_port is not None 
-
-                await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, self._key,
-                                    app_url, app_serv_meta.grpc_port, prefixes)
-                layout, root_comp_uid = await self.get_layout_dict()
-                # first event: update layout from remote
-                update_comp_ev = self.create_update_comp_event(layout, [])
-                # second event: update childs prop in remote container
-                prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
-                # WARNING: connect button remove container that contains itself,
-                # so the actual set_new_layout is delayed after current callback finish.
-                # so we can't update stuff here, we must ensure
-                # layout update done after set_new_layout.
-                # so we use post_ev_creator here.
-                await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
-                self._is_remote_mounted = True
-            else:
-                self._shutdown_ev.clear()
-                await self.health_check(1)
-                self._remote_task = asyncio.create_task(
-                    self._remote_msg_handle_loop(prefixes, "", -1))
-                self._cur_ts = 0
+            self._shutdown_ev.clear()
+            await self.health_check(1)
+            self._remote_task = asyncio.create_task(
+                self._remote_msg_handle_loop(prefixes, "", -1), name="remote_msg_handle_loop")
+            self._cur_ts = 0
         except BaseException as e:
             await self.send_exception(e)
             await self.disconnect()
@@ -3474,11 +3593,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        if self._patch_in_remote:
-            return res["layout"], res["remoteRootUid"]
-        else:
-            return self._patch_layout_dict(res["layout"],
-                                           res["remoteRootUid"], prefixes)
+        return self._patch_layout_dict(res["layout"],
+                                        res["remoteRootUid"], prefixes)
 
     def _patch_layout_dict(self, layout, remote_root_uid: str, prefixes: list[str]):
         layout_dict = layout
@@ -3499,11 +3615,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        if self._patch_in_remote:
-            return res["layout"], res["remoteRootUid"]
-        else:
-            return self._patch_layout_dict(res["layout"],
-                                           res["remoteRootUid"], prefixes)
+        return self._patch_layout_dict(res["layout"],
+                                        res["remoteRootUid"], prefixes)
 
     async def handle_remote_event(self,
                                   ev_data: tuple[str, Any],
@@ -3515,9 +3628,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             ev_data[0]: ev_data[1]
         }
         uiev = UIEvent.from_dict(ev_data_dict)
-        if not self._patch_in_remote:
-            uiev.unpatch_keys_prefix_inplace(prefixes)
-            ev_data_dict = uiev.to_dict()
+        uiev.unpatch_keys_prefix_inplace(prefixes)
+        ev_data_dict = uiev.to_dict()
         while True:
             try:
                 return await self.remote_call(
@@ -3563,11 +3675,10 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         prefixes = self._flow_uid.parts
         if comp_uid is not None:
             comp_uid = unpatch_uid(comp_uid, prefixes)
-        print("WTF", file_key, comp_uid, prefixes)
-        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key, comp_uid)
+        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, self._fastrpc_timeout, self._key, file_key, comp_uid)
 
     async def send_remote_comp_event(self, key: str, event: RemoteCompEvent):
-        return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, 1, self._key, key, event)
+        return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, self._fastrpc_timeout, self._key, key, event)
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):
@@ -3675,6 +3786,11 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property
+    def childs_complex(self):
+        assert isinstance(self._child_structure, MatchCaseChildDef)
+        return self._child_structure
 
     @staticmethod 
     def binary_selection(success_val: Union[ValueType, bool], success: Component, fail: Optional[Component] = None):

@@ -61,6 +61,10 @@ class UniqueTreeId:
     def __hash__(self) -> int:
         return hash(self.uid_encoded)
 
+    @property
+    def length(self) -> int:
+        return len(self.parts)
+
     def append_part(self, part: str, splitter: str = ".") -> Self:
         return self.__class__.from_parts(self.parts + [part], splitter)
 

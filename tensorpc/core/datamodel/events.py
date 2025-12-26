@@ -141,8 +141,8 @@ def update_model_with_change_event(
                 new_val_dict[k] = new_value
                 continue
             if is_obj:
-                is_not_equal = id(old_value) != id(new_value)
-                if not is_not_equal:
+                obj_id_not_equal = id(old_value) != id(new_value)
+                if not obj_id_not_equal:
                     if id(old_value) in changed_obj_ids:
                         ev_type = DraftEventType.ObjectInplaceChange
                     elif handler.handle_child_change:

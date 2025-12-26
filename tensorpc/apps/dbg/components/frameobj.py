@@ -168,7 +168,7 @@ class FrameObjectPreview(ObjectPreviewBase):
     async def set_user_selection_frame_variable(self, var_name: str, value: Any):
         await self._obj_user_sel_preview.set_obj_preview_layout(value, None, header=f"Vscode: {var_name}")
 
-    async def _fold_editor_sel(self, ev: mui.MonacoEditorSelectionEvent, frame_holder: _FrameHolder):
+    async def _fold_editor_sel(self, ev: mui.MonacoSelectionEvent, frame_holder: _FrameHolder):
         cur_frame = frame_holder.frame
         if cur_frame is None:
             return 
@@ -270,7 +270,7 @@ class FrameObjectPreview(ObjectPreviewBase):
             await self._obj_preview.set_preview_layout([mui.VBox(layouts).prop(flex=1, overflow="auto")], header=header)
 
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         if self._cur_state is not None:
             value = ev.value
             await self._set_frame_obj_layout_from_code(value)

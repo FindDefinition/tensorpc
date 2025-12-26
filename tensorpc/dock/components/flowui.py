@@ -1176,6 +1176,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
+        # print(FrontendEventType(ev.type).name, ev.data)
         return await handle_standard_event(self,
                                            ev,
                                            is_sync=is_sync,
@@ -1688,7 +1689,7 @@ class Handle(MUIComponentBase[HandleProps]):
                  type: Literal["source", "target"],
                  position: Literal["left", "top", "right", "bottom"],
                  id: Union[Undefined, str] = undefined) -> None:
-        super().__init__(UIType.Handle, HandleProps, [])
+        super().__init__(UIType.FlowHandle, HandleProps, [])
         self.prop(type=type, handledPosition=position, id=id)
 
     @property

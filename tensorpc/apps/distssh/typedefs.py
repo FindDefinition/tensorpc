@@ -4,7 +4,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import Any, Awaitable, Callable, Optional, Union
 
 from tensorpc.core.datamodel.draft import DraftFieldMeta
-
+from tensorpc.core.distributed.ftgroup import FTStatus, FTStateBase
 
 class CmdStatus(enum.IntEnum):
     IDLE = 0
@@ -13,12 +13,6 @@ class CmdStatus(enum.IntEnum):
     # master will enter this state and try to restart all workers with 
     # same cmd.
     DURING_RESTART = 2
-
-class FTStatus(enum.IntEnum):
-    OK = 0
-    MASTER_DISCONNECTED = 1
-    WORKER_DISCONNECTED = 2
-    UNKNOWN = 3
 
 class SSHStatus(enum.IntEnum):
     IDLE = 0
@@ -76,21 +70,14 @@ class FTSSHServerArgs:
 
     cmd_retry_when_reconnect: bool = True
     env_fwd_re: str = ""
+    local_ssh_port: int = 22
+    log_to_stdout: bool = False
 
 @dataclasses.dataclass
-class FTState:
-    label: str
-    rank: int
-    ip: str
-    port: int
-    is_master: bool 
+class FTState(FTStateBase):
+    label: str = ""
     cur_cmd: Annotated[Optional[str], DraftFieldMeta(is_external=True)] = None
-    status: FTStatus = FTStatus.OK
     ssh_status: SSHStatus = SSHStatus.IDLE
-    # backend only states don't need to send to frontend
-    uuid: Annotated[str, DraftFieldMeta(is_external=True)] = ""
-    master_uuid: Annotated[str, DraftFieldMeta(is_external=True)] = ""
-    master_ip: Annotated[str, DraftFieldMeta(is_external=True)] = ""
     # when enabled, your distributed problem will enter breakpoint
     is_user_control_enabled: Annotated[bool, DraftFieldMeta(is_external=True)] = False
     num_bkpt_proc: int = 0

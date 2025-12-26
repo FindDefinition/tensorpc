@@ -63,3 +63,7 @@ class LocalNodeExecutor(NodeExecutorBase):
         return mui.VBox([
             mui.Markdown("## Hello Local Executor!")
         ]).prop(width="100%", height="100%", overflow="auto")
+
+    @override
+    async def setup_node(self, node: ComputeNodeModel) -> None:
+        return 

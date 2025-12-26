@@ -137,12 +137,11 @@ def perf_context(name: str,
                 if sync_start_event:
                     stream.synchronize()
                 ctx._first_cpu_timestamp = pytime.time_ns()
+                ctx._first_event = ev_start
 
             ev_start.record(stream)
             yield ctx
             ev_stop.record(stream)
-            if ctx._first_event is None:
-                ctx._first_event = ev_start
             key = tuple(ctx._ns_stack)
             if key not in ctx._measures:
                 ctx._measures[key] = []

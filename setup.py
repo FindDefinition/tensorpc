@@ -46,13 +46,17 @@ REQUIRED = [
     "psutil",
     "libtmux",
     "humanize",
-    "pyright",
+    "pyright[nodejs]",
     "pydantic>=2.7,<3.0",
     "setproctitle",
     "rich",
     "jmespath-community",
     "hsluv",
     "fsspec",
+    "orjson",
+    "lark",
+    "cmap",
+    "aiortc",
 ]
 
 # What packages are optional?

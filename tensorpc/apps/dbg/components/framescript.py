@@ -30,7 +30,6 @@ from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.apps.dbg.constants import TENSORPC_DBG_FRAMESCRIPT_STORAGE_PREFIX, DebugFrameState
 from tensorpc.apps.dbg.core.frame_id import get_frame_uid
 from tensorpc.dock.components.plus.styles import CodeStyles
-from tensorpc.dock.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.dock.components import mui
 from tensorpc.dock import appctx
 
@@ -181,7 +180,7 @@ class FrameScript(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
         
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
 
         if action == EditorActions.SaveAndRun.value:
@@ -212,7 +211,7 @@ class FrameScript(mui.FlexBox):
         frame_id, title = self._get_frame_id_and_title_from_frame(frame)
         return frame_id
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         if self.scripts.value is not None:
             frame_id = self._get_current_frame_id()

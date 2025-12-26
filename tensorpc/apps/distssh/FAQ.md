@@ -10,6 +10,12 @@ Example (Bash):
 { python -m tensorpc.apps.distssh.cli --rank=... --world_size=... --password=... --workdir=... & } && /usr/sbin/sshd -D
 ```
 
+Example (Single): 
+
+```bash
+python -m tensorpc.apps.distssh.cli --rank=0 --world_size=1 --workdir=./build --local_ssh_port=22 --password=...
+```
+
 ### `Check failed: state_ == FAILED` when use control point or flash checkpoint
 
 Grpc fork support in python still have some bugs. you need to set pytorch dataloader from `fork` to `spawn` mode.

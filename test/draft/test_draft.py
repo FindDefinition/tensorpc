@@ -1,13 +1,13 @@
 import asyncio
 import base64
 import copy
-from typing import Annotated, Any, Generic, TypeVar, cast, get_origin
+from typing import Annotated, Any, Generic, TypeVar, Union, cast, get_origin
 
 from deepdiff.diff import DeepDiff
-
+import rich 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
+    DraftFieldMeta, DraftObject, apply_draft_path_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
@@ -21,6 +21,8 @@ from tensorpc.core.datamodel.draftstore import (DraftFileStorage,
                                                 analysis_model_store_meta)
 from tensorpc.core.datamodel.events import DraftChangeEventHandler, DraftEventType, create_draft_change_event_handler, update_model_with_change_event
 from tensorpc.core.datamodel import jmes as jmespath
+from tensorpc.core.datamodel.draft import JMESPathOp, PFLPathOp
+from tensorpc.core.pfl import pflpath
 
 @dataclasses.dataclass
 class NestedModel:
@@ -64,6 +66,10 @@ def modify_func(mod: Model):
     })
     mod.f["d"] = 6
     del mod.f["a"]
+    if isinstance(mod, DraftObject):
+        mod.e[D.length(mod.e) - 1] = 10
+    else:
+        mod.e[len(mod.e) - 1] = 10
 
 def _draft_expr_examples(mod: Model, is_draft: bool):
     return {
@@ -83,7 +89,7 @@ def _get_test_model():
     )
     return model
 
-def test_draft(type_only_draft: bool = True):
+def test_draft(type_only_draft: bool = True, use_jmes_path: bool = True):
     model = _get_test_model()
     model_ref = copy.deepcopy(model)
     if type_only_draft:
@@ -95,17 +101,22 @@ def test_draft(type_only_draft: bool = True):
     assert get_draft_anno_path_metas(draft.j["a"].c) == [("AnnoMeta2",), ("AnnoNestedMeta1",)]
     assert get_draft_anno_path_metas(draft.j["a"].a) == [("AnnoMeta2",)]
 
-    with capture_draft_update() as ctx:
+    with capture_draft_update(use_jmes_path=use_jmes_path) as ctx:
         modify_func(model_ref)
         modify_func(draft)
     # print(get_draft_anno_type(draft.f))
     # print(get_draft_ast_node(draft.e[draft.a]).get_jmes_path())
     import rich
-    rich.print(ctx._ops)
+    # rich.print(ctx._ops)
     model_for_jpath = copy.deepcopy(model)
     model_for_jpath_dict = dataclasses.asdict(model_for_jpath)
     apply_draft_update_ops_with_changed_obj_ids(model, ctx._ops)
-    apply_draft_jmes_ops(model_for_jpath_dict, [op.to_jmes_path_op() for op in ctx._ops])
+    path_ops: list[Union[JMESPathOp, PFLPathOp]]
+    if use_jmes_path:
+        path_ops = [op.to_jmes_path_op() for op in ctx._ops]
+    else:
+        path_ops = [op.to_pfl_path_op() for op in ctx._ops]
+    apply_draft_path_ops(model_for_jpath_dict, path_ops)
 
     ddiff = DeepDiff(dataclasses.asdict(model), dataclasses.asdict(model_ref), ignore_order=True)
     assert not ddiff, str(ddiff)
@@ -113,7 +124,7 @@ def test_draft(type_only_draft: bool = True):
     ddiff = DeepDiff(model_for_jpath_dict, dataclasses.asdict(model_ref), ignore_order=True)
     assert not ddiff
 
-def test_draft_expr():
+def test_draft_expr(use_jmes_path: bool = True):
     model = _get_test_model()
     model_ref = copy.deepcopy(model)
     exprs_res_ref = _draft_expr_examples(model_ref, False)
@@ -133,9 +144,12 @@ def test_draft_expr():
 
     exprs_res = {}
     for k, expr in exprs.items():
-        jmes_path = get_draft_ast_node(cast(Any, expr)).get_jmes_path()
-        jmes_expr = jmespath.compile(jmes_path)
-        exprs_res[k] = jmespath.search(jmes_expr, dataclasses.asdict(model))
+        ast_node = get_draft_ast_node(cast(Any, expr))
+        if use_jmes_path:
+            jmes_expr = jmespath.compile(ast_node.get_jmes_path())
+            exprs_res[k] = jmespath.search(jmes_expr, dataclasses.asdict(model))
+        else:
+            exprs_res[k] = pflpath.search(ast_node.get_pfl_path(), dataclasses.asdict(model))
     ddiff = DeepDiff(exprs_res_ref, exprs_res, ignore_order=True)
     assert not ddiff, str(ddiff)
 
@@ -264,18 +278,37 @@ def test_python_code():
     code = DraftASTCompiler(node).compile_draft_ast_to_py_lines()
     print("\n".join(code))
 
+@dataclasses.dataclass
+class ModelWithExternal:
+    a: int
+    b: Annotated[int, DraftFieldMeta(is_external=True)]
+
+def test_external_field():
+    model = ModelWithExternal(1, 2)
+    draft = create_draft_type_only(type(model))
+
+    with capture_draft_update() as ctx:
+        draft.a = 2
+        draft.b = 1
+
+    rich.print(ctx._ops)
 
 if __name__ == "__main__":
-    # test_draft(False)
-    # test_draft(True)
+    test_draft(False)
+    test_draft(True)
+    test_draft(False, use_jmes_path=False)
+    test_draft(True, use_jmes_path=False)
 
-    # test_draft_event()
+    test_draft_event()
 
-    # test_draft_any_materialize()
+    test_draft_any_materialize()
 
-    # test_draft_expr()
+    test_draft_expr()
+    test_draft_expr(use_jmes_path=False)
 
-    # test_generic_model()
+    test_generic_model()
 
     test_python_code()
+
+    test_external_field()
 

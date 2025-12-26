@@ -246,7 +246,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
     ctx2 = contextlib.nullcontext()
     if standalone:
         ctx = server_core.enter_global_context()
-        ctx2 = server_core.enter_exec_context()
+        ctx2 = server_core.enter_exec_context(is_loopback_call=True)
     with ctx, ctx2:
         if standalone:
             await server_core._init_async_members()

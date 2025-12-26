@@ -29,7 +29,7 @@ import numpy as np
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_PORT_MAX_TRY
 from tensorpc.core.defs import ServiceDef
-from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
+from tensorpc.core.server_core import ProtobufServiceCore, ServerDistributedMeta, ServerMeta
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
@@ -42,7 +42,7 @@ import aiohttp
 
 from tensorpc.utils.wait_tools import get_free_ports
 
-LOGGER = get_logger("tensorpc.aioserver")
+LOGGER = get_logger("tensorpc.aioserver", log_time_format="[%x %X]")
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
@@ -79,22 +79,26 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
             raise
         return rpc_message_pb2.SimpleReply(data=json.dumps(meta.to_json()))
 
-    async def RemoteJsonCall(self, request, context):
+    async def RemoteJsonCall(self, request, context: grpc.aio.ServicerContext):
         res = await self.server_core.remote_json_call_async(request)
         return res
 
     async def RemoteCall(self, request, context):
-        res = await self.server_core.remote_call_async(request)
+        rpc_done_ev = asyncio.Event()
+        context.add_done_callback(lambda _ : rpc_done_ev.set())
+        res = await self.server_core.remote_call_async(request, rpc_done_ev)
         return res
 
     async def RemoteGenerator(self, request, context):
         async for res in self.server_core.remote_generator_async(request):
             yield res
 
-    async def ChunkedRemoteCall(self, request_iterator, context):
+    async def ChunkedRemoteCall(self, request_iterator, context: grpc.aio.ServicerContext):
+        rpc_done_ev = asyncio.Event()
+        context.add_done_callback(lambda _ : rpc_done_ev.set())
         try:
             async for res in self.server_core.chunked_remote_call_async(
-                    request_iterator):
+                    request_iterator, rpc_done_ev):
                 yield res
         except:
             traceback.print_exc()
@@ -106,7 +110,11 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
             yield res
 
     async def ClientStreamRemoteCall(self, request_iterator, context):
-        return await self.server_core.client_stream_async(request_iterator)
+        try:
+            return await self.server_core.client_stream_async(request_iterator)
+        except:
+            traceback.print_exc()
+            raise 
 
     async def BiStreamRemoteCall(self, request_iterator, context):
         try:
@@ -265,7 +273,7 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
 
         url = '[::]:{}'.format(port)
         with server_core.enter_global_context():
-            with server_core.enter_exec_context():
+            with server_core.enter_exec_context(is_loopback_call=True):
                 await server_core._init_async_members()
                 await server_core.run_event_async(ServiceEventType.Init)
             service = AsyncRemoteObjectService(server_core, is_local, length)
@@ -287,7 +295,7 @@ async def run_exit_async(server_core: ProtobufServiceCore):
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)
         with server_core.enter_global_context():
-            with server_core.enter_exec_context():
+            with server_core.enter_exec_context(is_loopback_call=True):
                 server_core.async_shutdown_event.set()
                 async with server_core._shutdown_handler_lock:
                     if not server_core._is_exit_async_run:
@@ -307,7 +315,7 @@ async def serve_async(sc: ProtobufServiceCore,
                       max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     server_core = sc
     with server_core.enter_global_context():
-        with server_core.enter_exec_context():
+        with server_core.enter_exec_context(is_loopback_call=True):
             await server_core._init_async_members()
             await server_core.run_event_async(ServiceEventType.Init)
         service = AsyncRemoteObjectService(server_core, is_local, length)
@@ -329,13 +337,15 @@ def serve(service_def: ServiceDef,
           ssl_key_path: str = "",
           ssl_crt_path: str = "",
           create_loop: bool = False,
-          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+          dist_meta: Optional[ServerDistributedMeta] = None):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta, dist_meta)
     return serve_service_core(server_core, wait_time, length, is_local,
                               max_threads, process_id, ssl_key_path, ssl_crt_path,
-                              max_port_retry=max_port_retry)
+                              max_port_retry=max_port_retry,
+                              dist_meta=dist_meta)
 
 def serve_service_core(service_core: ProtobufServiceCore,
           wait_time=-1,
@@ -347,7 +357,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
           ssl_crt_path: str = "",
           create_loop: bool = False,
           start_thread_ev: Optional[threading.Event] = None,
-          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+          dist_meta: Optional[ServerDistributedMeta] = None):
     # url = '[::]:{}'.format(port)
     # smeta = ServerMeta(port=port, http_port=-1)
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -378,6 +389,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
         service_core._loop = None
         if create_loop:
             loop.close()
+        if dist_meta is not None:
+            dist_meta.cleanup()
 
 
 # import uvloop
@@ -391,10 +404,11 @@ def serve_with_http(service_def: ServiceDef,
                     process_id=-1,
                     ssl_key_path: str = "",
                     ssl_crt_path: str = "",
-                    max_port_retry: int = TENSORPC_PORT_MAX_TRY):
+                    max_port_retry: int = TENSORPC_PORT_MAX_TRY,
+                    dist_meta: Optional[ServerDistributedMeta] = None):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta, dist_meta)
     loop = asyncio.get_event_loop()
     try:
         # uvloop.install()
@@ -420,3 +434,5 @@ def serve_with_http(service_def: ServiceDef,
         if _cleanup_coroutines:
             loop.run_until_complete(*_cleanup_coroutines)
         server_core._loop = None 
+        if dist_meta is not None:
+            dist_meta.cleanup()

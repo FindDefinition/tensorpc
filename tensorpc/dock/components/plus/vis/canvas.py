@@ -31,7 +31,7 @@ from tensorpc.dock.core.coretypes import TreeDragTarget
 from tensorpc.dock import appctx
 from tensorpc.dock.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
-from tensorpc.dock.components.core import get_tensor_container
+from tensorpc.dock.components.plus.tensorutil import get_tensor_container
 from tensorpc.dock.components.plus.scriptmgr import ScriptManager
 
 from .treeview import CanvasTreeItemHandler, lock_component

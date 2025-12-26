@@ -31,7 +31,7 @@ draft.dic.clear()
 
 * Main Path: for a draft ast expr, all nodes that can be assigned constructs a main path.
 
-e.g. when you use a dynamic `getitem`, the target of `getitem` is a main path node, the key isn't a main path node
+e.g. when you use a dynamic `getItem`, the target of `getItem` is a main path node, the key isn't a main path node
 
 Our draft change detection only check main path nodes, other node will be treated as constant in a draft expr.
 
@@ -39,21 +39,23 @@ Our draft change detection only check main path nodes, other node will be treate
 
 import contextlib
 import contextvars
+import copy
 from dataclasses import is_dataclass
 import enum
 import json
 import traceback
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
-from typing_extensions import Literal
+from typing_extensions import Literal, Self
 from tensorpc.core import inspecttools
 from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, resolve_type_hints
+from tensorpc.core.core_io import JsonSpecialData
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
 from .draftast import DraftASTFuncType, DraftASTNode, evaluate_draft_ast, evaluate_draft_ast_json, evaluate_draft_ast_with_obj_id_trace, evaluate_draft_ast_noexcept, DraftASTType
-
+from tensorpc.core.pfl import pflpath
 
 T = TypeVar("T")
 
@@ -111,6 +113,14 @@ class JMESPathOp:
     def to_dict(self):
         return {"path": self.path, "op": int(self.op), "opData": self.opData}
 
+@dataclasses.dataclass
+class PFLPathOp:
+    path: str
+    op: JMESPathOpType
+    opData: Any
+
+    def to_dict(self):
+        return {"path": self.path, "op": int(self.op), "opData": self.opData}
 
 @dataclasses.dataclass(kw_only=True)
 class DraftFieldMeta:
@@ -162,6 +172,18 @@ class DraftUpdateOp:
         # app internal will handle non-dict data in self.opData.
         return JMESPathOp(self.node.get_jmes_path(), self.op, self.opData)
 
+    def to_pfl_path_op(self) -> PFLPathOp:
+        # app internal will handle non-dict data in self.opData.
+        return PFLPathOp(self.node.get_pfl_path(), self.op, self.opData)
+    
+    def to_pfl_frontend_path_op(self) -> PFLPathOp:
+        # app internal will handle non-dict data in self.opData.
+        op_data = self.opData
+        if "keyPath" in self.opData:
+            op_data = op_data.copy()
+            op_data["keyPath"] = pflpath.compile_pflpath_to_compact_str(self.opData["keyPath"])
+        return PFLPathOp(pflpath.compile_pflpath_to_compact_str(self.node.get_pfl_path()), self.op, op_data)
+
     def to_userdata_removed(self) -> "DraftUpdateOp":
         return dataclasses.replace(self, userdata=None, node=self.node.to_userdata_removed())
 
@@ -179,12 +201,35 @@ class DraftUpdateOp:
                                    field_id=None)
 
     def has_dynamic_node_in_main_path(self):
-        # has `getattr` or `getitem_path` or `where` func call node
+        # has `getattr` or `getItemPath` or `where` func call node
         for node in self.node.get_child_nodes_in_main_path():
             if node.type == DraftASTType.FUNC_CALL:
                 if node.value in _DYNAMIC_FUNC_TYPES:
                     return True
         return False 
+
+    def freeze_assign_data(self, is_json_only: bool = False) -> Self:
+        if self.op == JMESPathOpType.SetAttr or self.op == JMESPathOpType.ArraySet:
+            # freeze the assign data
+            new_items = [(k, JsonSpecialData.from_option(v, is_json_only, True)) for k, v in self.opData["items"]]
+            new_opdata = self.opData.copy()
+            new_opdata["items"] = new_items
+            res = dataclasses.replace(self, opData=new_opdata)
+        elif self.op == JMESPathOpType.DictUpdate:
+            # freeze the assign data
+            new_items = {k: JsonSpecialData.from_option(v, is_json_only, True) for k, v in self.opData["items"]}
+            new_opdata = self.opData.copy()
+            new_opdata["items"] = new_items
+            res = dataclasses.replace(self, opData=new_opdata)
+        else:
+            res = dataclasses.replace(self)
+        return res 
+
+    def to_data_deepcopied(self) -> Self:
+        # we may need to deepcopy opData if we do backend update
+        # before send to frontend, to avoid backend update modify opData.
+        return dataclasses.replace(self,
+                                   opData=copy.deepcopy(self.opData))
 
 class DraftUpdateProcessContext:
     def __init__(self, proc: Callable[[DraftUpdateOp], DraftUpdateOp]):
@@ -197,9 +242,10 @@ _DRAGT_UPDATE_PROC_CONTEXT: contextvars.ContextVar[
 
 class DraftUpdateContext:
 
-    def __init__(self, prevent_inner_draft: bool = False):
+    def __init__(self, prevent_inner_draft: bool = False, use_jmes_path: bool = True):
         self._ops: list[DraftUpdateOp] = []
         self._prevent_inner_draft = prevent_inner_draft
+        self._use_jmes_path = use_jmes_path
 
     def add_op(self, op: DraftUpdateOp):
         assert not self._prevent_inner_draft, "Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler."
@@ -223,11 +269,11 @@ def prevent_draft_update():
         _DRAGT_UPDATE_CONTEXT.reset(token)
 
 @contextlib.contextmanager
-def capture_draft_update(allow_nested: bool = True):
+def capture_draft_update(allow_nested: bool = True, use_jmes_path: bool = True):
     cur_ctx = _DRAGT_UPDATE_CONTEXT.get()
     if cur_ctx is not None and not allow_nested:
         raise RuntimeError("Nested DraftUpdateContext is not allowed")
-    ctx = DraftUpdateContext()
+    ctx = DraftUpdateContext(use_jmes_path=use_jmes_path)
     token = _DRAGT_UPDATE_CONTEXT.set(ctx)
     try:
         yield ctx
@@ -296,6 +342,20 @@ def _tensorpc_draft_dispatch(
     else:
         return DraftImmutableScalar(new_obj, userdata, node, new_anno_state)
 
+def _extract_field_meta(anno_type: AnnotatedType, anno_state: _DraftAnnoState):
+    is_external = anno_state.is_external
+    if not is_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_external = annmeta.is_external
+                break
+    is_store_external = anno_state.is_store_external
+    if not is_store_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_store_external = annmeta.is_store_external
+                break
+    return is_external, is_store_external
 
 def _tensorpc_draft_anno_dispatch(
         anno_type: AnnotatedType, node: DraftASTNode, userdata: Any,
@@ -307,18 +367,7 @@ def _tensorpc_draft_anno_dispatch(
     path_metas = prev_anno_state.path_metas.copy()
     if anno_type is not None and anno_type.annometa is not None:
         path_metas = path_metas + [anno_type.annometa]
-    is_external = prev_anno_state.is_external
-    if not is_external and anno_type.annometa is not None:
-        for annmeta in anno_type.annometa:
-            if isinstance(annmeta, DraftFieldMeta):
-                is_external = annmeta.is_external
-                break
-    is_store_external = prev_anno_state.is_store_external
-    if not is_store_external and anno_type.annometa is not None:
-        for annmeta in anno_type.annometa:
-            if isinstance(annmeta, DraftFieldMeta):
-                is_store_external = annmeta.is_store_external
-                break
+    is_external, is_store_external = _extract_field_meta(anno_type, prev_anno_state)
 
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
@@ -389,7 +438,7 @@ class DraftBase:
         self._tensorpc_draft_attr_anno_state = anno_state
 
     def __str__(self) -> str:
-        return get_draft_jmespath(self)
+        return get_draft_pflpath(self)
 
     def _tensorpc_draft_get_update_op(
             self,
@@ -397,19 +446,25 @@ class DraftBase:
             opdata: Any,
             drop_last: bool = False,
             addi_nodes: Optional[list[DraftASTNode]] = None,
-            field_id: Optional[int] = None) -> DraftUpdateOp:
+            field_id: Optional[int] = None,
+            field_anno_type: Optional[AnnotatedType] = None) -> DraftUpdateOp:
         node = self._tensorpc_draft_attr_cur_node
         if drop_last:
             node = node.children[0]
         annometa = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
             annometa = self._tensorpc_draft_attr_anno_state.anno_type.annometa
+        is_external = self._tensorpc_draft_attr_anno_state.is_external
+        is_store_external = self._tensorpc_draft_attr_anno_state.is_store_external
+        if field_anno_type is not None:
+            annometa = field_anno_type.annometa
+            is_external, is_store_external = _extract_field_meta(field_anno_type, self._tensorpc_draft_attr_anno_state)
         return DraftUpdateOp(op_type, opdata, node,
                              self._tensorpc_draft_attr_userdata,
                              addi_nodes if addi_nodes is not None else [],
                              annometa, field_id=field_id,
-                             is_external=self._tensorpc_draft_attr_anno_state.is_external,
-                             is_store_external=self._tensorpc_draft_attr_anno_state.is_store_external)
+                             is_external=is_external,
+                             is_store_external=is_store_external)
 
     def _tensorpc_draft_dispatch(
             self,
@@ -438,25 +493,58 @@ class DraftBase:
         return self._tensorpc_draft_dispatch(
             self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
 
-    def _tensorpc_draft_binary_op(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
-        if not isinstance(other, DraftComparableScalar):
-            if isinstance(other, str):
-                ast_type = DraftASTType.STRING_LITERAL
-            else:
-                # obj must be json serializable
-                json.dumps(other)
-                ast_type = DraftASTType.JSON_LITERAL
-            new_node = DraftASTNode(ast_type, [], other)
-        else:
-            new_node = other._tensorpc_draft_attr_cur_node
-        this_node = self._tensorpc_draft_attr_cur_node
-        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
-                                [this_node, new_node], op)
+    def _tensorpc_draft_binary_op(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<=", "+", "-", "*", "/", "//"]):
+        binary_ops = set(["==", "!=", ">", "<", ">=", "<="])
+        math_ops = set(["+", "-", "*", "/", "//"])
+        if op in math_ops:
+            assert isinstance(self, DraftMutableScalar) and isinstance(
+                other, (DraftMutableScalar, int, float)), "only support arithmetic op for DraftMutableScalar or number"
         
-        if self._tensorpc_draft_attr_anno_state.is_type_only:
-            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
-        return self._tensorpc_draft_dispatch(
-            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+            self_type = self._tensorpc_draft_attr_anno_state.anno_type
+            assert self_type is not None
+            other_is_float = False
+            if isinstance(other, DraftMutableScalar):
+                other_annotype = other._tensorpc_draft_attr_anno_state.anno_type
+                assert other_annotype is not None
+                other_is_float = issubclass(other_annotype.origin_type, float)
+                other_node = other._tensorpc_draft_attr_cur_node
+            else:
+                other_node = DraftASTNode(DraftASTType.JSON_LITERAL, [], other)
+
+            self_is_float = issubclass(self_type.origin_type, float)
+            if other_is_float or self_is_float:
+                res_annotype = AnnotatedType(float, [])
+            else:
+                res_annotype = AnnotatedType(int, [])
+            this_node = self._tensorpc_draft_attr_cur_node
+            ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                    [this_node, other_node], op)
+            if self._tensorpc_draft_attr_anno_state.is_type_only:
+                return self._tensorpc_draft_dispatch(None, ast_node, res_annotype)
+            return self._tensorpc_draft_dispatch(
+                self._tensorpc_draft_attr_real_obj, ast_node, res_annotype)
+
+        elif op in binary_ops:
+            if not isinstance(other, DraftComparableScalar):
+                if isinstance(other, str):
+                    ast_type = DraftASTType.STRING_LITERAL
+                else:
+                    # obj must be json serializable
+                    json.dumps(other)
+                    ast_type = DraftASTType.JSON_LITERAL
+                new_node = DraftASTNode(ast_type, [], other)
+            else:
+                new_node = other._tensorpc_draft_attr_cur_node
+            this_node = self._tensorpc_draft_attr_cur_node
+            ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                    [this_node, new_node], op)
+            
+            if self._tensorpc_draft_attr_anno_state.is_type_only:
+                return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
+            return self._tensorpc_draft_dispatch(
+                self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+        else:
+            raise NotImplementedError
 
     def __eq__(self, other: Any): # type: ignore
         assert other is None, "only allow compare with None for all draft object"
@@ -514,9 +602,19 @@ class DraftObject(DraftBase):
                     if inspecttools.isstaticmethod(dcls_type, name):
                         return unbound_func
                     return types.MethodType(unbound_func, self)
-            raise AttributeError(
-                f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
-            )
+                else:
+                    raw_type = self._tensorpc_draft_attr_anno_state.anno_type.raw_type
+                    raise AttributeError(
+                        f"field `{name}` doesn't exist in {self}({raw_type})."
+                    )
+            if self._tensorpc_draft_attr_real_obj is None:
+                raise AttributeError(
+                    f"want to get {self}.{name}, but {self} don't have annotated type"
+                )
+            else:
+                raise AttributeError(
+                    f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
+                )
         anno_type = None
         field_id = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
@@ -557,12 +655,15 @@ class DraftObject(DraftBase):
         # TODO do validate here
         assert not isinstance(value, Undefined), "currently we don't support assign Undefined to dataclass field."
         field_id = None
+        field_anno_type = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
+            field_anno_type = self._tensorpc_draft_attr_obj_fields_dict[name][1]
             field_id = id(self._tensorpc_draft_attr_obj_fields_dict[name][0])
         ctx.add_op(
             self._tensorpc_draft_get_update_op(JMESPathOpType.SetAttr,
                                                {"items": [(name, value)]},
-                                               field_id=field_id))
+                                               field_id=field_id,
+                                               field_anno_type=field_anno_type))
 
 
 def _assert_not_draft(*value: Any):
@@ -589,7 +690,7 @@ class DraftSequence(DraftBase):
             ast_node = DraftASTNode(DraftASTType.FUNC_CALL, [
                 self._tensorpc_draft_attr_cur_node,
                 index._tensorpc_draft_attr_cur_node
-            ], "getitem")
+            ], "getItem")
             if self._tensorpc_draft_attr_anno_state.is_type_only:
                 assert anno_type is not None
                 return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
@@ -621,13 +722,15 @@ class DraftSequence(DraftBase):
                     return
         _assert_not_draft(value)
         if isinstance(index, DraftBase):
+            if ctx._use_jmes_path:
+                path = index._tensorpc_draft_attr_cur_node.get_jmes_path()
+            else:
+                path = index._tensorpc_draft_attr_cur_node.get_pfl_path()
             ctx.add_op(
                 self._tensorpc_draft_get_update_op(
                     JMESPathOpType.Assign, {
-                        "keyPath":
-                        index._tensorpc_draft_attr_cur_node.get_jmes_path(),
-                        "value":
-                        value
+                        "keyPath": path,
+                        "value": value
                     },
                     addi_nodes=[index._tensorpc_draft_attr_cur_node]))
             return
@@ -692,6 +795,14 @@ class DraftSequence(DraftBase):
     def __radd__(self, other: Any):
         return _draft_seq_add(self, other, True)
 
+    def _get_length(self):
+        ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
+                                [self._tensorpc_draft_attr_cur_node], "len")
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(int, []))
+        return self._tensorpc_draft_dispatch(
+            len(self._tensorpc_draft_attr_real_obj), ast_node, AnnotatedType(int, []))
+
 def _draft_seq_add(x: Any, other: Any, is_reverse: bool):
     assert isinstance(x, DraftSequence)
     if not isinstance(other, DraftSequence):
@@ -728,20 +839,19 @@ class DraftDict(DraftBase):
             else:
                 anno_type = self._tensorpc_draft_attr_anno_state.anno_type.get_child_annotated_type(
                     1)
-
         if isinstance(key, DraftBase):
             ast_node = DraftASTNode(
                 DraftASTType.FUNC_CALL, [
                     self._tensorpc_draft_attr_cur_node,
                     key._tensorpc_draft_attr_cur_node
-                ], "getitem", self._tensorpc_draft_attr_anno_state.anno_type)
+                ], "getItem", self._tensorpc_draft_attr_anno_state.anno_type)
             if self._tensorpc_draft_attr_anno_state.is_type_only:
                 assert anno_type is not None
                 return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
 
             return self._tensorpc_draft_dispatch(
                 self._tensorpc_draft_attr_real_obj[
-                    key._tensorpc_draft_attr_real_obj], ast_node)
+                    key._tensorpc_draft_attr_real_obj], ast_node, anno_type)
         ast_node = DraftASTNode(DraftASTType.DICT_GET_ITEM,
                                 [self._tensorpc_draft_attr_cur_node], key,
                                 self._tensorpc_draft_attr_anno_state.anno_type)
@@ -817,43 +927,23 @@ class DraftUnion(DraftBase):
     pass
 
 class DraftComparableScalar(DraftBase):
-    def _tensorpc_draft_compare(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
-        if not isinstance(other, DraftComparableScalar):
-            if isinstance(other, str):
-                ast_type = DraftASTType.STRING_LITERAL
-            else:
-                # obj must be json serializable
-                json.dumps(other)
-                ast_type = DraftASTType.JSON_LITERAL
-            new_node = DraftASTNode(ast_type, [], other)
-        else:
-            new_node = other._tensorpc_draft_attr_cur_node
-        this_node = self._tensorpc_draft_attr_cur_node
-        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
-                                [this_node, new_node], op)
-        
-        if self._tensorpc_draft_attr_anno_state.is_type_only:
-            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
-        return self._tensorpc_draft_dispatch(
-            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
-
     def __eq__(self, other: Any): # type: ignore
-        return self._tensorpc_draft_compare(other, "==")
+        return self._tensorpc_draft_binary_op(other, "==")
     
     def __ne__(self, other: Any): # type: ignore
-        return self._tensorpc_draft_compare(other, "!=")
+        return self._tensorpc_draft_binary_op(other, "!=")
 
     def __gt__(self, other: Any):
-        return self._tensorpc_draft_compare(other, ">")
+        return self._tensorpc_draft_binary_op(other, ">")
 
     def __lt__(self, other: Any):
-        return self._tensorpc_draft_compare(other, "<")
+        return self._tensorpc_draft_binary_op(other, "<")
     
     def __ge__(self, other: Any):
-        return self._tensorpc_draft_compare(other, ">=")
+        return self._tensorpc_draft_binary_op(other, ">=")
 
     def __le__(self, other: Any):
-        return self._tensorpc_draft_compare(other, "<=")
+        return self._tensorpc_draft_binary_op(other, "<=")
     
 class DraftImmutableString(DraftComparableScalar):
     """string object, only support c-style format.
@@ -884,9 +974,37 @@ class DraftImmutableString(DraftComparableScalar):
         return self._tensorpc_draft_dispatch(
             self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(str, []))
 
+    def join(self, arg: Any):
+        assert isinstance(arg, DraftSequence), "only support join DraftSequence"
+        res_nodes: list[DraftASTNode] = [
+            self._tensorpc_draft_attr_cur_node,
+            arg._tensorpc_draft_attr_cur_node,
+        ]
+        ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
+                                res_nodes, DraftASTFuncType.JOIN.value)
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(str, []))
+        # FIXME we shouldn't eval ast here to get real obj.
+        return self._tensorpc_draft_dispatch(
+            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(str, []))
 
 
 class DraftMutableScalar(DraftComparableScalar):
+
+    def __add__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "+")
+
+    def __sub__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "-")
+
+    def __mul__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "*")
+
+    def __truediv__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "/")
+
+    def __floordiv__(self, other: Union[int, float]):
+        return self._tensorpc_draft_binary_op(other, "//")
 
     def __iadd__(self, other: Union[int, float]):
         _assert_not_draft(other)
@@ -1155,11 +1273,15 @@ def apply_draft_update_ops_to_json_with_root(obj: Any, ops: list[DraftUpdateOp])
         _apply_draft_update_op_to_json(cur_obj, op, dynamic_key)
     return is_root_changed, obj
 
-def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
+def apply_draft_path_ops(obj: dict, ops: list[Union[JMESPathOp, PFLPathOp]]):
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     for op in ops:
-        cur_obj = jmespath.search(op.path, obj)
+        is_jmes_op = isinstance(op, JMESPathOp)
+        if is_jmes_op:
+            cur_obj = jmespath.search(op.path, obj)
+        else:
+            cur_obj = pflpath.search(op.path, obj)
         # new cur_obj is target, apply op.
         if op.op == JMESPathOpType.SetAttr:
             for k, v in op.opData["items"]:
@@ -1188,7 +1310,10 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
             for k, v in op.opData["items"].items():
                 cur_obj[k] = v
         elif op.op == JMESPathOpType.Assign:
-            key = jmespath.search(op.opData["keyPath"], obj)
+            if is_jmes_op:
+                key = jmespath.search(op.opData["keyPath"], obj)
+            else:
+                key = pflpath.search(op.opData["keyPath"], obj)
             cur_obj[key] = op.opData["value"]
         elif op.op == JMESPathOpType.ScalarInplaceOp:
             key = op.opData["key"]
@@ -1208,6 +1333,8 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
 def get_draft_jmespath(draft: DraftBase) -> str:
     return draft._tensorpc_draft_attr_cur_node.get_jmes_path()
 
+def get_draft_pflpath(draft: DraftBase) -> str:
+    return draft._tensorpc_draft_attr_cur_node.get_pfl_path()
 
 def create_draft(obj: T, userdata: Any = None, obj_type: Optional[type[T]] = None) -> T:
     if obj_type is None:
@@ -1371,7 +1498,7 @@ def insert_assign_draft_op(draft: Any, value: Any):
     assert isinstance(draft, DraftBase), "draft should be a Draft object"
     ctx = get_draft_update_context()
     cur_node = draft._tensorpc_draft_attr_cur_node
-    assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getitem/getattr object"
+    assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getItem/getattr object"
     anno_state = draft._tensorpc_draft_attr_anno_state
     assert anno_state.can_assign and anno_state.can_direct_assign, "assign to this draft is disabled."
     node_prev = cur_node.children[0]
@@ -1445,7 +1572,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
         else:
             raise NotImplementedError(f"op {op} not implemented")
     elif node.type == DraftASTType.FUNC_CALL:
-        if node.value == "getitem":
+        if node.value == "getItem":
             # for dynamic ops, we need real model value as key.
             k = evaluate_draft_ast(node.children[1], model)
             draft_target = _rebuild_draft_expr_recursive(node.children[0], root_draft, model)
@@ -1461,7 +1588,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
             ]
             assert isinstance(fmt, DraftImmutableString)
             return fmt % tuple(args)
-        elif node.value == "getitem_path":
+        elif node.value == "getItemPath":
             target_node = node.children[0]
             draft_expr = _rebuild_draft_expr_recursive(target_node, root_draft, model)
             path_items = evaluate_draft_ast(node.children[1], model)
@@ -1499,7 +1626,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
 
 
 def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, model: Any):
-    """Rebuild draft expr from node, all dynamic op (getattr, getitem_path, where) will be converted to static.
+    """Rebuild draft expr from node, all dynamic op (getattr, getItemPath, where) will be converted to static.
     Note: this function must be called in runtime because it depends on real model value.
     """
     assert isinstance(node, DraftASTNode)
@@ -1510,9 +1637,9 @@ def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, 
 
 
 def stabilize_getitem_path_in_op_main_path(op: DraftUpdateOp, root_model_draft: Any, model: Any):
-    """Convert dynamic ops `getattr` and `getitem_path(tgt, [...])` to static draft expr.
+    """Convert dynamic ops `getattr` and `getItemPath(tgt, [...])` to static draft expr.
 
-    `getitem_path` is usually used in nested data structure. If your draft
+    `getItemPath` is usually used in nested data structure. If your draft
     expr contains dynamic path, we can't do static type analysis on it. So we need
     to convert it to static draft expr from real model.
 

@@ -24,13 +24,12 @@ from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Mapping, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import Literal, overload
 
-from tensorpc.core.datamodel.draft import create_literal_draft
+from tensorpc.core.datamodel.draft import DraftBase, create_literal_draft, insert_assign_draft_op
 from tensorpc.core.datamodel.draftstore import DraftStoreBackendBase
 from tensorpc.utils.containers.dict_proxy import DictProxy
 
 import numpy as np
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
-from tensorpc.dock.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.dock.components import mui
 from tensorpc.dock import appctx
 # from tensorpc.core import dataclass_dispatch as dataclasses
@@ -42,7 +41,6 @@ from tensorpc.dock.core.appcore import AppSpecialEventType, app_is_remote_comp
 from tensorpc.dock.core.component import FrontendEventType
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from .options import CommonOptions
-
 from tensorpc.dock.client import MasterMeta
 
 class EditorActions(enum.Enum):
@@ -279,7 +277,7 @@ class ScriptManager(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
@@ -407,7 +405,7 @@ class ScriptManager(mui.FlexBox):
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value]))
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
@@ -539,7 +537,8 @@ class ScriptManagerV2(mui.FlexBox):
                  init_store_backend: Optional[tuple[DraftStoreBackendBase, str]] = None,
                  frame: Optional[FrameType] = None,
                  enable_app_backend: bool = True,
-                 editor_path_uid: str = "scriptmgr_v2"):
+                 editor_path_uid: str = "scriptmgr_v2",
+                 ext_buttons: Optional[list[mui.IconButton]] = None):
         """Script manager that use draft storage
 
         """
@@ -549,6 +548,8 @@ class ScriptManagerV2(mui.FlexBox):
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
         self._editor_path_uid = editor_path_uid
+        if ext_buttons is None:
+            ext_buttons = []
         if frame is not None:
             init_model = ScriptManagerModel([
                 ScriptModel("dev", "python", _create_init_script_states(_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT)),
@@ -583,8 +584,8 @@ class ScriptManagerV2(mui.FlexBox):
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
         ]))
+        self.code_editor_container.bind_fields(visibles="[states[language].is_editor_visible, states[language].is_app_visible]")
 
-        self.code_editor_container.bind_fields(visibles="[getitem(states, language).is_editor_visible, getitem(states, language).is_app_visible]")
         self._scripts_select = mui.Autocomplete(
             "Scripts",
             [],
@@ -614,27 +615,31 @@ class ScriptManagerV2(mui.FlexBox):
                 progressColor="primary",
                 confirmTitle="Warning",
                 confirmMessage="Are you sure to delete this script?")
-        self._save_and_run_btn.bind_fields(disabled="cur_script_idx == `-1`")
-        self._delete_button.bind_fields(disabled="cur_script_idx == `-1`")
-        self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
+        self._save_and_run_btn.bind_fields(disabled="cur_script_idx == -1")
+        self._delete_button.bind_fields(disabled="cur_script_idx == -1")
+        for btn in ext_buttons:
+            btn.bind_fields(disabled="cur_script_idx == -1")
+        self.code_editor.bind_fields(readOnly="cur_script_idx == -1")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
-        self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
+        self._show_editor_btn.bind_fields(selected="states[language].is_editor_visible")
+
         self.dm = mui.DataModel(init_model, [
             mui.HBox([
                 self._scripts_select.prop(flex=1).bind_fields(
-                    options=r"scripts[*].{label: label}", 
-                    value=r"getitem(scripts, cur_script_idx).{label: label}"),
-                self.langs.bind_fields(disabled="cur_script_idx == `-1`"),
+                    options="scripts", 
+                    value="scripts[cur_script_idx]"),
+                self.langs.bind_fields(disabled="cur_script_idx == -1"),
                 self._save_and_run_btn,
                 # self._enable_save_watch,
                 self._delete_button,
-                mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+                *ext_buttons,
+                mui.DataSubQuery("scripts[cur_script_idx]", [
                     self._show_editor_btn,
-                ]).bind_fields(enable="cur_script_idx != `-1`"),
+                ]).bind_fields(enable="cur_script_idx != -1"),
             ]).prop(alignItems="center"),
-            mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+            mui.DataSubQuery("scripts[cur_script_idx]", [
                 self.code_editor_container,
-            ]).bind_fields(enable="cur_script_idx != `-1`"),
+            ]).bind_fields(enable="cur_script_idx != -1"),
         ])
         draft = self.dm.get_draft_type_only()
 
@@ -728,7 +733,7 @@ class ScriptManagerV2(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
 
-    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
         action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
@@ -751,7 +756,7 @@ class ScriptManagerV2(mui.FlexBox):
                 # TODO add better option
                 await self._on_run_script(value)
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
         value = ev.value
         model = self.dm.model
         draft = self.dm.get_draft()
@@ -889,3 +894,90 @@ class ScriptManagerV2(mui.FlexBox):
                 except Exception as e:
                     traceback.print_exc()
                     await self.app_show_box.set_new_layout({"layout": mui.Markdown(f"Error: {e}")})
+
+
+class SingleAppScriptDrafted(mui.FlexBox):
+    USER_APP_OBJECT_KEY = "__user_app_object__"
+    def __init__(self, draft: Any):
+        assert isinstance(draft, DraftBase)
+        self._draft = draft
+        super().__init__()
+        self.code_editor = mui.MonacoEditor(self._get_default_script(), "python",
+                                            "default_app_script").prop(flex=1,
+                                                            minHeight=0,
+                                                            minWidth=0)
+        editor_acts: list[mui.MonacoEditorAction] = [
+            mui.MonacoEditorAction(id=EditorActions.SaveAndRun.value, 
+                label="Save And Run", contextMenuOrder=1.5,
+                contextMenuGroupId="tensorpc-flow-editor-action", 
+                keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+        ]
+        self.code_editor.prop(actions=editor_acts)
+        self.code_editor.event_editor_action.on(self._handle_editor_action)
+        self.code_editor.bind_draft_change_uncontrolled(draft)
+        self.init_add_layout([
+            self.code_editor,
+        ])
+
+        self.prop(flex=1,
+                  flexDirection="column",
+                  width="100%",
+                  height="100%",
+                  minHeight=0,
+                  minWidth=0,
+                  overflow="hidden")
+        self.code_editor.event_editor_save.on(self._on_editor_save)
+
+    def _get_default_script(self):
+        return f"""
+async def main(self):
+    # put your code with self (your ui app) here...
+
+    return
+        """.strip()
+
+
+    async def _on_save_and_run(self):
+        # we attach userdata to tell save handler run script after save
+        # actual run script will be handled in save handler
+        await self.code_editor.save({"SaveAndRun": True})
+        return
+
+    async def _handle_editor_action(self, act_ev: mui.MonacoActionEvent):
+        action = act_ev.action
+        if action == EditorActions.SaveAndRun.value:
+            await self._on_save_and_run()
+
+    async def _on_editor_save(self, ev: mui.MonacoSaveEvent):
+        value = ev.value
+        insert_assign_draft_op(self._draft, value)
+        is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
+        if is_save_and_run:
+            await self._on_run_script(value)
+
+    async def _on_run_script(self, code: str):
+        app_obj = appctx.get_app()
+        ui_obj = app_obj._get_user_app_object()
+        __tensorpc_script_res: List[Optional[Coroutine]] = [None]
+        fname = f"<app_script>"
+        lines = code.splitlines()
+        lines.append(f"assert 'main' in locals(), 'script must contain async def main(self)'")
+        lines.append(f"__tensorpc_script_res[0] = main({SingleAppScriptDrafted.USER_APP_OBJECT_KEY})")
+        code = "\n".join(lines)
+        code_comp = compile(code, fname, "exec")
+        gs = {
+            SingleAppScriptDrafted.USER_APP_OBJECT_KEY: ui_obj,
+        }
+        exec(code_comp, gs,
+            {"__tensorpc_script_res": __tensorpc_script_res})
+        res = __tensorpc_script_res[0]
+        assert res is not None
+        await res
+
+    @staticmethod 
+    def get_app_script_dialog(draft: Any):
+        dialog = mui.Dialog([
+            SingleAppScriptDrafted(draft).prop(flex=1),
+        ]).prop(dialogMaxWidth=False, fullWidth=False,
+            width="75vw", height="75vh", display="flex")
+        return dialog

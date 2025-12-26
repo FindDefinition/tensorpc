@@ -6,6 +6,7 @@ import json
 import threading
 import traceback
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+import uuid
 
 import aiohttp
 from aiohttp import web
@@ -14,6 +15,7 @@ from tensorpc.core import core_io, defs
 import ssl
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.constants import TENSORPC_API_FILE_DOWNLOAD, TENSORPC_API_FILE_UPLOAD, TENSORPC_FETCH_STATUS
+from tensorpc.core.httpservers.langservers.core import LanguageServerHandler
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
@@ -25,7 +27,7 @@ from .aiohttp_file import FileProxy, FileProxyResponse
 
 from tensorpc.utils.rich_logging import get_logger
 
-LOGGER = get_logger("tensorpc.http")
+LOGGER = get_logger("tensorpc.http", log_time_format="[%x %X]")
 
 class GrpcFileProxy(FileProxy):
     def __init__(self, sc: ServiceCore,node_uid: str, resource_key: str, comp_id: Optional[str],  metadata: defs.FileResource) -> None:
@@ -139,6 +141,12 @@ class HttpService:
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
 
+        self._default_headers = {
+            'Access-Control-Allow-Origin': '*',
+            # 'Access-Control-Allow-Headers': '*',
+            # 'Access-Control-Allow-Method': 'POST',
+        }
+
     async def remote_json_call_http(self, request: web.Request):
         try:
             data_bin = await request.read()
@@ -150,13 +158,7 @@ class HttpService:
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
         byte = res.SerializeToString()
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.Response(body=byte, headers=headers)
+        res = web.Response(body=byte, headers=self._default_headers)
         return res
 
     async def simple_remote_json_call_http(self, request: web.Request):
@@ -180,26 +182,14 @@ class HttpService:
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
             res_json_str = data
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.Response(body=res_json_str, headers=headers)
+        res = web.Response(body=res_json_str, headers=self._default_headers)
         return res
 
     async def fetch_status(self, request: web.Request):
         status = {
             "status": "ok",
         }
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.json_response(status, headers=headers)
+        res = web.json_response(status, headers=self._default_headers)
         return res
 
     async def resource_download_call(self, request: web.Request):
@@ -232,12 +222,6 @@ class HttpService:
         reader = await request.multipart()
         # /!\ Don't forget to validate your inputs /!\
         # reader.next() will `yield` the fields of your form
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-
         field = await reader.next()
         assert field is not None
         assert field.name == 'data'
@@ -262,9 +246,9 @@ class HttpService:
         if not is_exc:
             return web.Response(text='{} sized of {} successfully stored'
                                 ''.format(filename, content),
-                                headers=headers)
+                                headers=self._default_headers)
         else:
-            return web.Response(status=500, text=res, headers=headers)
+            return web.Response(status=500, text=res, headers=self._default_headers)
 
     async def remote_pickle_call_http(self, request: web.Request):
         try:
@@ -277,15 +261,8 @@ class HttpService:
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
         byte = res.SerializeToString()
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.Response(body=byte, headers=headers)
+        res = web.Response(body=byte, headers=self._default_headers)
         return res
-
 
 async def _await_shutdown(shutdown_ev, loop):
     return await loop.run_in_executor(None, shutdown_ev.wait)
@@ -324,24 +301,25 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}"):
+                                  ws_backup_name="/api/ws_backup/{client_id}",
+                                  langserver_name="/api/langserver/{type}"):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
     ctx2 = contextlib.nullcontext()
     if standalone:
         ctx = server_core.enter_global_context()
-        ctx2 = server_core.enter_exec_context()
+        ctx2 = server_core.enter_exec_context(is_loopback_call=True)
     with ctx, ctx2:
         if standalone:
             await server_core._init_async_members()
             await server_core.run_event_async(ServiceEventType.Init)
 
         ws_service = AiohttpWebsocketHandler(server_core)
+        ls_service = LanguageServerHandler()
         # print("???????", client_max_size)
         app = web.Application(client_max_size=client_max_size)
         # logging.basicConfig(level=logging.DEBUG)
-
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
@@ -359,6 +337,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         app.router.add_get(ws_backup_name,
                            ws_service.handle_new_backup_connection_aiohttp)
+        app.router.add_get(langserver_name, ls_service.handle_ls_open)
+
         LOGGER.warning("server started at {}".format(port))
 
         ssl_context = None
@@ -384,8 +364,12 @@ def serve_service_core(server_core: ProtobufServiceCore,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
                                   simple_json_rpc_name="/api/simple_json_rpc",
-                                  ws_backup_name="/api/ws_backup/{client_id}"):
-    http_task = serve_service_core_task(server_core, port, rpc_name, ws_name, is_sync, rpc_pickle_name, client_max_size, standalone, ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name)
+                                  ws_backup_name="/api/ws_backup/{client_id}",
+                                  langserver_name="/api/langserver/{type}"):
+    http_task = serve_service_core_task(server_core, port, rpc_name, 
+        ws_name, is_sync, rpc_pickle_name, client_max_size, standalone, 
+        ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name,
+        langserver_name)
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:

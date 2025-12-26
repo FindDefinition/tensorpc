@@ -26,14 +26,13 @@ from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.protos_export import wsdef_pb2
-from tensorpc.utils import rich_logging
 from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
 from contextlib import suppress
 import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-LOGGER = rich_logging.get_logger("tensorpc.http")
+from .logger import LOGGER
 
 JS_MAX_SAFE_INT = 2**53 - 1
 
@@ -345,7 +344,7 @@ class WebsocketHandler:
         self.new_event_ev = asyncio.Event()
         self.shutdown_ev = service_core.async_shutdown_event
         self._shutdown_task: Optional[asyncio.Task] = None
-        with service_core.enter_exec_context():
+        with service_core.enter_exec_context(is_loopback_call=True):
             service_core.service_units.init_service(init_service_has_websocket_only=True)
         self.all_ev_providers = service_core.service_units.get_all_event_providers(
         )
@@ -409,7 +408,7 @@ class WebsocketHandler:
         conn_st_ev = asyncio.Event()
         # wait at most 100 rpcs
         conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
-        with service_core.enter_exec_context():
+        with service_core.enter_exec_context(is_loopback_call=True):
             try:
                 await service_core.service_units.run_event_async(
                     ServiceEventType.WebSocketOnConnect, client)
@@ -611,7 +610,7 @@ class WebsocketHandler:
                     client_may_main._large_data_ws = None
             else:
                 self.client_id_to_client.pop(client_id)
-        print(f"CONN {client_id} (is_backup={is_backup}) disconnected.")
+        LOGGER.warning(f"ws {client_id} (is_backup={is_backup}) disconnected.")
 
     async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
                           shutdown_ev: asyncio.Event):
@@ -789,15 +788,20 @@ class WebsocketHandler:
                 await _cancel(task)
             # t = time.time()
             if sending_tasks:
-                try:
-                    # TODO if this function fail...
-                    for task in sending_tasks:
+                # TODO if this function fail...
+                for task in sending_tasks:
+                    try:
                         await task[0]
-                    # await asyncio.wait([x[0] for x in sending_tasks])
-                except ConnectionResetError:
-                    print("Cannot write to closing transport")
-                except JsonEncodeException:
-                    print("encode message to json failed. check your data!")
+                        # await asyncio.wait([x[0] for x in sending_tasks])
+                    except ConnectionResetError:
+                        print("Cannot write to closing transport")
+                        if not task[0].done():
+                            await _cancel(task[0])
+                    except JsonEncodeException:
+                        print("encode message to json failed. check your data!")
+                        if not task[0].done():
+                            await _cancel(task[0])
+
             for task, ev_str in sending_tasks:
                 exc = task.exception()
                 if exc is not None:
