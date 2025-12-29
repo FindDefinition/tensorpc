@@ -16,7 +16,7 @@ class MarkdownTutorialsTree:
     @mark_create_layout
     def my_layout(self):
         # appctx.set_app_z_index(200)  # required for drawer/dialog.
-        # appctx.get_app().set_enable_language_server(True)
+        appctx.get_app().set_enable_language_server(True)
         pyright_setting = appctx.get_app().get_language_server_settings()
         pyright_setting.python.analysis.pythonPath = sys.executable
         pyright_setting.python.analysis.extraPaths = [

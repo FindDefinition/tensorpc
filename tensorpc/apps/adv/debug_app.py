@@ -98,11 +98,13 @@ class App:
             flow_uid_getter=lambda: self.dm.get_model().get_cur_flow_uid(),
             debug_id="main_flow")
         binder.bind_flow_comp_with_base_model(self.dm, cur_model_draft.selected_nodes)
-        detail.bind_fields(data=cur_root_proj.draft_get_selected_node())
+        # detail.bind_fields(data=cur_root_proj.draft_get_selected_node())
+        detail.bind_pfl_query(self.dm, data=(ADVRoot.get_cur_node_flows, "selectedNode"))
         has_code, code_draft, path_draft = cur_root_proj.draft_get_node_impl_editor(cur_root_proj.draft_get_selected_node().id)
         editor.bind_draft_change_uncontrolled(code_draft, path_draft=path_draft)
-        editor_ct.bind_fields(condition=has_code)
-        self.dm.debug_print_draft_change(has_code)
+        # editor_ct.bind_fields(condition=has_code)
+        editor_ct.bind_pfl_query(self.dm, condition=(ADVRoot.get_cur_node_flows, "enableCodeEditor"))
+        # self.dm.debug_print_draft_change(has_code)
 
         return mui.HBox([
             self.dm,

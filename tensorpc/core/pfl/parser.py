@@ -316,11 +316,15 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         self.visit(node.args)
         for stmt in node.body:
             self.visit(stmt)
-        if node.returns is not None:
-            self.visit(node.returns)
+        # if node.returns is not None:
+        #     self.visit(node.returns)
         if hasattr(node, "type_params"):
             for tp in getattr(node, "type_params"):
                 self.visit(tp)
+
+    def visit_arg(self, node: ast.arg):
+        # avoid visit arg annotation
+        pass 
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         # visit annassign without annotation
@@ -1397,7 +1401,8 @@ class PFLParser:
         #         f"default value of arg {pfl_arg.arg} must be constant, but got {default_pfl}"
         #     pfl_arg.default = default_pfl
         funbody, rinfo = self._parse_block_to_pfl_ast(stmt.body, private_scope)
-        if not isinstance(funbody[-1], PFLReturn):
+        
+        if not rinfo.complete:
             ret_none_value = PFLConstant(PFLASTType.CONSTANT,
                                          (-1, -1, None, None),
                                          value=None)
@@ -1417,8 +1422,9 @@ class PFLParser:
                 rstmt_st = PFLExprInfo(
                     PFLExprType.NONE_TYPE
                 ) if rstmt.value is None else rstmt.value.st
-                assert rstmt_st.is_equal_type(first_rstmt_st), \
-                    f"all return stmts must have same type, but got {rstmt_st} and {first_rstmt_st}"
+                if stmt.returns is None:
+                    assert rstmt_st.is_equal_type(first_rstmt_st), \
+                        f"all return stmts must have same type, but got {rstmt_st} and {first_rstmt_st}"
                 ret_sts.append(rstmt_st)
         finfo_args: list[PFLExprFuncArgInfo] = []
         for a in args:
@@ -1441,18 +1447,22 @@ class PFLParser:
                             args=args,
                             st=func_node_st,
                             body=funbody)
+        if meta.userdata is not None:
+            func_node.userdata = meta.userdata
         if stmt.returns is not None:
             ann_res = evaluate_annotation_expr(stmt.returns)
             st = PFLExprInfo.from_annotype(
                 parse_type_may_optional_undefined(ann_res))
             if ret_sts:
-                assert st.is_equal_type(ret_sts[0])
+                for ret_st in ret_sts:
+                    assert ret_st.is_convertable(st), f"{st} vs {ret_st}"
             func_node.ret_st = st
         if func_node.ret_st is None and external_ret_anno is not None:
             st = PFLExprInfo.from_annotype(
                 parse_type_may_optional_undefined(external_ret_anno))
             if ret_sts:
-                assert st.is_equal_type(ret_sts[0])
+                for ret_st in ret_sts:
+                    assert ret_st.is_convertable(st), f"{st} vs {ret_st}"
             func_node.ret_st = st
         if ret_sts and func_node.ret_st is None:
             func_node.ret_st = ret_sts[0]

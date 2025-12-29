@@ -17,12 +17,13 @@ from typing_extensions import Literal, Self, get_overloads, ParamSpec, ParamSpec
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
                                    Undefined, get_type_hints_with_cache, is_undefined,
-                                   parse_type_may_optional_undefined,
+                                   parse_type_may_optional_undefined, resolve_type_hints_with_cache,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN, PFL_COMPILE_META_ATTR, PFL_STDLIB_FUNC_META_ATTR, PFL_FUNC_ANNO_META_ATTR
 from tensorpc.core.moduleid import get_module_id_of_type, get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
+from .typedefs import (BoolOpType, BinOpType, CompareType, UnaryOpType)
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem, register_pfl_std
 
@@ -858,7 +859,8 @@ class PFLExprFuncInfo:
             if self.is_template():
                 raise ValueError(f"field({field_name}) must be set by delayed_init_set_field_type before get attr.")
             assert self.raw_func is not None 
-            type_hints = get_type_hints_with_cache(self.raw_func, include_extras=True)
+            # type_hints = get_type_hints_with_cache(self.raw_func, include_extras=True)
+            type_hints = resolve_type_hints_with_cache(self.raw_func)
             anno = type_hints[field.name]
             annotype = parse_type_may_optional_undefined(anno)
             arg_type = PFLExprInfo.from_annotype(annotype,
@@ -875,7 +877,9 @@ class PFLExprFuncInfo:
                        external_annos: Optional[dict[str, Any]] = None,
                        delay_parse_field: bool = False,
                        external_local_ids: Optional[list[int]] = None) -> Self:
-        type_hints = get_type_hints_with_cache(dcls, include_extras=True)
+        # type_hints = get_type_hints_with_cache(dcls, include_extras=True)
+        type_hints = resolve_type_hints_with_cache(dcls)
+
         args: list[PFLExprFuncArgInfo] = []
         # type_hints = resolve_type_hints(anno_type.origin_type)
 
@@ -1297,7 +1301,7 @@ class PFLExprInfo:
                 res = cls(PFLExprType.GENERIC_TYPE)
             else:
                 raise NotImplementedError(
-                    "TypeVar only supported in function argument and return anno."
+                    f"TypeVar only supported in function argument and return anno, got {annotype}"
                 )
         elif annotype.is_param_spec() or annotype.is_param_spec_args():
             if allow_param_spec:
@@ -1501,9 +1505,24 @@ class PFLExprInfo:
     def support_binary_op(self):
         return self.type in _TYPE_SUPPORT_BINARY_OP and not self.is_optional()
 
-    def check_support_binary_op(self, msg: str = ""):
-        assert self.support_binary_op(
-        ), f"not support binary op for {self.type}, {msg}"
+    def check_support_compare_op(self, op: CompareType, other_st: Self, msg: str = ""):
+        if self.type == PFLExprType.STRING and other_st.type == PFLExprType.STRING:
+            assert op in [CompareType.EQUAL, CompareType.NOT_EQUAL], "only support ==/!= for string type"
+            return 
+        left_support = self.support_binary_op()
+        right_support = other_st.support_binary_op()
+        assert left_support and right_support, f"not support binary op for {self} vs {other_st}, {msg}"
+
+    def check_support_binary_op(self, op: BinOpType, other_st: Self, msg: str = ""):
+        if self.type == PFLExprType.STRING and other_st.type == PFLExprType.STRING:
+            assert op == BinOpType.ADD, "only support + for string type"
+            return 
+        left_support = self.support_binary_op()
+        right_support = other_st.support_binary_op()
+        assert left_support and right_support, f"not support binary op for {self} vs {other_st}, {msg}"
+    
+    def check_support_unary_op(self, msg: str = ""):
+        assert self.support_binary_op(), f"not support unary op for {self}, {msg}"
 
     def is_all_child_same(self):
         if len(self.childs) > 0:
@@ -1524,9 +1543,8 @@ class PFLExprInfo:
         else:
             raise NotImplementedError
 
-    def check_support_binary_op_and_promotion(self, other: Self) -> Optional[AnnotatedType]:
-        self.check_support_binary_op()
-        other.check_support_binary_op()
+    def check_support_binary_op_and_promotion(self, op: BinOpType, other: Self) -> Optional[AnnotatedType]:
+        self.check_support_binary_op(op, other)
         support_prompt = [PFLExprType.NUMBER, PFLExprType.BOOL]
         if self.type in support_prompt and other.type in support_prompt:
             if self.annotype is not None and other.annotype is not None:
@@ -1549,10 +1567,6 @@ class PFLExprInfo:
                     return dataclasses.replace(other)
         assert self.is_equal_type(other), f"can't merge {self} and {other}, they are not same type."
         return dataclasses.replace(self)
-
-    def check_support_compare_op(self, msg: str = ""):
-        assert self.support_binary_op(
-        ), f"not support binary op for {self.type}, {msg}"
 
     def support_aug_assign(self):
         return self.type in _TYPE_SUPPORT_BINARY_OP
@@ -1883,13 +1897,15 @@ def mark_pfl_compilable(fn: T) -> T: ...
 def mark_pfl_compilable(fn: None = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
         always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None,
-        constexpr_args: Optional[Sequence[str]] = None) -> Callable[[T], T]: ...
+        constexpr_args: Optional[Sequence[str]] = None,
+        userdata: Optional[dict[str, Any]] = None) -> Callable[[T], T]: ...
 
 @register_pfl_std(mapped_name="compiler_mark_pfl_compilable", backend=None, _internal_disable_type_check=True)
 def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]] = None, 
         inline_run_env_fn: Optional[Callable[[], PFLInlineRunEnv]] = None, is_template: bool = False, 
         always_inline: bool = False, meta: Optional[PFLCompileFuncMeta] = None,
-        constexpr_args: Optional[Sequence[str]] = None) -> Union[T, Callable[[T], T]]:
+        constexpr_args: Optional[Sequence[str]] = None,
+        userdata: Optional[dict[str, Any]] = None) -> Union[T, Callable[[T], T]]:
     def wrapper(fn_wrapped: T) -> T:
         prev_meta: Optional[PFLCompileFuncMeta] = getattr(fn_wrapped, PFL_COMPILE_META_ATTR, None)
         constexpr_args_ = constexpr_args
@@ -1902,7 +1918,7 @@ def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]]
         else:
             if prev_meta is None:
                 prev_meta = PFLCompileFuncMeta(backends, inline_run_env_fn, is_template=is_template, always_inline=always_inline,
-                    constexpr_args=constexpr_args_set)
+                    constexpr_args=constexpr_args_set, userdata=userdata)
                 setattr(fn_wrapped, PFL_COMPILE_META_ATTR, prev_meta)
             else:
                 prev_meta.backends = backends
@@ -1910,6 +1926,7 @@ def mark_pfl_compilable(fn: Optional[T] = None, *, backends: Optional[list[str]]
                 prev_meta.is_template = is_template
                 prev_meta.always_inline = always_inline
                 prev_meta.constexpr_args = constexpr_args_set
+                prev_meta.userdata = userdata
                 prev_meta.validate()
         return cast(T, fn_wrapped)
     if fn is None:

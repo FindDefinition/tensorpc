@@ -293,6 +293,17 @@ class ColorUtil:
         res = perfetto_colors.perfetto_slice_to_color(color).variant.rgb
         return res[0], res[1], res[2]
 
+@register_pfl_std(mapped_name="Common", backend="js")
+@dataclasses.dataclass
+class Common:
+    @staticmethod
+    def getItemPath(obj: Any, attrs: Optional[list[Any]]) -> Any:
+        if attrs is None:
+            return None
+        for attr in attrs:
+            obj = obj[attr]
+        return obj
+
 @register_pfl_std(mapped_name="NdArray", mapped=np.ndarray, backend="js")
 @dataclasses.dataclass
 class NdArray:

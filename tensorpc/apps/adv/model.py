@@ -14,13 +14,15 @@ from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
 from tensorpc.utils.uniquename import UniqueNamePool
 import uuid
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY
+from tensorpc.dock.components import mui 
+import tensorpc.core.pfl as pfl 
 
 class ADVNodeType(enum.IntEnum):
     # contains sub flow
     CLASS = 0
     # may contain sub flow. when have sub flow, don't have code.
     FRAGMENT = 1
-    SYMBOL = 2
+    SYMBOLS = 2
 
 
 
@@ -40,7 +42,17 @@ class InlineCode:
 
 DEFAULT_EXECUTOR_ID = "local"
 
-# @dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
+class Symbol:
+    name: str
+    type: str
+    default: Optional[str] = None
+    # when user select a fragment node, we will use different
+    # border color to highlight it.
+    fragment_selected: bool = False
+    # when user select a variable in code editor,
+    # we will use different style to highlight it.
+    var_selected: bool = False
 
 
 @dataclasses.dataclass
@@ -64,6 +76,8 @@ class ADVNodeModel(BaseNodeModel):
     # fields
     # base classes
     # decorators
+    # --- Symbol node props ---
+    symbols: list[Symbol] = dataclasses.field(default_factory=list)
 
 
 
@@ -230,3 +244,49 @@ class ADVRoot:
 
     def draft_get_cur_model(self):
         return self.draft_get_cur_adv_project().draft_get_cur_model()
+
+    @mui.DataModel.mark_pfl_query_func
+    def get_cur_node_flows(self) -> dict[str, Any]:
+        cur_proj = self.adv_projects[self.cur_adv_project]
+        # cur_flow = cast(Optional[ADVFlowModel], pfl.js.Common.getItemPath(
+        #     cur_proj.flow, cur_proj.cur_path))
+        cur_flow: Optional[ADVFlowModel] = pfl.js.Common.getItemPath(
+            cur_proj.flow, cur_proj.cur_path)
+        res: dict[str, Any] = {
+            "selectedNode": None,
+            "enableCodeEditor": False,
+        }
+        if cur_flow is None:
+            return res
+        selected_node_ids = cur_flow.selected_nodes
+        if len(selected_node_ids) == 1:
+            selected_node = cur_flow.nodes[selected_node_ids[0]]
+            if selected_node.ref_node_id is not None and selected_node.ref_fe_path is not None:
+                real_node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+                    cur_proj.flow, selected_node.ref_fe_path)
+                if real_node is not None:
+                    impl = real_node.impl
+                    if impl is not None:
+                        res["enableCodeEditor"] = True
+            else:
+                impl = selected_node.impl
+                if impl is not None:
+                    res["enableCodeEditor"] = True
+            res["selectedNode"] = selected_node
+            return res
+        else:
+            return res
+
+    @mui.DataModel.mark_pfl_func
+    def get_real_node_by_id(self, node_id: str) -> tuple[Optional[ADVNodeModel], bool]:
+        cur_proj = self.adv_projects[self.cur_adv_project]
+        node_frontend_path = cur_proj.node_id_to_frontend_path[node_id]
+        node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+            cur_proj.flow, node_frontend_path)
+        node_is_ref = False
+        if node is not None:
+            if node.ref_node_id is not None and node.ref_fe_path is not None:
+                node = pfl.js.Common.getItemPath(
+                    cur_proj.flow, node.ref_fe_path)
+                node_is_ref = True
+        return node, node_is_ref

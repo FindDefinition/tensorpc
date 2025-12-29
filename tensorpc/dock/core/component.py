@@ -1190,6 +1190,40 @@ class ContainerBaseProps(BasicProps):
     pass 
     # childs: list[str] = dataclasses_strict.field(default_factory=list)
 
+@dataclasses_strict.dataclass
+class _DataModelPFLQueryDesc:
+    dm: Any
+    func_uid: str 
+    key: str
+    tail_args: Optional[list[Any]] = None
+
+def _preprocess_pfl_func(func: Callable, num_fixed_args: int = 2) -> tuple[Callable, Optional[list[Any]]]:
+    tail_kws = None
+    
+    if isinstance(func, partial):
+        assert not func.args, "args isn't supported in partial, use keywords instead."
+        tail_kws = func.keywords
+        func = func.func
+    assert not inspect.ismethod(func), "use Class.method instead of obj.method"
+    fing_sig = inspect.signature(func)
+    for k, p in fing_sig.parameters.items():
+        assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+    tail_args = None
+    if tail_kws is not None:
+        bind_args = fing_sig.bind_partial(**tail_kws)
+        bind_args.apply_defaults()
+        cnt = 0
+        tail_args = []
+        for k, p in fing_sig.parameters.items():
+            if cnt >= num_fixed_args:
+                assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                tail_args.append(bind_args.arguments[k])
+            else:
+                assert k not in tail_kws, "you can't use partial on first and second argument."
+            cnt += 1
+    else:
+        assert len(fing_sig.parameters) == num_fixed_args, "func must have two arguments, first is self, second is event data."
+    return func, tail_args
 
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
 T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
@@ -1337,32 +1371,7 @@ class _EventSlotBase(Generic[TEventData]):
         # TODO use string targetPath can cause unexpected bugs, consider use draft expr and type check.
         assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
         assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
-        tail_kws = None
-        
-        if isinstance(func, partial):
-            assert not func.args, "args isn't supported in partial, use keywords instead."
-            tail_kws = func.keywords
-            func = func.func
-        assert not inspect.ismethod(func), "use Class.method instead of obj.method"
-        fing_sig = inspect.signature(func)
-        for k, p in fing_sig.parameters.items():
-            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
-        tail_args = undefined
-        if tail_kws is not None:
-            bind_args = fing_sig.bind_partial(**tail_kws)
-            bind_args.apply_defaults()
-            cnt = 0
-            tail_args = []
-            for k, p in fing_sig.parameters.items():
-                if cnt >= 2:
-                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
-                    tail_args.append(bind_args.arguments[k])
-                else:
-                    assert k not in tail_kws, "you can't use partial on first and second argument."
-                cnt += 1
-        else:
-            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
-        
+        func, tail_args = _preprocess_pfl_func(func, num_fixed_args=2)
         func_specs = dm._pfl_library.get_compiled_unit_specs(func)
         assert len(func_specs) == 1, "func can't be template"
         if targetPath != "":
@@ -1371,7 +1380,7 @@ class _EventSlotBase(Generic[TEventData]):
         op = EventFrontendUpdateOp(
             attr="",
             targetPath=undefined if targetPath == "" else targetPath,
-            partialTailArgs=tail_args,
+            partialTailArgs=tail_args if tail_args is not None else undefined,
             pflFuncUid=func_specs[0].uid,
         )
         if not use_immer:
@@ -1602,7 +1611,7 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
 
-        self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str]]] = {}
+        self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str], _DataModelPFLQueryDesc]] = {}
         self._flow_exclude_field_ids: set[int] = set()
 
         # tensorpc will scan your prop dict to find
@@ -1875,10 +1884,13 @@ class Component(Generic[T_base_props, T_child]):
     def get_raw_props(self):
         return self.__raw_props
 
-    def _get_dm_props_for_frontend(self, model_paths):
+    def _get_dm_props_for_frontend(self, model_paths: dict[str, Union[str, tuple["Component", str], _DataModelPFLQueryDesc]]):
         dm_paths_new = {}
         for k, v in model_paths.items():
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                dm_paths_new[k] = (v.dm._flow_uid, (v.func_uid, v.key, v.tail_args))
+
+            elif not isinstance(v, str):
                 dm_paths_new[k] = (v[0]._flow_uid, v[1])
             else:
                 dm_paths_new[k] = v
@@ -1886,14 +1898,20 @@ class Component(Generic[T_base_props, T_child]):
         dm_paths_new_grouped = {}
         id_to_containers = {}
         for k, v in model_paths.items():
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                container = id(v.dm)
+                id_to_containers[container] = v.dm
+
+            elif not isinstance(v, str):
                 container = id(v[0])
                 id_to_containers[id(v[0])] = v[0]
             else:
                 container = None
             if container not in dm_paths_new_grouped:
                 dm_paths_new_grouped[container] = []
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                dm_paths_new_grouped[container].append((k, (v.func_uid, v.key, v.tail_args)))
+            elif not isinstance(v, str):
                 dm_paths_new_grouped[container].append((k, v[1]))
             else:
                 dm_paths_new_grouped[container].append((k, v))
@@ -2040,6 +2058,36 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_data_model_paths.update(new_kwargs)
         return self
 
+    def bind_pfl_query(self, dm: "DataModel", **kwargs: tuple[Callable, str]):
+        for k in kwargs.keys():
+            assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
+        return self.bind_pfl_query_unchecked_dict(dm, kwargs)
+
+    def bind_pfl_query_unchecked_dict(self, dm: "DataModel", kwargs: Mapping[str, tuple[Callable, str]]):
+        assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
+        assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
+        for prop, (func, key) in kwargs.items():
+            if isinstance(func, partial):
+                func_real = func.func 
+            else:
+                func_real = func 
+            meta = pfl.get_compilable_meta(func_real)
+            assert meta is not None 
+            assert meta.userdata is not None 
+            fn_type = meta.userdata["dmFuncType"]
+            assert fn_type in [1, 2], "only support mark_pfl_query_func/mark_pfl_query_nested_func"
+            if fn_type == 1:
+                num_fixed_args = 1
+            else:
+                num_fixed_args = 2
+
+            func, tail_args = _preprocess_pfl_func(func, num_fixed_args=num_fixed_args)
+
+            func_specs = dm._pfl_library.get_compiled_unit_specs(func)
+            assert len(func_specs) == 1, "func can't be template"
+            pfl_func_id = func_specs[0].uid
+            self._flow_data_model_paths[prop] = _DataModelPFLQueryDesc(dm, pfl_func_id, key, tail_args)
+        
     def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
         return self.bind_fields_unchecked_dict(kwargs)
 

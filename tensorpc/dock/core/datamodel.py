@@ -1,16 +1,18 @@
 import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
+import contextvars
 from functools import partial
 import inspect
 import io
 import json
 import time
 from typing import (Any, Callable, Coroutine, Generic, Optional, Type, TypeVar,
-                    Union, cast)
+                    Union, cast, overload)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
+from streamlit import context
 from typing_extensions import Self, TypeAlias, override
 
 from tensorpc.core.annolib import AnnotatedFieldMeta, BackendOnlyProp, DataclassType, child_dataclass_type_generator, get_dataclass_field_meta_dict
@@ -700,6 +702,40 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 partial(DataModel._op_proc, handlers=handlers)):
             yield
 
+    @staticmethod
+    def mark_pfl_update_func(fn: Callable[[T, Any], Any]) -> Callable[[T, Any], Any]:
+        """Mark a function as pfl update function.
+        Update function have two arguments, self and event data.
+        """
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 0,
+        })(fn)
+
+    @staticmethod
+    def mark_pfl_query_func(fn: T) -> T:
+        """Mark a function as pfl cached query function.
+        Cached query function don't have any argument except self, and
+        the result will be cached during each data model update.
+        """
+        
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 1,
+        })(fn)
+
+    @staticmethod
+    def mark_pfl_query_nested_func(fn: T) -> T:
+        """Mark a function as pfl query function.
+        Query function have two arguments, self and path list.        
+        """
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 2,
+        })(fn)
+        
+    @staticmethod
+    def mark_pfl_func(fn: T) -> T:
+        """Mark a function as regular pfl function. can be used by other pfl function.
+        """
+        return pfl.mark_pfl_compilable()(fn)
 
 @dataclasses.dataclass
 class DataPortalProps(ContainerBaseProps):
