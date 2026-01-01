@@ -20,6 +20,8 @@ register_backend("js", PFLParseConfig(
     tuple_assign_must_be_homogeneous=True,
     allow_custom_class=False,
     allow_dynamic_container_literal=True,
+    allow_partial_in_slice=True,
+    allow_remove_optional_based_on_cond=False,
 ))
 
 @register_pfl_std(mapped_name="len", backend="js", mapped=len)

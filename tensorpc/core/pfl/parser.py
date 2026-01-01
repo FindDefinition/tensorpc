@@ -332,8 +332,7 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         if node.value is not None:
             self.visit(node.value)
 
-    def _visit_Attribute_or_name(self, node: Union[ast.Attribute, ast.Name]):
-        # TODO block nesetd function def support
+    def _extract_attr_chain(self, node: ast.AST):
         parts: list[str] = []
         parts_node: list[ast.AST] = []
         cur_node = node
@@ -350,6 +349,13 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 name_found = True
                 is_external_name = cur_node.id in self._global_or_nonlocal_names or cur_node.id in _SUPPORTED_PYTHON_BUILTINS
                 break
+        return parts, parts_node, name_found, is_external_name
+
+    def _visit_Attribute_or_name(self, node: Union[ast.Attribute, ast.Name]):
+        # TODO block nesetd function def support
+        parts, parts_node, name_found, is_external_name = self._extract_attr_chain(
+            node)
+        
         if not name_found or not is_external_name:
             return self.generic_visit(node)
 
@@ -926,6 +932,40 @@ class PFLParser:
             raise PFLAstParseError(f"Unknown error {e}", expr) from e
         return res
 
+    def _get_plain_attribute_chain_name(self, expr: PFLExpr) -> Optional[PFLName]:
+        if isinstance(expr, PFLAttribute):
+            return self._get_plain_attribute_chain_name(expr.value)
+        elif isinstance(expr, PFLName):
+            return expr
+        else:
+            return None
+
+    def _if_test_optional_removal(self, expr: PFLExpr) -> dict[str, Union[PFLAttribute, PFLName]]:
+        # TODO better match
+        res: dict[str, Union[PFLAttribute, PFLName]] = {}
+        if isinstance(expr, PFLBoolOp):
+            if expr.op == BoolOpType.AND:
+                for value in expr.values:
+                    res.update(self._if_test_optional_removal(value)) 
+        elif isinstance(expr, PFLCompare):
+            if expr.op == CompareType.IS_NOT:
+                if isinstance(expr.right, PFLConstant) and expr.right.value is None:
+                    const_node = expr.right
+                    tgt_node = expr.left
+                elif isinstance(expr.left, PFLConstant) and expr.left.value is None:
+                    const_node = expr.left
+                    tgt_node = expr.right
+                else:
+                    const_node = None 
+                    tgt_node = None
+                if const_node is not None and tgt_node is not None:
+                    nested_name = self._get_plain_attribute_chain_name(tgt_node)
+                    if nested_name is not None:
+                        attr_expr = tgt_node
+                        assert isinstance(attr_expr, (PFLAttribute, PFLName))
+                        res[nested_name.id] = attr_expr
+        return res 
+
     def _parse_block_to_pfl_ast(
             self, body: list[ast.stmt],
             scope: dict[str,
@@ -988,10 +1028,12 @@ class PFLParser:
                     else:
                         tgt = stmt.target
                     if isinstance(tgt, ast.Name) and value is not None:
+                        ctx = get_parse_context_checked()
+
                         is_new_var = False
                         if tgt.id not in scope:
                             is_new_var = True
-                        else:
+                        elif not ctx.cfg.allow_var_type_override:
                             value.st.check_convertable(scope[tgt.id],
                                                        "assign value")
                         scope[tgt.id] = value.st
@@ -1000,6 +1042,7 @@ class PFLParser:
                         assert isinstance(target, PFLName)
                         target.is_new = is_new_var
                     elif isinstance(tgt, ast.Tuple) and value is not None:
+                        ctx = get_parse_context_checked()
                         assert value.st.type == PFLExprType.TUPLE, "value type must be tuple"
                         assert len(tgt.elts) == len(
                             value.st.childs), "tuple length must be same"
@@ -1011,14 +1054,13 @@ class PFLParser:
                                 ast.Name), "assign tuple item must be Name"
                             if elt.id not in scope:
                                 is_new_var = True
-                            else:
+                            elif not ctx.cfg.allow_var_type_override:
                                 value.st.childs[i].check_convertable(
                                     scope[elt.id], "assign value")
                             scope[elt.id] = value.st.childs[i]
                             is_new_vars.append(is_new_var)
                         target = self._parse_expr_to_pfl(tgt, scope)
                         assert isinstance(target, PFLTuple)
-                        ctx = get_parse_context_checked()
                         if ctx.cfg.tuple_assign_must_be_homogeneous:
                             assert all(is_new_vars) or not any(is_new_vars), \
                                 "tuple assign must be homogeneous, all new or all old"
@@ -1070,6 +1112,9 @@ class PFLParser:
                 elif isinstance(stmt, ast.If):
                     ctx = get_parse_context_checked()
                     test = self._parse_expr_to_pfl(stmt.test, scope)
+                    # TODO if some special condition (e.g. obj.field is not None),
+                    # create tmp type with optional removed for this object
+                    # in if body scope.
                     if test.is_const and ctx.cfg.inline_constexpr_if:
                         # TODO we can't do constexpr inline when a dependency
                         # isn't a template function.
@@ -1087,9 +1132,16 @@ class PFLParser:
                             return_info.complete = True
                         continue
                     private_scope_if = scope.copy()
+                    if ctx.cfg.allow_remove_optional_based_on_cond:
+                        test_optional_removals = self._if_test_optional_removal(test)
+                        for var_name, attr_expr in test_optional_removals.items():
+                            # TODO support dataclass neste fields
+                            if isinstance(attr_expr, PFLName) and var_name in private_scope_if:
+                                private_scope_if[var_name] = private_scope_if[var_name]._remove_optional()
                     ifbody, if_rinfo = self._parse_block_to_pfl_ast(
                         stmt.body, private_scope_if)
                     private_scope_else = scope.copy()
+                    # TODO support remove-optional in else scope
                     orelse, orelse_rinfo = self._parse_block_to_pfl_ast(
                         stmt.orelse, private_scope_else)
                     if if_rinfo.complete and orelse_rinfo.complete:

@@ -12,7 +12,6 @@ from typing import (Any, Callable, Coroutine, Generic, Optional, Type, TypeVar,
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
-from streamlit import context
 from typing_extensions import Self, TypeAlias, override
 
 from tensorpc.core.annolib import AnnotatedFieldMeta, BackendOnlyProp, DataclassType, child_dataclass_type_generator, get_dataclass_field_meta_dict

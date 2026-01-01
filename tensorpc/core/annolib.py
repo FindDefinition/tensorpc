@@ -3,6 +3,7 @@ https://github.com/wyfo/apischema/blob/master/apischema/typing.py
 https://github.com/pydantic/pydantic/blob/main/pydantic/_internal/_typing_extra.py
 """
 
+import collections.abc
 from collections.abc import Mapping, Sequence
 import copy
 import dataclasses
@@ -20,6 +21,7 @@ from pydantic import (
     GetCoreSchemaHandler, )
 
 from tensorpc import compat
+from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
 
 
@@ -558,6 +560,27 @@ def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], No
     visited = set()
     yield from _child_dataclass_type_generator_recursive(t, visited)
 
+def dataclass_flatten_fields_generator(t: type) -> Generator[tuple[dataclasses.Field, str, Any, Any], None, None]:
+    visited = set()
+    yield from _dataclass_flatten_fields_generator_recursive(t, "", visited)
+
+def _dataclass_flatten_fields_generator_recursive(t: type, prefix: str, visited: set[Any]) -> Generator[tuple[dataclasses.Field, str, Any, Any], None, None]:
+    assert dataclasses.is_dataclass(t) and inspect.isclass(t)
+    type_hints = get_type_hints_with_cache(t, include_extras=True)
+    for field in dataclasses.fields(t):
+        field_type = type_hints[field.name]
+        field_annometa = None
+        prefix = f"{prefix}.{field.name}" if prefix else field.name
+        if is_annotated(t):
+            args = get_args(t)
+            field_type = args[0]
+            field_annometa = t.__metadata__
+            # field_annometa = 
+        yield field, prefix, field_type, field_annometa
+        if dataclasses.is_dataclass(field_type) and inspect.isclass(field_type):
+            yield from _dataclass_flatten_fields_generator_recursive(field_type, prefix, visited)
+
+
 def parse_annotated_function(
     func: Callable,
     is_dynamic_class: bool = False
@@ -653,6 +676,25 @@ def get_dataclass_field_meta_dict(model_type: type[T_dataclass]) -> dict[int, An
     new_field_meta_dict: dict[int, AnnotatedFieldMeta] = {**field_meta_dict}
     return new_field_meta_dict
 
+def unparse_type_expr(expr: Any, get_type_str: Callable[[Any], str] = get_qualname_of_type) -> str:
+    if isinstance(expr, list):
+        return "[" + ", ".join([unparse_type_expr(e) for e in expr]) + "]"
+    module = expr.__module__
+    is_typing = module == "typing" or module == "typing_extensions"
+    if (is_typing or (module == "builtins")):
+        origin = get_origin(expr)
+        if origin is None:
+            return get_qualname_of_type(expr)
+        if origin == collections.abc.Callable:
+            origin_str = "typing.Callable"
+        else:
+            origin_str = get_qualname_of_type(origin)
+        args = get_args(expr)
+        arg_strs = [unparse_type_expr(arg) for arg in args]
+        return f"{origin_str}[{', '.join(arg_strs)}]"
+    else:
+        return get_type_str(expr)
+
 def _main():
 
     class WTF(TypedDict):
@@ -697,6 +739,6 @@ def _main():
 
 def _main_test():
     print(parse_type_may_optional_undefined(tuple[int, ...]))
-
+    print(unparse_type_expr(Callable[[Union[list[int], str]], dict[str, int]]))
 if __name__ == "__main__":
     _main_test()

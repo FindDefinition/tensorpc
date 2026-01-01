@@ -734,12 +734,14 @@ class PFLIfExp(PFLExpr):
         if not allow_partial or not _is_unknown_or_any(self.test.st):
             assert self.test.st.can_cast_to_bool(
             ), f"test must be convertable to bool, but got {self.test.st}"
+        res_st = self.body.st
         if not allow_partial or not operands_has_unk:
-            assert self.body.st.is_equal_type(self.orelse.st), f"body and orelse must be same type, but got {self.body.st} and {self.orelse.st}"
+            msg = f"body and orelse must be same type, but got {self.body.st} and {self.orelse.st}"
+            res_st = self.body.st._check_equal_type_with_unk_any_type_promption(self.orelse.st, msg) 
         if operands_has_unk:
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
         else:
-            self.st = dataclasses.replace(self.body.st)
+            self.st = dataclasses.replace(res_st)
         return self
 
     def consteval(self):
@@ -1613,7 +1615,8 @@ class PFLSubscript(PFLExpr):
     is_store: Union[Undefined, bool] = undefined
 
     def check_and_infer_type(self):
-        allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
+        parse_cfg = get_parse_context_checked().cfg
+        allow_partial = parse_cfg.allow_partial_type_infer
         if _is_unknown_or_any(self.value.st):
             assert allow_partial, f"{self.value}"
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
@@ -1626,7 +1629,7 @@ class PFLSubscript(PFLExpr):
             for s in self.slice:
                 if _is_unknown_or_any(s.st):
                     slice_has_unk = True
-        if slice_has_unk:
+        if slice_has_unk and not parse_cfg.allow_partial_in_slice:
             assert allow_partial, f"{self.slice}"
         assert not self.value.st.is_optional()
         if self.value.st.type == PFLExprType.ARRAY:

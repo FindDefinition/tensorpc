@@ -16,7 +16,7 @@ from typing_extensions import Literal, Self, get_overloads, ParamSpec, ParamSpec
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, DataclassType, T_dataclass,
-                                   Undefined, get_type_hints_with_cache, is_undefined,
+                                   Undefined, get_type_hints_with_cache, is_optional, is_undefined,
                                    parse_type_may_optional_undefined, resolve_type_hints_with_cache,
                                    undefined)
 from tensorpc.core.inspecttools import unwrap_fn_static_cls_property
@@ -201,8 +201,16 @@ class PFLParseConfig:
     # enable partial type infer, for string expr parsing.
     # WARNING: unknown attr call isn't allowed.
     allow_partial_type_infer: bool = False
-
+    # if True, allow empty container literal to be any type.
+    # e.g. `[]` will have type `list[Any]`
     allow_dynamic_container_literal: bool = False
+    # allow type in slice to be unknown/any.
+    allow_partial_in_slice: bool = False
+    # if True, var type can be overridden by later assignment.
+    allow_var_type_override: bool = False
+    # if True, parser will try to remove optional from variable type based on condition
+    # e.g. xxx is not None, WARNING: only support if block and simple cond for now.
+    allow_remove_optional_based_on_cond: bool = False 
 
 @dataclasses.dataclass
 class StaticEvalConfig:
@@ -1464,7 +1472,7 @@ class PFLExprInfo:
         res = cls(PFLExprType.DATACLASS_TYPE, dcls_info=res_info, annotype=parse_type_may_optional_undefined(dcls))
         return res
 
-    def is_equal_type(self, other):
+    def is_equal_type(self, other, check_nested: bool = True):
         if not isinstance(other, PFLExprInfo):
             return False
         if self.type != other.type:
@@ -1484,9 +1492,10 @@ class PFLExprInfo:
             ) is other.get_origin_type_checked()
         if len(self.childs) != len(other.childs):
             return False
-        for i in range(len(self.childs)):
-            if not self.childs[i].is_equal_type(other.childs[i]):
-                return False
+        if check_nested:
+            for i in range(len(self.childs)):
+                if not self.childs[i].is_equal_type(other.childs[i]):
+                    return False
         return True
 
     def can_cast_to_bool(self):
@@ -1711,6 +1720,31 @@ class PFLExprInfo:
         # func info won't be copied to due with template dcls.
         return dataclasses.replace(self, childs=self.childs.copy())
 
+    def _check_equal_type_with_unk_any_type_promption(self, other: Self, msg: str = "") -> Self:
+        unk_or_any_types = [PFLExprType.UNKNOWN, PFLExprType.ANY]
+        self_is_unk_or_any = self.type in unk_or_any_types
+        other_is_unk_or_any = other.type in unk_or_any_types
+        if self_is_unk_or_any:
+            return other 
+        elif other_is_unk_or_any:
+            return self
+        else:
+            assert self.is_equal_type(other, check_nested=False), f"type not match: {self} vs {other}, {msg}"
+            new_childs = []
+            for c1, c2 in zip(self.childs, other.childs):
+                new_childs.append(c1._check_equal_type_with_unk_any_type_promption(c2))
+            return dataclasses.replace(self, childs=new_childs)
+
+    def _remove_optional(self):
+        # TODO deal with undefined
+        if self.has_optional:
+            annotype = self.annotype
+            if annotype is not None:
+                annotype = dataclasses.replace(annotype, is_optional=False)
+            res = dataclasses.replace(self, annotype=annotype)
+            res.has_optional = False
+            return res
+        return self
 
 def param_fn(name: str, anno: Any, default: Any = inspect.Parameter.empty):
     # since js don't support keyword, we don't need to care about kw.

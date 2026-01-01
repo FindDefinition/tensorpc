@@ -4796,17 +4796,9 @@ class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
     dataList: List[Any] = dataclasses.field(default_factory=list)
     idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined
-
-    # variant?: "default" | "list"
-    # filter?: string
-    # filterKey?: string
-
-    # // for list only
-    # disablePadding?: boolean
-    # dense?: boolean
-    # divider?: boolean
-    # disableGutters?: boolean
-    variant: Union[Undefined, Literal["default", "list"]] = undefined
+    # if fragment, all flexbox-related attrs and event handlers
+    # are ignored
+    variant: Union[Undefined, Literal["default", "list", "fragment"]] = undefined
     filter: Union[Undefined, str] = undefined
     filterKey: Union[Undefined, str] = undefined
 

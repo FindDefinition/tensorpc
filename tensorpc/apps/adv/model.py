@@ -9,11 +9,7 @@ from tensorpc.dock.components.models.flow import BaseNodeModel, BaseEdgeModel, B
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import tensorpc.core.datamodel as D
-import dataclasses as dataclasses_relaxed
-from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
-from tensorpc.utils.uniquename import UniqueNamePool
 import uuid
-from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY
 from tensorpc.dock.components import mui 
 import tensorpc.core.pfl as pfl 
 
@@ -23,6 +19,10 @@ class ADVNodeType(enum.IntEnum):
     # may contain sub flow. when have sub flow, don't have code.
     FRAGMENT = 1
     SYMBOLS = 2
+    GLOBAL_SCRIPT = 3
+    # user need to connect node output handle to this node
+    # to indicate outputs of this flow.
+    OUT_INDICATOR = 4
 
 
 
@@ -54,6 +54,25 @@ class Symbol:
     # we will use different style to highlight it.
     var_selected: bool = False
 
+@dataclasses.dataclass(kw_only=True)
+class ADVNodeHandle:
+    id: str
+    # display name
+    name: str
+    type: str
+    is_input: bool
+    symbol_name: str = ""
+    default: Optional[str] = None
+    # when user select a fragment node, we will use different
+    # border color to highlight it.
+    fragment_selected: bool = False
+    # when user select a variable in code editor,
+    # we will use different style to highlight it.
+    var_selected: bool = False
+
+    conn_node_id: Optional[str] = None
+    conn_handle_id: Optional[str] = None
+
 
 @dataclasses.dataclass
 class ADVNodeModel(BaseNodeModel):
@@ -67,18 +86,19 @@ class ADVNodeModel(BaseNodeModel):
     path: list[str] = dataclasses.field(default_factory=list)
 
     impl: Optional[InlineCode] = None
+    # when this node have nested flow, this is the import code to import libraries.
     # if two node share same impl, this stores the key to original node.
     ref_fe_path: Optional[list[str]] = None
     ref_node_id: Optional[str] = None
+
+    handles: list[ADVNodeHandle] = dataclasses.field(default_factory=list)
+
     # --- fragment node props ---
 
     # --- class node props ---
     # fields
     # base classes
     # decorators
-    # --- Symbol node props ---
-    symbols: list[Symbol] = dataclasses.field(default_factory=list)
-
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -147,15 +167,15 @@ class ADVProject:
         node_id_to_path: dict[str, list[str]] = {}
         node_id_to_frontend_path: dict[str, list[str]] = {}
 
-        def _assign(node: ADVNodeModel, frontend_path: list[str], path: list[str]):
+        def _assign(node: ADVNodeModel, frontend_path: list[str], path: list[str], depth: int):
             node.frontend_path = frontend_path
             node_id_to_path[node.id] = path
             node_id_to_frontend_path[node.id] = frontend_path
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
-                    _assign(n, frontend_path + ["nodes", n_id], path + [n.name])
+                    _assign(n, frontend_path + ["flow", "nodes", n_id], path + [n.name], depth + 1)
         for n_id, n in self.flow.nodes.items():
-            _assign(n, ["nodes", n_id], [n.name])
+            _assign(n, ["nodes", n_id], [n.name], 0)
         return node_id_to_path, node_id_to_frontend_path
 
     def update_ref_path(self, node_id_to_frontend_path: dict[str, list[str]]):
@@ -165,10 +185,14 @@ class ADVProject:
                 node.ref_fe_path = node_id_to_frontend_path[node.ref_node_id]
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
-                    _update(n, path + ["nodes", n_id])
+                    _update(n, path + ["flow", "nodes", n_id])
         for n_id, n in self.flow.nodes.items():
             _update(n, ["nodes", n_id])
         return 
+
+    @staticmethod 
+    def get_node_id_path_from_fe_path(fe_path: list[str]) -> list[str]:
+        return fe_path[1::3]
 
     def draft_get_node_by_id(self,
                         node_id: str):
@@ -286,7 +310,68 @@ class ADVRoot:
         node_is_ref = False
         if node is not None:
             if node.ref_node_id is not None and node.ref_fe_path is not None:
-                node = pfl.js.Common.getItemPath(
+                node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
                     cur_proj.flow, node.ref_fe_path)
                 node_is_ref = True
         return node, node_is_ref
+
+
+    @mui.DataModel.mark_pfl_query_nested_func
+    def get_handle(self, paths: list[Any], node_id: str) -> dict[str, Any]:
+        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
+        res: dict[str, Any] = {}
+        if real_node is not None:
+            handle_idx: int = paths[0]
+            handle = real_node.handles[handle_idx]
+            is_input = handle.is_input
+            res = {
+                "id": handle.id,
+                "name": handle.name,
+                "type": handle.type,
+                "htype": "target" if is_input else "source",
+                "hpos": "left" if is_input else "right",
+                "textAlign": "start" if is_input else "end",
+                "is_input": is_input,
+            }
+            if is_input:
+                res["hborder"] = "1px solid #4caf50"
+        return res
+
+    @mui.DataModel.mark_pfl_query_nested_func
+    def get_right_icon(self, paths: list[Any], node_id: str) -> dict[str, Any]:
+        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
+        res: dict[str, Any] = {}
+        if real_node is not None:
+            icon_idx: int = paths[0]
+            icons = [] if not real_node_is_ref else [mui.IconType.Shortcut]
+            res = {
+                "icon": icons[icon_idx],
+            }
+        return res
+
+    @mui.DataModel.mark_pfl_query_func
+    def get_node_frontend_props(self, node_id: str) -> dict[str, Any]:
+        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
+        res: dict[str, Any] = {}
+        if real_node is not None:
+            if real_node.nType == ADVNodeType.CLASS:
+                icon_type = mui.IconType.DataObject
+            elif real_node.nType == ADVNodeType.FRAGMENT:
+                icon_type = mui.IconType.Code
+            else:
+                icon_type = mui.IconType.Info
+
+            res = {
+                "id": real_node.id,
+                "header": real_node.name,
+                "iconType": icon_type,
+                "isRef": real_node_is_ref,
+                "bottomMsg": "hello world!",
+                "handles": real_node.handles,
+                # "htype": "target" if is_input else "source",
+                # "hpos": "left" if is_input else "right",
+                # "textAlign": "start" if is_input else "end",
+            }
+            # if is_input:
+            #     res["hborder"] = "1px solid #4caf50"
+        return res

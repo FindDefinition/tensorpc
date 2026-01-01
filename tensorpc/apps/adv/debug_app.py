@@ -1,3 +1,4 @@
+from tensorpc.apps.adv.nodes.base import BaseNodeWrapper
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -7,8 +8,9 @@ from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Optional, Any
-from tensorpc.apps.adv.model import ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.apps.adv.model import ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 from tensorpc.core.datamodel.draft import (get_draft_pflpath)
+from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 
 class App:
     @mark_create_layout
@@ -16,8 +18,27 @@ class App:
         adv_proj = {
             "project": ADVProject(
                 flow=ADVFlowModel(nodes={
-                    "n1": ADVNodeModel(id="n1", position=flowui.XYPosition(0, 0), name="Node 1",
-                        impl=InlineCode()),
+                    "n1": ADVNodeModel(
+                        id="n1", 
+                        position=flowui.XYPosition(0, 0), 
+                        name="Node 1",
+                        impl=InlineCode(),
+                        handles=[
+                            ADVNodeHandle(
+                                id="in1",
+                                name="Input 1",
+                                type="number",
+                                is_input=True,
+                            ),
+                            ADVNodeHandle(
+                                id="out1",
+                                name="Output 1",
+                                type="number",
+                                is_input=False,
+                            ),
+
+                        ]
+                    ),
 
                     "n2": ADVNodeModel(id="n2", position=flowui.XYPosition(0, 100), name="Node 2 (Nested)",
                         flow=ADVFlowModel(nodes={
@@ -66,16 +87,17 @@ class App:
             ]).prop(flex=1, overflow="hidden"),
             editor_ct,
         ]).prop(flex=1, overflow="hidden"))
-
-        self.dm = mui.DataModel(model, [
-            mui.VBox([
+        graph_container = mui.VBox([
                 mui.HBox([
                     path_breadcrumb
                 ]).prop(minHeight="24px"),
                 self.graph,
-            ]).prop(flex=1),
+            ]).prop(flex=1)
+        self.dm = mui.DataModel(model, [
+            graph_container,
             detail_ct,
         ])
+        graph_container.update_raw_props(default_compute_flow_css())
 
         draft = self.dm.get_draft()
         cur_root_proj = draft.draft_get_cur_adv_project()
@@ -122,6 +144,11 @@ class App:
         comp = mui.VBox([
             mui.Typography(f"Node-{node.name}" if node.flow is None else "Nested Flow"),
         ])
+        comp = BaseNodeWrapper(
+            node_id,
+            self.dm,
+            ADVNodeType.SYMBOLS,
+        )
         ui_node = flowui.Node(type="app", 
             id=node.id, 
             data=flowui.NodeData(component=comp, label=node.name), 
@@ -145,7 +172,7 @@ class App:
         draft = self.dm.get_draft().draft_get_cur_adv_project()
         # we have to clear selection before switch flow because xyflow don't support controlled selection.
         # xyflow will clear previous selection and send clear-selection event when flow is switched.
-        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_node = None
+        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
         draft.cur_path = new_path_val
 
     def handle_breadcrumb_click(self, data: list[str]):
@@ -156,7 +183,7 @@ class App:
         draft = self.dm.get_draft().draft_get_cur_adv_project()
         # we have to clear selection before switch flow because xyflow don't support controlled selection.
         # xyflow will clear previous selection and send clear-selection event when flow is switched.
-        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_node = None
+        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
         draft.cur_path = res_path
 
     # def add_node(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):

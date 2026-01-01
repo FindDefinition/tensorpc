@@ -98,6 +98,7 @@ class IconType(enum.IntEnum):
     KeyboardArrowUp = 81
     KeyboardDoubleArrowDown = 82
     KeyboardDoubleArrowUp = 83
+    Shortcut = 84
 
 @dataclasses.dataclass
 class MenuItem:

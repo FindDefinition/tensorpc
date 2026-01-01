@@ -38,7 +38,7 @@ from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                               UIType, Undefined, undefined)
 from .mui import (ContainerBaseProps, LayoutType, MUIBasicProps,
                   MUIComponentBase, MUIComponentBaseProps, MUIComponentType,
-                  MUIContainerBase, MUIFlexBoxProps, MenuItem, Theme,
+                  MUIContainerBase, FlexBoxProps, MenuItem, Theme,
                   ValueType)
 
 _T = TypeVar("_T", bound=Component)
@@ -1672,7 +1672,7 @@ def enter_flow_ui_context(flow: "Flow"):
 
 
 @dataclasses.dataclass
-class HandleProps(MUIFlexBoxProps):
+class HandleProps(FlexBoxProps):
     type: Union[Literal["source", "target"], Undefined] = undefined
     handledPosition: Union[Literal["left", "top", "right", "bottom"],
                            Undefined] = undefined

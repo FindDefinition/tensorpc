@@ -1195,7 +1195,7 @@ class _DataModelPFLQueryDesc:
     dm: Any
     func_uid: str 
     key: str
-    tail_args: Optional[list[Any]] = None
+    query_desc: Any
 
 def _preprocess_pfl_func(func: Callable, num_fixed_args: int = 2) -> tuple[Callable, Optional[list[Any]]]:
     tail_kws = None
@@ -1888,7 +1888,7 @@ class Component(Generic[T_base_props, T_child]):
         dm_paths_new = {}
         for k, v in model_paths.items():
             if isinstance(v, _DataModelPFLQueryDesc):
-                dm_paths_new[k] = (v.dm._flow_uid, (v.func_uid, v.key, v.tail_args))
+                dm_paths_new[k] = (v.dm._flow_uid, (v.func_uid, v.key, v.query_desc))
 
             elif not isinstance(v, str):
                 dm_paths_new[k] = (v[0]._flow_uid, v[1])
@@ -1910,7 +1910,7 @@ class Component(Generic[T_base_props, T_child]):
             if container not in dm_paths_new_grouped:
                 dm_paths_new_grouped[container] = []
             if isinstance(v, _DataModelPFLQueryDesc):
-                dm_paths_new_grouped[container].append((k, (v.func_uid, v.key, v.tail_args)))
+                dm_paths_new_grouped[container].append((k, (v.func_uid, v.key, v.query_desc)))
             elif not isinstance(v, str):
                 dm_paths_new_grouped[container].append((k, v[1]))
             else:
@@ -2060,7 +2060,7 @@ class Component(Generic[T_base_props, T_child]):
 
     def bind_pfl_query(self, dm: "DataModel", **kwargs: tuple[Callable, str]):
         for k in kwargs.keys():
-            assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
+            assert k in self._prop_field_names, f"overrided prop must be defined in props class {self.__prop_cls}, {k}"
         return self.bind_pfl_query_unchecked_dict(dm, kwargs)
 
     def bind_pfl_query_unchecked_dict(self, dm: "DataModel", kwargs: Mapping[str, tuple[Callable, str]]):
@@ -2082,11 +2082,34 @@ class Component(Generic[T_base_props, T_child]):
                 num_fixed_args = 2
 
             func, tail_args = _preprocess_pfl_func(func, num_fixed_args=num_fixed_args)
-
+            if tail_args is not None:
+                for arg in tail_args:
+                    assert isinstance(arg, (str, int, float, bool)), "only support primitive tail args in pfl query"
             func_specs = dm._pfl_library.get_compiled_unit_specs(func)
             assert len(func_specs) == 1, "func can't be template"
             pfl_func_id = func_specs[0].uid
-            self._flow_data_model_paths[prop] = _DataModelPFLQueryDesc(dm, pfl_func_id, key, tail_args)
+            fn_cache_key = pfl_func_id
+            if fn_type == 1 and tail_args is not None:
+                fn_cache_key_parts = [pfl_func_id]
+                for arg in tail_args:
+                    if isinstance(arg, float):
+                        prefix = "f"
+                    elif isinstance(arg, bool):
+                        prefix = "b"
+                    elif isinstance(arg, int):
+                        prefix = "i"
+                    else:
+                        prefix = "s"
+                    fn_cache_key_parts.append(f"{prefix}:{arg}")
+                fn_cache_key = UniqueTreeId.from_parts(fn_cache_key_parts).uid_encoded
+            query_desc: dict[str, Any] = {
+                "tailQueryUid": fn_cache_key,
+                "dmFuncType": fn_type,
+            }
+            if tail_args is not None:
+                query_desc["tailArgs"] = tail_args
+            self._flow_data_model_paths[prop] = _DataModelPFLQueryDesc(dm, pfl_func_id, key, query_desc)
+        return self 
         
     def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
         return self.bind_fields_unchecked_dict(kwargs)
