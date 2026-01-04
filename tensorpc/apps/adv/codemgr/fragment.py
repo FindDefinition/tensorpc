@@ -1,12 +1,11 @@
 import ast
 import inspect
 from typing import Any, Self, Union
-from git import Optional
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
 
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
 
 @dataclasses.dataclass
@@ -240,8 +239,10 @@ class FragmentParser:
             output_handles.append(sym_handle)
         input_handles: list[BackendHandle] = []
         for sym_name, sym_handle in name_to_sym.items():
-            sym_handle.target_id_pairs.append((node_id, sym_handle.handle.id))
-            input_handles.append(sym_handle.copy())
+            sym_handle.target_node_handle_id.add((node_id, sym_handle.handle.id))
+            sym_handle = sym_handle.copy(prefix=ADVHandlePrefix.Input)
+            sym_handle.handle.is_input = True
+            input_handles.append(sym_handle)
         # make order of input handles stable.
         input_handles.sort(key=lambda h: h.index)
         if output_desc.type == "single":

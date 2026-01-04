@@ -2089,7 +2089,7 @@ class Component(Generic[T_base_props, T_child]):
             assert len(func_specs) == 1, "func can't be template"
             pfl_func_id = func_specs[0].uid
             fn_cache_key = pfl_func_id
-            if fn_type == 1 and tail_args is not None:
+            if tail_args is not None:
                 fn_cache_key_parts = [pfl_func_id]
                 for arg in tail_args:
                     if isinstance(arg, float):

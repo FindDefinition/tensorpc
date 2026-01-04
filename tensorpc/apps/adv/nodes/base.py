@@ -70,8 +70,8 @@ class BaseNodeWrapper(mui.FlexBox):
         ])
         icon.bind_pfl_query(dm, 
             icon=(get_node_fn, "iconType"))
-        icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small")
-        icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small")
+        icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small", muiColor="primary")
+        icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small", muiColor="primary")
         icon_is_shortcut.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isRef"))
         icon_is_main_flow.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isMainFlow"))
 

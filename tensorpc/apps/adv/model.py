@@ -36,7 +36,7 @@ class InlineCodeInfo:
     path: str
     lineno: int
 
-@dataclasses.dataclass(kw_only=True)
+@dataclasses.dataclass
 class InlineCode:
     code: str = "## let's write some code here..."
 
@@ -54,6 +54,12 @@ class Symbol:
     # we will use different style to highlight it.
     var_selected: bool = False
 
+class ADVHandlePrefix:
+    Input = "inp"
+    Output = "out"
+    OutIndicator = "oic"
+
+
 @dataclasses.dataclass(kw_only=True)
 class ADVNodeHandle:
     id: str
@@ -69,11 +75,13 @@ class ADVNodeHandle:
     # when user select a variable in code editor,
     # we will use different style to highlight it.
     var_selected: bool = False
-    # this store all qual names that this handle type depend on.
-    # e.g. list[torch.Tensor] will have ["torch::Tensor"]
+    # this store all qualified names that this handle type depend on.
+    # e.g. list[torch.Tensor] will have ["torch.Tensor"]
     type_dep_qnames: list[str] = dataclasses.field(default_factory=list)
     source_node_id: Optional[str] = None
     source_handle_id: Optional[str] = None
+    is_sym_handle: bool = False
+    sym_depth: int = -1
 
     
 
@@ -84,7 +92,10 @@ class ADVNodeModel(BaseNodeModel):
     nType: int = ADVNodeType.FRAGMENT.value
     # subflow props
     flow: Optional["ADVFlowModel"] = None
+    # set after parse
     name: str = ""
+    handles: list[ADVNodeHandle] = dataclasses.field(default_factory=list)
+
     # tmp field, set when load adv project
     frontend_path: list[str] = dataclasses.field(default_factory=list)
     path: list[str] = dataclasses.field(default_factory=list)
@@ -95,7 +106,6 @@ class ADVNodeModel(BaseNodeModel):
     ref_fe_path: Optional[list[str]] = None
     ref_node_id: Optional[str] = None
 
-    handles: list[ADVNodeHandle] = dataclasses.field(default_factory=list)
     inline_subflow_name: Optional[str] = None
     # --- fragment node props ---
 
@@ -169,6 +179,20 @@ class ADVProject:
             else:
                 return None
         return cast(Optional[ADVFlowModel], cur_obj)
+
+    def get_flow_node_by_fe_path(self, frontend_path: list[str]) -> Optional[tuple["ADVFlowModel", ADVNodeModel]]:
+        id_path = self.get_node_id_path_from_fe_path(frontend_path)
+        cur_parent = self.flow
+        cur_node: Optional[ADVNodeModel] = None
+        for i, node_id in enumerate(id_path):
+            cur_node = cur_parent.nodes[node_id]
+            if i != len(id_path) - 1:
+                if cur_node.flow is None:
+                    return None
+                cur_parent = cur_node.flow
+        if cur_node is None:
+            return None
+        return (cur_parent, cur_node)
 
     def assign_path_to_all_node(self):
         node_id_to_path: dict[str, list[str]] = {}
@@ -322,7 +346,6 @@ class ADVRoot:
                 node_is_ref = True
         return node, node_is_ref
 
-
     @mui.DataModel.mark_pfl_query_nested_func
     def get_handle(self, paths: list[Any], node_id: str) -> dict[str, Any]:
         real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
@@ -334,10 +357,10 @@ class ADVRoot:
             res = {
                 "id": handle.id,
                 "name": handle.name,
-                "type": handle.type,
-                "htype": "target" if is_input else "source",
+                "type_anno": handle.type,
+                "type": "target" if is_input else "source",
                 "hpos": "left" if is_input else "right",
-                "textAlign": "start" if is_input else "end",
+                "textAlign": "start" if (is_input or handle.is_sym_handle) else "end",
                 "is_input": is_input,
             }
             if is_input:
@@ -363,7 +386,7 @@ class ADVRoot:
                 "isRef": real_node_is_ref,
                 "bottomMsg": "hello world!",
                 "handles": real_node.handles,
-                "isMainFlow": not real_node_is_ref and real_node.is_main_flow_node,
+                "isMainFlow": not real_node_is_ref and real_node.inline_subflow_name is not None,
                 # "htype": "target" if is_input else "source",
                 # "hpos": "left" if is_input else "right",
                 # "textAlign": "start" if is_input else "end",

@@ -564,21 +564,21 @@ def dataclass_flatten_fields_generator(t: type) -> Generator[tuple[dataclasses.F
     visited = set()
     yield from _dataclass_flatten_fields_generator_recursive(t, "", visited)
 
-def _dataclass_flatten_fields_generator_recursive(t: type, prefix: str, visited: set[Any]) -> Generator[tuple[dataclasses.Field, str, Any, Any], None, None]:
+def _dataclass_flatten_fields_generator_recursive(t: type, qname: str, visited: set[Any]) -> Generator[tuple[dataclasses.Field, str, Any, Any], None, None]:
     assert dataclasses.is_dataclass(t) and inspect.isclass(t)
     type_hints = get_type_hints_with_cache(t, include_extras=True)
     for field in dataclasses.fields(t):
         field_type = type_hints[field.name]
         field_annometa = None
-        prefix = f"{prefix}.{field.name}" if prefix else field.name
+        qname_cur = f"{qname}.{field.name}" if qname else field.name
         if is_annotated(t):
             args = get_args(t)
             field_type = args[0]
             field_annometa = t.__metadata__
             # field_annometa = 
-        yield field, prefix, field_type, field_annometa
+        yield field, qname_cur, field_type, field_annometa
         if dataclasses.is_dataclass(field_type) and inspect.isclass(field_type):
-            yield from _dataclass_flatten_fields_generator_recursive(field_type, prefix, visited)
+            yield from _dataclass_flatten_fields_generator_recursive(field_type, qname_cur, visited)
 
 
 def parse_annotated_function(
