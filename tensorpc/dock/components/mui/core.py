@@ -559,9 +559,27 @@ class IconBaseProps:
         #         'you must use mui.IconButton.encode_svg to encode svg string')
         return v
 
+@dataclasses.dataclass
+class IconOptionalBaseProps:
+    icon: Union[IconType, str, Undefined] = undefined
+    iconSize: Union[Literal["small", "medium", "large", "inherit"],
+                    Undefined] = undefined
+    iconFontSize: Union[ValueType, Undefined] = undefined
+
+    @field_validator('icon')
+    def svg_validator(cls, v):
+        if isinstance(v, Undefined):
+            return v
+        if isinstance(v, int):
+            return v
+        # if not v.startswith('data:image/svg+xml;base64'):
+        #     raise ValueError(
+        #         'you must use mui.IconButton.encode_svg to encode svg string')
+        return v
 
 @dataclasses.dataclass
-class IconProps(BasicProps, IconBaseProps, TooltipBaseProps):
+class IconProps(BasicProps, IconOptionalBaseProps, TooltipBaseProps):
+    show: Union[bool, Undefined] = undefined
     takeDragRef: Union[Undefined, bool] = undefined
     tooltip: Union[str, Undefined] = undefined
     muiColor: Union[_IconColorNoDefault, Undefined] = undefined
@@ -569,11 +587,11 @@ class IconProps(BasicProps, IconBaseProps, TooltipBaseProps):
 
 class Icon(MUIComponentBase[IconProps]):
 
-    def __init__(self, icon: Union[IconType, str]) -> None:
+    def __init__(self, icon: Union[IconType, str, Undefined] = undefined) -> None:
         super().__init__(UIType.Icon, IconProps)
         if isinstance(icon, IconType):
             self.props.icon = icon
-        else:
+        elif not isinstance(icon, Undefined):
             self.prop(icon=self.encode_svg(icon))
 
     @staticmethod

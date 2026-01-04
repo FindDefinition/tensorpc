@@ -1677,6 +1677,8 @@ class HandleProps(FlexBoxProps):
     handledPosition: Union[Literal["left", "top", "right", "bottom"],
                            Undefined] = undefined
     isConnectable: Union[bool, Undefined] = undefined
+    isConnectableStart: Union[bool, Undefined] = undefined
+    isConnectableEnd: Union[bool, Undefined] = undefined
     style: Union[Undefined, Any] = undefined
     id: Union[Undefined, str] = undefined
     className: Union[Undefined, str] = undefined

@@ -70,11 +70,15 @@ class BaseNodeWrapper(mui.FlexBox):
         ])
         icon.bind_pfl_query(dm, 
             icon=(get_node_fn, "iconType"))
-        icons = mui.Icon(mui.IconType.Add).prop(iconSize="small")
-        icons.bind_pfl_query(dm, icon=(partial(ADVRoot.get_right_icon, node_id=node_id), "icon"))
-        header_icons = mui.DataFlexBox(icons).prop(className=ComputeFlowClasses.HeaderIcons)
-        header_icons.bind_pfl_query(dm, 
-            dataList=(get_node_fn, "rightIcons"))
+        icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small")
+        icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small")
+        icon_is_shortcut.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isRef"))
+        icon_is_main_flow.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isMainFlow"))
+
+        header_icons = mui.HBox([
+            icon_is_shortcut,
+            icon_is_main_flow,
+        ])
         header_container = mui.HBox([
             icon_container,
             header,

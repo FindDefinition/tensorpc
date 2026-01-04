@@ -1,11 +1,12 @@
 import ast
 import inspect
-from typing import Any, Union
+from typing import Any, Self, Union
+from git import Optional
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.apps.adv.codemgr.core import BaseParseResult
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
 
-from tensorpc.apps.adv.model import ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVNodeModel, ADVNodeHandle
 import hashlib
 
 @dataclasses.dataclass
@@ -20,11 +21,28 @@ class FragmentOutputDesc:
     
 @dataclasses.dataclass(kw_only=True)
 class FragmentParseResult(BaseParseResult):
-    input_handles: list[ADVNodeHandle]
-    output_handles: list[ADVNodeHandle]
+    input_handles: list[BackendHandle]
+    output_handles: list[BackendHandle]
     out_type: Literal["single", "tuple", "dict"]
     out_type_anno: str
 
+    def copy(self, node_id: str) -> Self:
+        new_output_handles: list[BackendHandle] = []
+        for h in self.output_handles:
+            new_h = h.copy(node_id)
+            new_output_handles.append(new_h)
+
+        new_input_handles: list[BackendHandle] = []
+        for h in self.input_handles:
+            new_h = h.copy()
+            h.handle.source_node_id = None
+            h.handle.source_handle_id = None
+            new_input_handles.append(new_h)
+        return dataclasses.replace(
+            self,
+            input_handles=new_input_handles,
+            output_handles=new_output_handles,
+        )
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:
@@ -159,9 +177,9 @@ def _parse_mark_outputs_ast(node: ast.Call) -> FragmentOutputDesc:
 
 class _ExtractSymbolFromFragment:
     def __init__(self):
-        self._assigned_symbols: dict[str, ADVNodeHandle] = {} 
+        self._assigned_symbols: dict[str, BackendHandle] = {} 
 
-    def _extract_symbol_from_node(self, root: ast.AST, scope: dict[str, Any]):
+    def _extract_symbol_from_node(self, root: ast.AST, scope: dict[str, BackendHandle]):
         for node in ast.walk(root):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 name = node.id
@@ -191,7 +209,7 @@ class _ExtractSymbolFromFragment:
 
 
 class FragmentParser:
-    def parse_fragment(self, code: str, global_scope: dict[str, Any], cur_scope: dict[str, ADVNodeHandle], is_flow_mode: bool = False):
+    def parse_fragment(self, node_id: str, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle]):
         tree = ast.parse(code) 
         chain_finder = _ChainAttrFinder(global_scope)
         chain_finder.visit(tree)
@@ -209,23 +227,27 @@ class FragmentParser:
         symbol_extractor.parse_block(tree.body, local_scope)
         name_to_sym = symbol_extractor._assigned_symbols
 
-        output_handles: list[ADVNodeHandle] = []
+        output_handles: list[BackendHandle] = []
         for sym_name, alias in output_desc.mapping.items():
+            # TODO better error here.
             assert sym_name in cur_scope, \
                 f"Output symbol {sym_name} not found in global scope"
-            sym_handle = cur_scope[sym_name]
-            out_handle = dataclasses.replace(sym_handle, name=alias)
-            output_handles.append(out_handle)
-            if is_flow_mode:
-                cur_scope[alias] = out_handle
-        input_handles: list[ADVNodeHandle] = []
+            sym_handle = cur_scope[sym_name].copy()
+            sym_handle.handle.source_node_id = node_id
+            sym_handle.handle.source_handle_id = sym_handle.handle.id
+            sym_handle.handle.name = alias
+            sym_handle.handle.symbol_name = alias
+            output_handles.append(sym_handle)
+        input_handles: list[BackendHandle] = []
         for sym_name, sym_handle in name_to_sym.items():
-            input_handles.append(dataclasses.replace(sym_handle))
-
+            sym_handle.target_id_pairs.append((node_id, sym_handle.handle.id))
+            input_handles.append(sym_handle.copy())
+        # make order of input handles stable.
+        input_handles.sort(key=lambda h: h.index)
         if output_desc.type == "single":
-            out_type_anno = output_handles[0].type
+            out_type_anno = output_handles[0].handle.type
         elif output_desc.type == "tuple":
-            out_type_anno = f"tuple[{', '.join([h.type for h in output_handles])}]"
+            out_type_anno = f"tuple[{', '.join([h.handle.type for h in output_handles])}]"
         else:
             out_type_anno = f"dict[str, Any]"
         return FragmentParseResult(

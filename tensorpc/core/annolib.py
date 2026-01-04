@@ -679,18 +679,36 @@ def get_dataclass_field_meta_dict(model_type: type[T_dataclass]) -> dict[int, An
 def unparse_type_expr(expr: Any, get_type_str: Callable[[Any], str] = get_qualname_of_type) -> str:
     if isinstance(expr, list):
         return "[" + ", ".join([unparse_type_expr(e) for e in expr]) + "]"
+    if expr is Ellipsis:
+        return "..."
     module = expr.__module__
+    # TODO support TypeVar, ParamSpec, etc.
     is_typing = module == "typing" or module == "typing_extensions"
     if (is_typing or (module == "builtins")):
         origin = get_origin(expr)
         if origin is None:
-            return get_qualname_of_type(expr)
+            # should be builtin
+            if module == "builtins":
+                return get_qualname_of_type(expr)
+            else:
+                return get_type_str(expr)
         if origin == collections.abc.Callable:
-            origin_str = "typing.Callable"
+            origin = Callable
+        if origin == Literal:
+            origin_str = get_type_str(Literal)
+            args = get_args(expr)
+            arg_strs = [repr(arg) for arg in args]
+            return f"{origin_str}[{', '.join(arg_strs)}]"
+        if is_annotated(expr):
+            # don't support unparse annotated.
+            return unparse_type_expr(get_args(expr)[0], get_type_str)
+        if module == "builtins":
+            origin_str = get_qualname_of_type(expr)
         else:
-            origin_str = get_qualname_of_type(origin)
+            origin_str = get_type_str(expr)
+
         args = get_args(expr)
-        arg_strs = [unparse_type_expr(arg) for arg in args]
+        arg_strs = [unparse_type_expr(arg, get_type_str) for arg in args]
         return f"{origin_str}[{', '.join(arg_strs)}]"
     else:
         return get_type_str(expr)
@@ -739,6 +757,6 @@ def _main():
 
 def _main_test():
     print(parse_type_may_optional_undefined(tuple[int, ...]))
-    print(unparse_type_expr(Callable[[Union[list[int], str]], dict[str, int]]))
+    print(unparse_type_expr(Callable[[Union[list[int], str, Literal["wtf"]]], dict[str, int]]))
 if __name__ == "__main__":
     _main_test()

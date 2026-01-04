@@ -69,9 +69,13 @@ class ADVNodeHandle:
     # when user select a variable in code editor,
     # we will use different style to highlight it.
     var_selected: bool = False
+    # this store all qual names that this handle type depend on.
+    # e.g. list[torch.Tensor] will have ["torch::Tensor"]
+    type_dep_qnames: list[str] = dataclasses.field(default_factory=list)
+    source_node_id: Optional[str] = None
+    source_handle_id: Optional[str] = None
 
-    conn_node_id: Optional[str] = None
-    conn_handle_id: Optional[str] = None
+    
 
 
 @dataclasses.dataclass
@@ -92,7 +96,7 @@ class ADVNodeModel(BaseNodeModel):
     ref_node_id: Optional[str] = None
 
     handles: list[ADVNodeHandle] = dataclasses.field(default_factory=list)
-
+    inline_subflow_name: Optional[str] = None
     # --- fragment node props ---
 
     # --- class node props ---
@@ -100,9 +104,12 @@ class ADVNodeModel(BaseNodeModel):
     # base classes
     # decorators
 
+@dataclasses.dataclass
+class ADVEdgeModel(BaseEdgeModel):
+    isAutoEdge: bool = False
 
 @dataclasses.dataclass(kw_only=True)
-class ADVFlowModel(BaseFlowModel[ADVNodeModel, BaseEdgeModel]):
+class ADVFlowModel(BaseFlowModel[ADVNodeModel, ADVEdgeModel]):
     selected_nodes: list[str] = dataclasses.field(default_factory=list)
 
     def _make_unique_name(self, target: Mapping[str, Any], name, max_count=10000) -> str:
@@ -337,18 +344,6 @@ class ADVRoot:
                 res["hborder"] = "1px solid #4caf50"
         return res
 
-    @mui.DataModel.mark_pfl_query_nested_func
-    def get_right_icon(self, paths: list[Any], node_id: str) -> dict[str, Any]:
-        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
-        res: dict[str, Any] = {}
-        if real_node is not None:
-            icon_idx: int = paths[0]
-            icons = [] if not real_node_is_ref else [mui.IconType.Shortcut]
-            res = {
-                "icon": icons[icon_idx],
-            }
-        return res
-
     @mui.DataModel.mark_pfl_query_func
     def get_node_frontend_props(self, node_id: str) -> dict[str, Any]:
         real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
@@ -368,6 +363,7 @@ class ADVRoot:
                 "isRef": real_node_is_ref,
                 "bottomMsg": "hello world!",
                 "handles": real_node.handles,
+                "isMainFlow": not real_node_is_ref and real_node.is_main_flow_node,
                 # "htype": "target" if is_input else "source",
                 # "hpos": "left" if is_input else "right",
                 # "textAlign": "start" if is_input else "end",
