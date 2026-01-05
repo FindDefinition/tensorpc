@@ -1651,7 +1651,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, content)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     def json(self):
         assert not isinstance(self.props.value, Undefined)
@@ -1889,7 +1889,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, checked)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     def __bool__(self):
         return self.props.checked
@@ -2043,7 +2043,7 @@ class Select(MUIComponentBase[SelectProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2136,7 +2136,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, values)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2280,7 +2280,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2388,7 +2388,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2570,7 +2570,7 @@ class Slider(_SliderBase[SliderProps, NumberType]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2630,7 +2630,7 @@ class RangeSlider(_SliderBase[RangeSliderProps, tuple[NumberType, NumberType]]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2719,7 +2719,7 @@ class BlenderSlider(_SliderBase[BlenderSliderProps, NumberType]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2860,7 +2860,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             (FrontendEventType.Change.value, TaskLoopEvent.Start.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def headless_stop(self):
         uiev = UIEvent({
@@ -2868,7 +2868,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             (FrontendEventType.Change.value, TaskLoopEvent.Stop.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         if self._raw_update:
@@ -2957,7 +2957,7 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, ev.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)

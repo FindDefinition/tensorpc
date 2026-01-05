@@ -303,7 +303,7 @@ class TmuxScheduler(mui.FlexBox):
                 num_tmux_pane_capture_lines)
             await self.info.write(
                 self._get_info(await self._get_resource_info()))
-            ev = mui.AppEvent("", {})
+            ev = mui.AppEvent("", [])
             new_task_cards = {}
             for updated_task in updated:
                 # print(updated_task.id, updated_task.state.status)

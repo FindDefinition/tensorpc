@@ -174,14 +174,14 @@ class FlowApp:
         if enable_lsp and self.fwd_http_port is not None:
             lay["httpPort"] = self.master_meta.fwd_http_port
         self.app._flowapp_is_inited = True
-        first_event = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})
+        first_event = AppEvent("", [(AppEventType.UpdateLayout, LayoutEvent(lay))])
         # first_event._after_send_callback = self.app.app_initialize_async
         await self._send_loop_queue.put(
             first_event)
         # TODO should we just use grpc client to query init state here?
-        init_event: Dict[AppEventType, Any] = {
-            AppEventType.Notify: NotifyEvent(NotifyType.AppStart)
-        }
+        init_event: list[tuple[AppEventType, Any]] = [
+            (AppEventType.Notify, NotifyEvent(NotifyType.AppStart))
+        ]
         if self.fwd_http_port is not None and enable_lsp:
             cfg = copy.deepcopy(self.app._flowapp_internal_lsp_config)
             extra_path = os.getenv(TENSORPC_LSP_EXTRA_PATH, None)
@@ -191,9 +191,12 @@ class FlowApp:
                     cfg.python.analysis.extraPaths.extend(extra_paths)
                 else:
                     cfg.python.analysis.extraPaths = extra_paths
-            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(
+            init_event.append((AppEventType.InitLSPClient, InitLSPClientEvent(
                 self.fwd_http_port,
-                cfg.get_dict())
+                cfg.get_dict())))
+            # init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(
+            #     self.fwd_http_port,
+            #     cfg.get_dict())
         await self._send_loop_queue.put(AppEvent("", init_event))
         if self.external_argv is not None:
             with enter_app_context(self.app):
@@ -259,9 +262,9 @@ class FlowApp:
             ev = ScheduleEvent(time.time_ns(), res, {})
             appev = ScheduleNextForApp(ev.to_dict())
             await self._send_loop_queue.put(
-                AppEvent(self._uid, {
-                    AppEventType.ScheduleNext: appev,
-                }))
+                AppEvent(self._uid, [
+                    (AppEventType.ScheduleNext, appev),
+                ]))
 
     async def handle_vscode_event(self, data: dict):
         """run event come from vscode, you need to install vscode-tensorpc-bridge extension first,
@@ -471,7 +474,7 @@ class FlowApp:
         ss = io.StringIO()
         traceback.print_exc(file=ss)
         user_exc = UserMessage.create_error("UNKNOWN", f"AppServiceError: {repr(e)}", ss.getvalue())
-        return AppEvent("", {AppEventType.UIException: UIExceptionEvent([user_exc])})
+        return AppEvent("", [(AppEventType.UIException, UIExceptionEvent([user_exc]))])
 
     async def _send_loop_stream_main(self, robj: tensorpc.AsyncRemoteManager):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
@@ -479,7 +482,7 @@ class FlowApp:
         shut_task = asyncio.create_task(self.shutdown_ev.wait(), name="app-shutdown-wait")
         send_task = asyncio.create_task(self._send_loop_queue.get(), name="app-send_loop_queue-get")
         wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-        previous_event = AppEvent(self._uid, {})
+        previous_event = AppEvent(self._uid, [])
         try:
             while True:
                 # if send fail, MERGE incoming app events, and send again after some time.
@@ -490,7 +493,7 @@ class FlowApp:
                     break
                 ev: AppEvent = send_task.result()
                 if ev.is_loopback:
-                    for k, v in ev.type_to_event.items():
+                    for k, v in ev.type_event_tuple:
                         if k == AppEventType.UIEvent:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
@@ -548,10 +551,10 @@ class FlowApp:
             uiev = UISaveStateEvent(self.app._get_simple_app_state())
             editorev = self.app.set_editor_value_event("")
             ev = AppEvent(
-                self._uid, {
-                    AppEventType.UISaveStateEvent: uiev,
-                    AppEventType.AppEditor: editorev
-                })
+                self._uid, [
+                    (AppEventType.UISaveStateEvent, uiev),
+                    (AppEventType.AppEditor, editorev)
+                ])
             # TODO remove this dump
             # check user error, user can't store invalid
             # object that exists after reload module.

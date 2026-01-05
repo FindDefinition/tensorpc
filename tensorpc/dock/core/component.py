@@ -1070,18 +1070,19 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
 
 
 def app_event_from_data(data: dict[str, Any]) -> "AppEvent":
-    type_to_event: dict[AppEventType, APP_EVENT_TYPES] = {}
+    type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]] = []
     for evtypeval, evdata in data["typeToEvents"]:
         found = False
         for k, v in ALL_APP_EVENTS.items():
             if k == evtypeval:
-                type_to_event[AppEventType(k)] = v.from_dict(evdata)
+                type_event_tuple.append(
+                    (AppEventType(k), v.from_dict(evdata)))
                 found = True
                 break
         if not found:
             raise ValueError("not found", evtypeval)
     return AppEvent(data["uid"],
-                    type_to_event,
+                    type_event_tuple,
                     remote_prefixes=data.get("remotePrefixes", None))
 
 
@@ -1099,7 +1100,7 @@ class AppEvent:
 
     def __init__(self,
                  uid: str,
-                 type_to_event: dict[AppEventType, APP_EVENT_TYPES],
+                 type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]],
                  sent_event: Optional[asyncio.Event] = None,
                  event_id: str = "",
                  is_loopback: bool = False,
@@ -1107,7 +1108,7 @@ class AppEvent:
                  after_send_callback: Optional[Callable[[], Awaitable[None]]] = None) -> None:
         # node uid, not component uid
         self.uid = uid
-        self.type_to_event = type_to_event
+        self.type_event_tuple = type_event_tuple
         # event that indicate this app event is sent
         # used for callback
         self.sent_event = sent_event
@@ -1121,11 +1122,24 @@ class AppEvent:
         self._after_send_callback = after_send_callback
 
     def is_empty(self):
-        return not self.type_to_event and not self._additional_events
+        return not self.type_event_tuple and not self._additional_events
+
+    def replace_type_event_tuple(self, new_type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]]):
+        new_app_event = AppEvent(
+            self.uid,
+            new_type_event_tuple,
+            self.sent_event,
+            self.event_id,
+            self.is_loopback,
+            self._remote_prefixes,
+            self._after_send_callback,
+        )
+        new_app_event._additional_events = self._additional_events
+        return new_app_event
 
     def to_dict(self):
         # here we don't use dict for typeToEvents because key in js must be string.
-        t2e = [(k.value, v.to_dict()) for k, v in self.type_to_event.items()]
+        t2e = [(k.value, v.to_dict()) for k, v in self.type_event_tuple]
         # make sure layout is proceed firstly.
         t2e.sort(key=lambda x: x[0])
         res = {"uid": self.uid, "typeToEvents": t2e}
@@ -1138,19 +1152,13 @@ class AppEvent:
         return app_event_from_data(data)
 
     def merge_new(self, new: "AppEvent") -> "AppEvent":
-        new_type_to_event: dict[AppEventType,
-                                APP_EVENT_TYPES] = new.type_to_event.copy()
+        new_type_ev_tuple = [e for e in new.type_event_tuple]
         if self.sent_event is not None:
             assert new.sent_event is None, "sent event of new must be None"
             sent_event = self.sent_event
         else:
             sent_event = new.sent_event
-        for k, v in self.type_to_event.items():
-            if k in new.type_to_event:
-                new_type_to_event[k] = v.merge_new(new.type_to_event[k])
-            else:
-                new_type_to_event[k] = v
-        res = AppEvent(self.uid, new_type_to_event, sent_event)
+        res = AppEvent(self.uid, self.type_event_tuple + new_type_ev_tuple, sent_event)
         res._additional_events = self._additional_events + new._additional_events
         return res 
 
@@ -1164,12 +1172,12 @@ class AppEvent:
 
     def __iadd__(self, other: "AppEvent"):
         ret = self.merge_new(other)
-        self.type_to_event = ret.type_to_event
+        self.type_event_tuple = ret.type_event_tuple
         self.sent_event = ret.sent_event
         return self
 
     def patch_keys_prefix_inplace(self, prefixes: list[str]):
-        for v in self.type_to_event.values():
+        for _, v in self.type_event_tuple:
             if isinstance(v, (UpdateUsedEventsEvent, UIUpdateEvent,
                               ComponentEvent, UpdateComponentsEvent)):
                 v.patch_keys_prefix_inplace(prefixes)
@@ -2018,10 +2026,10 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             assert self._flow_uid is not None
             return await self.queue.put(
-                AppEvent("", {
-                    AppEventType.UIEvent:
+                AppEvent("", [(
+                    AppEventType.UIEvent,
                     UIEvent({self._flow_uid.uid_encoded: ev})
-                },
+                )],
                          is_loopback=True))
 
     async def put_app_event(self, ev: AppEvent):
@@ -2262,7 +2270,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, json_only)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdateEvent: ev})
+        return AppEvent("", [(AppEventType.UIUpdateEvent, ev)])
 
     def _create_update_base_props_event(self, dm_props: Optional[Union[dict[str, Any], Undefined]] = None, 
                 used_events: Optional[Union[list[Any], Undefined]] = None):
@@ -2285,7 +2293,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, False)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdateBasePropsEvent: ev})
+        return AppEvent("", [(AppEventType.UIUpdateBasePropsEvent, ev)])
 
     def create_update_used_events_event(self):
         used_events = self._get_used_events_dict()
@@ -2302,7 +2310,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = ComponentEvent(
             {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     def create_comp_raw_event(self, data: Any):
         """create component control event for
@@ -2312,7 +2320,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = ComponentEvent(
             {self._flow_uid.uid_encoded: data})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     async def send_and_wait(self, ev: AppEvent, wait: bool = True):
         if ev.sent_event is None:
@@ -2326,29 +2334,29 @@ class Component(Generic[T_base_props, T_child]):
                                  deleted: Optional[list[str]]):
         ev = UpdateComponentsEvent(updates, deleted)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UpdateComponents: ev})
+        return AppEvent("", [(AppEventType.UpdateComponents, ev)])
 
     def create_delete_comp_event(self, deletes: list[str]):
         ev = UpdateComponentsEvent({}, deletes)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UpdateComponents: ev})
+        return AppEvent("", [(AppEventType.UpdateComponents, ev)])
 
     def create_remote_comp_event(self, key: str, data: Any):
         """create event for remote comp to send to mounted master app.
         """
-        res = AppEvent("", {})
+        res = AppEvent("", [])
         res._additional_events = [RemoteCompEvent(key, data)]
         return res
 
     def create_user_msg_event(self, exc: UserMessage):
         ev = UIExceptionEvent([exc])
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIException: ev})
+        return AppEvent("", [(AppEventType.UIException, ev)])
 
     def create_editor_event(self, type: AppEditorEventType, data: Any):
         # uid is set in flowapp service later.
         ev = AppEditorEvent(type, data)
-        return AppEvent("", {AppEventType.AppEditor: ev})
+        return AppEvent("", [(AppEventType.AppEditor, ev)])
 
     def send_error(self, title: str, detail: str):
         assert self._flow_uid is not None
@@ -2429,7 +2437,7 @@ class Component(Generic[T_base_props, T_child]):
             datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
             try:
-                batch_ev = AppEvent("", {})
+                batch_ev = AppEvent("", [])
                 with enter_batch_event_context(batch_ev):
                     with datamodel_ctx as ctx:
                         coro = cb()
@@ -2509,7 +2517,7 @@ class Component(Generic[T_base_props, T_child]):
         res_list :list[Any] = []
         assert self._flow_uid is not None
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            batch_ev = AppEvent("", {})
+            batch_ev = AppEvent("", [])
             with enter_batch_event_context(batch_ev):
 
                 for cb in cbs:
@@ -3218,9 +3226,10 @@ class ContainerBase(Component[T_container_props, T_child]):
                 update_child_complex=update_child_complex)
 
     async def _lifecycle_center_cb(self, new_ev: AppEvent, post_ev_creator: Optional[Callable[[], AppEvent]] = None):
-        await self.put_app_event(new_ev)
         if post_ev_creator is not None:
-            await self.put_app_event(post_ev_creator())
+            await self.put_app_event(new_ev + post_ev_creator())
+        else:
+            await self.put_app_event(new_ev)
 
     async def _set_new_layout_delay(
             self,
@@ -3429,7 +3438,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         assert self._flow_uid is not None
         ev = ComponentEvent(
                 {self._flow_uid.uid_encoded: raw_ev_data})
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     def create_comp_event(self, data: dict[str, Any]):
         """create component control event for
@@ -3447,7 +3456,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             ev = ComponentEvent(
                 {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
 
 class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
@@ -3593,7 +3602,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             app_event = AppEvent.from_dict(app_event_dict)
                             # ev._remote_prefixes = prefixes
                             app_event.patch_keys_prefix_inplace(prefixes)
-                            for ui_ev in app_event.type_to_event.values():
+                            for _, ui_ev in app_event.type_event_tuple:
                                 if isinstance(ui_ev, UpdateComponentsEvent):
                                     assert ui_ev.remote_component_all_childs is not None
                                     ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
