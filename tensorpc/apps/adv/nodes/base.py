@@ -1,5 +1,5 @@
 from functools import partial
-from tensorpc.apps.adv.model import ADVRoot
+from tensorpc.apps.adv.model import ADVHandlePrefix, ADVRoot
 from tensorpc.dock.components import flowui, mui
 from tensorpc.apps.adv.model import ADVNodeType
 from typing import Any, Optional, TypedDict, Union
@@ -125,3 +125,79 @@ class BaseNodeWrapper(mui.FlexBox):
 
         self._node_type = node_type
         self._node_id = node_id
+
+
+class OutIndicatorWrapper(mui.FlexBox):
+
+    def __init__(self,
+                 node_id: str,
+                 dm: mui.DataModel[ADVRoot]):
+        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_id=node_id)
+        header = mui.Typography("").prop(variant="body2", flex=1)
+        # header.bind_fields(value=node_model_draft.node.name)
+
+        header.bind_pfl_query(dm, 
+            value=(get_node_fn, "header"))
+        icon = mui.Icon(mui.IconType.Add).prop(iconSize="small")
+        icon_container = mui.Fragment([
+            icon
+        ])
+        icon.bind_pfl_query(dm, 
+            icon=(get_node_fn, "iconType"))
+        icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small", muiColor="primary")
+        icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small", muiColor="primary")
+        icon_is_shortcut.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isRef"))
+        icon_is_main_flow.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isMainFlow"))
+
+        header_icons = mui.HBox([
+            icon_is_shortcut,
+            icon_is_main_flow,
+        ])
+        header_container = mui.HBox([
+            icon_container,
+            header,
+            header_icons,
+        ]).prop(className=
+                f"{ComputeFlowClasses.Header} {ComputeFlowClasses.NodeItem}")
+        connected_desc = mui.Typography("").prop(
+                variant="caption",
+                flex=1,
+                marginLeft="8px",
+                marginRight="8px",
+                className=ComputeFlowClasses.CodeTypography)
+        get_handle_fn = partial(ADVRoot.get_handle, node_id=node_id)
+
+        connected_desc.bind_pfl_query(dm,
+            value=(get_handle_fn, "name"),
+        )
+        connected_descs = mui.DataFlexBox(mui.HBox([
+            connected_desc
+        ]).prop(
+            className=
+            f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"
+        ))
+        connected_descs.prop(variant="fragment")
+        connected_descs.bind_pfl_query(dm, 
+            dataList=(get_node_fn, "handles"))
+        _run_status = mui.Typography().prop(variant="caption").bind_pfl_query(dm, 
+            value=(get_node_fn, "bottomMsg"))
+        status_box = mui.HBox([
+            _run_status,
+        ]).prop(
+            className=
+            f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
+        handle = flowui.Handle("target", "left", f"{ADVHandlePrefix.OutIndicator}-outputs")
+        handle.prop(className=f"{ComputeFlowClasses.IOHandleBase} {ComputeFlowClasses.InputHandle}")
+
+        ui_dict = {
+            "header": header_container,
+            "handle": handle,
+            "descs": connected_descs,
+            "status_box": status_box,
+        }
+        super().__init__(ui_dict)
+        self.prop(
+            className=
+            f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
+        )
+        self.prop(minWidth="150px")

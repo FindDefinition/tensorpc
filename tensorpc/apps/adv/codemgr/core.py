@@ -49,6 +49,16 @@ class BackendHandle:
             target_node_handle_id=[],
         )
 
+    def rename_symbol(self, new_name: str) -> Self:
+        new_handle = dataclasses.replace(
+            self.handle,
+            symbol_name=new_name,
+        )
+        return dataclasses.replace(
+            self,
+            handle=new_handle,
+        )
+
 @dataclasses.dataclass 
 class BaseNodeCodeMeta:
     id: str 

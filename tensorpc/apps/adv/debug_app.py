@@ -1,5 +1,5 @@
-from tensorpc.apps.adv.codemgr.flow import ADVProjectBackendManager
-from tensorpc.apps.adv.nodes.base import BaseNodeWrapper
+from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackendManager
+from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, OutIndicatorWrapper
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -102,10 +102,55 @@ ADV.mark_outputs("c")
 return a + b
     """
     fragment1 = f"""
-ADV.mark_outputs("d")
+ADV.mark_outputs("d->D")
 return c + a
     """
+    nested_model = ADVNodeModel(
+        id="nf1", 
+        nType=ADVNodeType.FRAGMENT,
+        position=flowui.XYPosition(600, 100), 
+        name="Nested Fr 0",
+        flow=ADVFlowModel(nodes={
+            "nf1-s1": ADVNodeModel(
+                id="nf1-s1", 
+                nType=ADVNodeType.SYMBOLS,
+                position=flowui.XYPosition(0, 0), 
+                name="SymbolGroup",
+                impl=InlineCode(symbolgroup0),
+            ),
+            "nf1-f0": ADVNodeModel(
+                id="nf1-f0", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(200, 0), 
+                name="add_func_nested",
+                inline_subflow_name=ADV_MAIN_FLOW_NAME,
+                impl=InlineCode(fragment0),
+            ),
+            "nf1-oic0": ADVNodeModel(
+                id="nf1-oic0", 
+                nType=ADVNodeType.OUT_INDICATOR,
+                position=flowui.XYPosition(400, 100), 
+                name="Outputs",
+            ),
 
+        }, edges={
+            "e0": ADVEdgeModel(
+                id="e0", 
+                source="nf1-f0",
+                sourceHandle=f"{ADVHandlePrefix.Output}-c",
+                target="nf1-oic0",
+                targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
+                isAutoEdge=False,
+            )
+
+        })
+    )
+    # return ADVProject(
+    #     flow=nested_model.flow,
+    #     import_prefix="tensorpc.adv.test_project",
+    #     path=str(PACKAGE_ROOT / "adv" / "test_project"),
+
+    # )
     return ADVProject(
         flow=ADVFlowModel(nodes={
             "g1": ADVNodeModel(
@@ -140,10 +185,16 @@ return c + a
 
                 impl=InlineCode(fragment1),
             ),
-
-
+            "oic0": ADVNodeModel(
+                id="oic0", 
+                nType=ADVNodeType.OUT_INDICATOR,
+                position=flowui.XYPosition(800, 200), 
+                name="Outputs",
+            ),
+            "nf1": nested_model,
         }, edges={
         }),
+
         import_prefix="tensorpc.adv.test_project",
         path=str(PACKAGE_ROOT / "adv" / "test_project"),
     )
@@ -218,7 +269,11 @@ class App:
         manager.parse_all()
         manager.init_all_nodes()
         import rich 
-        rich.print(dataclasses.asdict(self.dm.get_model().adv_projects["project"].flow))
+        debug_flow = self.dm.get_model().adv_projects["project"].flow
+        rich.print({
+            "nodes": debug_flow.nodes,
+            "edges": debug_flow.edges,
+        })
         self._manager = manager
         graph_container.update_raw_props(default_compute_flow_css())
 
@@ -265,15 +320,16 @@ class App:
 
     def model_to_ui_node(self, flow: ADVFlowModel, node_id: str):
         node = flow.nodes[node_id]
-        # draft = self.dm.get_draft()
-        comp = mui.VBox([
-            mui.Typography(f"Node-{node.name}" if node.flow is None else "Nested Flow"),
-        ])
-        comp = BaseNodeWrapper(
-            node_id,
-            self.dm,
-            ADVNodeType(node.nType),
-        )
+        if node.nType == ADVNodeType.OUT_INDICATOR:
+            comp = OutIndicatorWrapper(
+                node_id, self.dm
+            )
+        else:
+            comp = BaseNodeWrapper(
+                node_id,
+                self.dm,
+                ADVNodeType(node.nType),
+            )
         ui_node = flowui.Node(type="app", 
             id=node.id, 
             data=flowui.NodeData(component=comp, label=node.name), 
@@ -343,3 +399,18 @@ class App:
         await self.graph.update_node_internals(node_ids)
 
 
+def _main():
+    model = _test_model_symbol_group()
+    manager = ADVProjectBackendManager(lambda: model.flow)
+    manager.sync_project_model()
+    manager.parse_all()
+    manager.init_all_nodes()
+    import rich 
+    debug_flow = model.flow
+    # rich.print({
+    #     "nodes": debug_flow.nodes,
+    #     "edges": debug_flow.edges,
+    # })
+
+if __name__ == "__main__":
+    _main()

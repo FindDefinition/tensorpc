@@ -2,12 +2,12 @@ import ast
 import inspect
 from typing import Any, Callable, Optional
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
-from tensorpc.apps.adv.codemgr.fragment import FragmentParseResult, FragmentParser
+from tensorpc.apps.adv.codemgr.fragment import FragmentParseResult, FragmentParser, parse_alias_map
 from tensorpc.apps.adv.codemgr.symbols import SymbolParseResult, SymbolParser
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.logger import ADV_LOGGER
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVFlowModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle, ADVNodeType, ADVProject
+from tensorpc.apps.adv.model import ADVConstHandles, ADVEdgeModel, ADVFlowModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle, ADVNodeType, ADVProject
 import hashlib
 from tensorpc.core.annolib import dataclass_flatten_fields_generator, unparse_type_expr
 import dataclasses as dataclasses_plain
@@ -16,7 +16,7 @@ from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.apps.adv import api as _ADV
 _ROOT_FLOW_ID = ""
 
-_MAIN_FLOW_NAME = "__adv_flow_main__"
+ADV_MAIN_FLOW_NAME = "__adv_flow_main__"
 
 @dataclasses.dataclass
 class CodeBlock:
@@ -241,6 +241,13 @@ class FlowParser:
         subflow_name_to_scope: dict[str, dict[str, BackendHandle]] = {}
         for n in child_nodes:
             if n.nType == ADVNodeType.FRAGMENT:
+                alias_map = None
+                # user can use output mapping to alias output symbols
+                # of ref nodes or subflow nodes
+                if n.alias_map is not None:
+                    # TODO handle error here.
+                    alias_map = parse_alias_map(n.alias_map)
+
                 subf_name = n.inline_subflow_name
                 if subf_name is not None:
                     if subf_name not in subflow_name_to_scope:
@@ -253,12 +260,15 @@ class FlowParser:
                 if cached_parse_res is not None:
                     assert isinstance(cached_parse_res, FragmentParseResult)
                     cached_parse_res = cached_parse_res.copy(n.id)
-
+                    if alias_map is not None:
+                        cached_parse_res = cached_parse_res.do_alias_map(alias_map)
                     parse_res = cached_parse_res
                 else:
                     if n_def.flow is not None:
                         flow_parser = mgr._flow_node_id_to_parser[flow_id]
                         parse_res = flow_parser._parse_flow_recursive(flow_id, n_def.flow, mgr, visited)
+                        if alias_map is not None:
+                            parse_res = parse_res.do_alias_map(alias_map)
                     else:
                         assert n_def.impl is not None, f"fragment node {n_def.id} has no code."
                         parser = FragmentParser()
@@ -269,8 +279,9 @@ class FlowParser:
                             symbol_scope
                         )
                     self._node_id_to_parse_result[n.id] = parse_res
-                if subf_name is not None and n.ref_node_id is None:
-                    # only non-ref main flow node will contribute symbols to symbol scope
+                # TODO rename handle if alias map provided
+                if subf_name is not None:
+                    # only main flow node will contribute symbols to symbol scope
                     # add outputs to symbol scope
                     for handle in parse_res.output_handles:
                         symbol_scope[handle.symbol_name] = handle 
@@ -291,8 +302,8 @@ class FlowParser:
                 parse_res = self._node_id_to_parse_result[n.id]
                 assert parse_res is not None
                 if isinstance(parse_res, FragmentParseResult):
-                    # ref nodes only use user edges, no auto edges
-                    if n.ref_node_id is None:
+                    # ref nodes/nested node only use user edges, no auto edges for inputs
+                    if n.ref_node_id is None and n.flow is None:
                         for handle in parse_res.input_handles:
                             inp_node_handle_to_node[(n.id, handle.id)] = (n, handle)
                             node_id_to_inp_handles[n.id].append(handle)
@@ -300,16 +311,16 @@ class FlowParser:
                             shid = handle.handle.source_handle_id
                             assert snid is not None and shid is not None
                             auto_edges.append(ADVEdgeModel(
-                                id=self._edge_uid_pool(f"AE_{snid}_{shid}_{n.id}_{handle.id}"),
+                                id=self._edge_uid_pool(f"AE-{snid}({shid})->{n.id}({handle.id})"),
                                 source=snid,
                                 sourceHandle=shid,
                                 target=n.id,
                                 targetHandle=handle.id,
                                 isAutoEdge=True,
                             ))
-                        for handle in parse_res.output_handles:
-                            out_node_handle_to_node[(n.id, handle.id)] = (n, handle)
-                            node_id_to_out_handles[n.id].append(handle)
+                    for handle in parse_res.output_handles:
+                        out_node_handle_to_node[(n.id, handle.id)] = (n, handle)
+                        node_id_to_out_handles[n.id].append(handle)
                 elif isinstance(parse_res, SymbolParseResult):
                     for handle in parse_res.symbols:
                         out_node_handle_to_node[(n.id, handle.id)] = (n, handle)
@@ -340,7 +351,13 @@ class FlowParser:
                             # target_node_handle_id from output indicators are ignored.
                             # source_handle.target_node_handle_id.add((n.id, edge.targetHandle))
                             source_handle.is_subflow_output = True
-                            inp_node_handle_to_node[(n.id, edge.targetHandle)] = (n, BackendHandle(handle=n.handles[0], index=0))
+                            out_indicator_handle = ADVNodeHandle(
+                                id=ADVConstHandles.OutIndicator,
+                                name="inputs",
+                                is_input=True,
+                                type="",
+                            )
+                            inp_node_handle_to_node[(n.id, edge.targetHandle)] = (n, BackendHandle(handle=out_indicator_handle, index=0))
                             subflow_output_handles.append((edge.source, source_handle))
         # 5. filter invalid user edges, fill target_node_handle_id from user edges
         valid_edges: list[ADVEdgeModel] = []
@@ -401,18 +418,24 @@ class FlowParser:
         all_input_handles: list[BackendHandle] = []
         all_output_handles: list[BackendHandle] = []
 
-        if _MAIN_FLOW_NAME in sorted_subflow_nodes:
-            subflow_node_id_to_nodes = {n.id: n for n in sorted_subflow_nodes[_MAIN_FLOW_NAME]}
+        if ADV_MAIN_FLOW_NAME in sorted_subflow_nodes:
+            subflow_node_id_to_nodes = {n.id: n for n in sorted_subflow_nodes[ADV_MAIN_FLOW_NAME]}
             for output_handle in root_symbol_scope.values():
                 for target_node_id, _ in output_handle.target_node_handle_id:
                     if target_node_id in subflow_node_id_to_nodes:
                         # output handle connects to main flow node
+                        output_handle = output_handle.copy(prefix=ADVHandlePrefix.Input)
+                        output_handle.handle.is_input = True
+                        output_handle.handle.source_handle_id = None 
+                        output_handle.handle.source_node_id = None
                         all_input_handles.append(output_handle)
                         break
             for source_node_id, source_handle in subflow_output_handles:
                 if source_node_id in subflow_node_id_to_nodes:
                     all_output_handles.append(source_handle)
             all_output_handles.sort(key=lambda h: h.index)
+        # import rich 
+        # rich.print(flow_id, all_input_handles, all_output_handles)
         flow_parse_res = FlowParseResult(
             succeed=True,
             input_handles=all_input_handles,

@@ -3147,7 +3147,8 @@ class ContainerBase(Component[T_container_props, T_child]):
                 await attach._run_mount_special_methods(self, reload_mgr)
 
     async def set_new_layout_locally(self, layout: Union[dict[str, Component],
-                                                         T_child_structure]):
+                                                         T_child_structure],
+                                    update_child_complex: bool = True):
         detached_uid_to_comp = self._prepare_detach_child()
         if isinstance(layout, dict):
             self._child_comps = layout
@@ -3181,7 +3182,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         child_uids = [self[c]._flow_uid for c in self._child_comps]
 
         update_msg: dict[str, Any] = {"childs": child_uids}
-        if self._child_structure is not None:
+        if self._child_structure is not None and update_child_complex:
             update_msg["childsComplex"] = asdict_no_deepcopy(
                 self._child_structure,
                 dict_factory=undefined_comp_dict_factory,
@@ -3197,7 +3198,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             layout: Union[dict[str, Component], list[Component],
                           T_child_structure],
             post_ev_creator: Optional[Callable[[], AppEvent]] = None,
-            disable_delay: bool = False):
+            disable_delay: bool = False,
+            update_child_complex: bool = True):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
 
@@ -3208,10 +3210,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             evctx.delayed_callbacks.append(lambda: self._set_new_layout_delay(
                 layout,
                 comp_dont_need_cancel=evctx.comp_uid,
-                post_ev_creator=post_ev_creator))
+                post_ev_creator=post_ev_creator,
+                update_child_complex=update_child_complex))
         else:
             await self._set_new_layout_delay(
-                layout, post_ev_creator=post_ev_creator)
+                layout, post_ev_creator=post_ev_creator,
+                update_child_complex=update_child_complex)
 
     async def _lifecycle_center_cb(self, new_ev: AppEvent, post_ev_creator: Optional[Callable[[], AppEvent]] = None):
         await self.put_app_event(new_ev)
@@ -3222,9 +3226,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             self,
             layout: Union[dict[str, Component], T_child_structure],
             comp_dont_need_cancel: Optional[UniqueTreeIdForComp] = None,
-            post_ev_creator: Optional[Callable[[], AppEvent]] = None):
+            post_ev_creator: Optional[Callable[[], AppEvent]] = None,
+            update_child_complex: bool = True):
         new_ev, attached, removed_dict = await self.set_new_layout_locally(
-            layout)
+            layout, update_child_complex=update_child_complex)
         for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
                 continue

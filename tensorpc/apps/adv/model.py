@@ -59,6 +59,8 @@ class ADVHandlePrefix:
     Output = "out"
     OutIndicator = "oic"
 
+class ADVConstHandles:
+    OutIndicator = "oic-outputs"
 
 @dataclasses.dataclass(kw_only=True)
 class ADVNodeHandle:
@@ -82,6 +84,8 @@ class ADVNodeHandle:
     source_handle_id: Optional[str] = None
     is_sym_handle: bool = False
     sym_depth: int = -1
+    # used when output of fragment node is dict.
+    dict_key: Optional[str] = None
 
     
 
@@ -108,6 +112,10 @@ class ADVNodeModel(BaseNodeModel):
 
     inline_subflow_name: Optional[str] = None
     # --- fragment node props ---
+    # alias_map_str: use alias->new_alias,alias2->new_alias2
+    # to rename a output handle of a ref node or subflow node 
+    # which don't support ADV.
+    alias_map: Optional[str] = None
 
     # --- class node props ---
     # fields
@@ -354,9 +362,16 @@ class ADVRoot:
             handle_idx: int = paths[0]
             handle = real_node.handles[handle_idx]
             is_input = handle.is_input
+            if handle.dict_key is not None:
+                # we need to show original key if dict output.
+                # otherwise users won't know the real key
+                # when they use this function in non-adv code.
+                name = handle.name + "(" + handle.dict_key + ")"
+            else:
+                name = handle.name
             res = {
                 "id": handle.id,
-                "name": handle.name,
+                "name": name,
                 "type_anno": handle.type,
                 "type": "target" if is_input else "source",
                 "hpos": "left" if is_input else "right",
@@ -375,10 +390,12 @@ class ADVRoot:
             if real_node.nType == ADVNodeType.CLASS:
                 icon_type = mui.IconType.DataObject
             elif real_node.nType == ADVNodeType.FRAGMENT:
-                icon_type = mui.IconType.Code
+                if real_node.flow is not None:
+                    icon_type = mui.IconType.Reactflow
+                else:
+                    icon_type = mui.IconType.Code
             else:
                 icon_type = mui.IconType.Info
-
             res = {
                 "id": real_node.id,
                 "header": real_node.name,

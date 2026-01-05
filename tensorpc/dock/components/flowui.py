@@ -298,6 +298,7 @@ class FlowControlType(enum.IntEnum):
     SetFlowAndElkLayout = 12
     ElkLayout = 13
     AddNewEdges = 14
+    SwitchFlow = 15
 
 
 @dataclasses.dataclass
@@ -1211,6 +1212,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self,
             value: dict):
         flow_user_id = self.props.flowUserUid
+        print(value, flow_user_id)
         if not isinstance(flow_user_id, Undefined) and "flowUserUid" in value:
             if flow_user_id != value["flowUserUid"]:
                 # when we repeatly switch different flow, the debounced change event
@@ -1346,7 +1348,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         if options is None:
             options = DagreLayoutOptions()
         res = {
-            "type": FlowControlType.DagreLayout,
+            "type": FlowControlType.DagreLayout.value,
             "graphOptions": options,
             "fitView": fit_view,
         }
@@ -1359,7 +1361,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             options = ElkLayoutOptions()
         opt_dict = asdict_flatten_field_only_no_undefined(options)
         res = {
-            "type": FlowControlType.ElkLayout,
+            "type": FlowControlType.ElkLayout.value,
             "graphOptions": opt_dict,
             "fitView": fit_view,
         }
@@ -1393,7 +1395,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 options = asdict_flatten_field_only_no_undefined(options)
 
         ev_new_node = {
-            "type": FlowControlType.SetFlowAndDagreLayout if algo_type == LayoutAlgoType.Dagre else FlowControlType.SetFlowAndElkLayout,
+            "type": int(FlowControlType.SetFlowAndDagreLayout if algo_type == LayoutAlgoType.Dagre else FlowControlType.SetFlowAndElkLayout),
             "nodes": nodes,
             "edges": edges,
             "graphOptions": options,
@@ -1445,7 +1447,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                            keep_zoom: Optional[bool] = False,
                            duration: Optional[NumberType] = None):
         res = {
-            "type": FlowControlType.LocateNode,
+            "type": FlowControlType.LocateNode.value,
             "nodeId": node_ids,
         }
         if keep_zoom is not None:
@@ -1456,7 +1458,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def fit_view(self):
         res = {
-            "type": FlowControlType.FitView,
+            "type": FlowControlType.FitView.value,
             "fitView": True,
         }
         return await self.send_and_wait(self.create_comp_event(res))
@@ -1475,7 +1477,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                     raise ValueError(f"item id {item.id} not exists")
                 merge_props_not_undefined(all_item_id_to_items[item.id], item)
             res = {
-                "type": FlowControlType.UpdatePaneContextMenuItem,
+                "type": FlowControlType.UpdatePaneContextMenuItem.value,
                 "menuItems": items,
             }
             return await self.send_and_wait(self.create_comp_event(res))
@@ -1528,7 +1530,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self.nodes.append(node)
         self._update_graph_data()
         ev_new_node = {
-            "type": FlowControlType.AddNewNodes,
+            "type": FlowControlType.AddNewNodes.value,
             "nodes": nodes,
         }
         if screen_to_flow is not None:
@@ -1541,6 +1543,54 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         else:
             return await self.send_and_wait(self.create_comp_event(ev_new_node))
     
+    async def switch_flow(self,
+                        nodes: list[Node],
+                        edges: list[Edge],
+                        screen_to_flow: Optional[bool] = None,
+                        flow_user_uid: Optional[str] = None):
+        """Add new nodes to the flow.
+
+        Args:
+            nodes (Node): nodes to add.
+            screen_to_flow (Optional[bool], optional): Whether the node position is in screen coordinates. Defaults to None.
+                you should use this when you use position from pane context menu or drag-drop to add a node.
+        """
+        self._clear_internals()
+        new_layout: dict[str, Component] = {}
+        self.childs_complex.nodes.clear()
+        for node in nodes:
+            assert node.id not in self._internals.id_to_node, f"node id {node.id} already exists"
+            comp = node.get_component()
+            if comp is not None:
+                new_layout[node.id] = comp
+            self.nodes.append(node)
+        if not isinstance(self.childs_complex.extraChilds, Undefined):
+            # keep extra childs
+            extra_childs = set([id(c) for c in self.childs_complex.extraChilds])
+            for k, v in self._child_comps.items():
+                if id(v) in extra_childs:
+                    new_layout[k] = v
+        
+        self.childs_complex.edges = edges
+        self._update_graph_data()
+        ev_new_node = {
+            "type": FlowControlType.SwitchFlow.value,
+            "nodes": nodes,
+            "edges": edges,
+        }
+        if flow_user_uid is not None:
+            self.prop(flowUserUid=flow_user_uid)
+            ev_new_node["flowUserUid"] = flow_user_uid
+        if screen_to_flow is not None:
+            ev_new_node["screenToFlowPosition"] = screen_to_flow
+        if new_layout:
+            return await self.set_new_layout(
+                new_layout,
+                update_child_complex=False,
+                post_ev_creator=lambda: self.create_comp_event(ev_new_node))
+        else:
+            return await self.send_and_wait(self.create_comp_event(ev_new_node))
+
     async def change_node_layout(self,
                         node_id: str, new_comp: Component):
         """Change node's layout.
@@ -1591,7 +1641,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.childs_complex.edges = new_edges
         self._update_graph_data()
         ev_del_node = {
-            "type": FlowControlType.DeleteNodeByIds,
+            "type": FlowControlType.DeleteNodeByIds.value,
             "nodeIds": node_ids,
         }
         if del_node_id_with_comp:
@@ -1644,6 +1694,19 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     async def clear(self):
         await self.delete_nodes_by_ids([n.id for n in self.nodes])
         await self.delete_edges_by_ids([e.id for e in self.edges])
+        self._internals = FlowInternals()
+
+    async def _clear_node_childs(self, post_ev_creator: Optional[Callable[[], AppEvent]] = None):
+        del_node_id_with_comp: list[str] = []
+        for node in self.nodes:
+            if not isinstance(node.data, Undefined):
+                if not isinstance(node.data.component, Undefined):
+                    del_node_id_with_comp.append(node.id)
+        return await self.remove_childs_by_keys(
+            del_node_id_with_comp, update_child_complex=False,
+            post_ev_creator=post_ev_creator)
+
+    def _clear_internals(self):
         self._internals = FlowInternals()
 
 class FlowUIContext:

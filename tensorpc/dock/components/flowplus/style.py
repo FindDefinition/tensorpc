@@ -82,7 +82,7 @@ def default_compute_flow_css():
             "borderRadius": "100%",
             "height": "12px",
             "width": "12px",
-            "border": "1px solid red",
+            "border": "1px solid grey",
             "background": "#eee"
         },
         f".{ComputeFlowClasses.DriverIOHandleBase}": {

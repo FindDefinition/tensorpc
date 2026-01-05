@@ -547,7 +547,7 @@ class IconBaseProps:
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
-
+    color: Union[str, Undefined] = undefined
     @field_validator('icon')
     def svg_validator(cls, v):
         if isinstance(v, Undefined):
@@ -565,6 +565,7 @@ class IconOptionalBaseProps:
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
+    color: Union[str, Undefined] = undefined
 
     @field_validator('icon')
     def svg_validator(cls, v):
@@ -590,7 +591,7 @@ class Icon(MUIComponentBase[IconProps]):
     def __init__(self, icon: Union[IconType, str, Undefined] = undefined) -> None:
         super().__init__(UIType.Icon, IconProps)
         if isinstance(icon, IconType):
-            self.props.icon = icon
+            self.prop(icon=icon)
         elif not isinstance(icon, Undefined):
             self.prop(icon=self.encode_svg(icon))
 

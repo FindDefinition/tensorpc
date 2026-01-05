@@ -16,7 +16,7 @@ class FragmentInputDesc:
 class FragmentOutputDesc:
     type: Literal["single", "tuple", "dict"]
     # symbol to alias
-    mapping: dict[str, str]
+    mapping: dict[str, tuple[str, str]]
     
 @dataclasses.dataclass(kw_only=True)
 class FragmentParseResult(BaseParseResult):
@@ -43,6 +43,20 @@ class FragmentParseResult(BaseParseResult):
             output_handles=new_output_handles,
         )
 
+    def do_alias_map(self, alias_map: dict[str, str]) -> Self:
+        new_output_handles: list[BackendHandle] = []
+        for h in self.output_handles:
+            new_h = h.copy()
+            if h.handle.symbol_name in alias_map:
+                new_alias = alias_map[h.handle.symbol_name]
+                new_h.handle.name = new_alias
+                new_h.handle.symbol_name = new_alias
+            new_output_handles.append(new_h)
+        return dataclasses.replace(
+            self,
+            output_handles=new_output_handles,
+        )
+
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:
         parts = desc.split("->")
@@ -56,29 +70,35 @@ def _parse_single_desc(desc: str) -> tuple[str, str]:
         f"Invalid symbol name or alias in output description: {desc}"
     return symbol_name, alias
 
+def parse_alias_map(alias_map: str) -> dict[str, str]:
+    # alias_map: use alias->new_alias,alias2->new_alias2
+    mapping: dict[str, str] = {}
+    items = alias_map.split(",")
+    for item in items:
+        alias, new_alias = _parse_single_desc(item)
+        mapping[alias] = new_alias
+    return mapping
+
 def mark_outputs(desc: Union[str, tuple[str, ...], dict[str, str]], /) -> FragmentOutputDesc:
     # we actually don't run this function, we will parse ast
     # and extract the info from function call node.
     out_desc = FragmentOutputDesc("single", {})
     if isinstance(desc, str):
-        desc = desc.strip()
-        assert desc.isidentifier(), \
-            f"Invalid symbol name in output description string: {desc}"
+        symbol_name, alias = _parse_single_desc(desc)
         out_desc.type = "single"  
         out_desc.mapping = {
-            desc: desc
+            "": (symbol_name, alias)
         }
     elif isinstance(desc, tuple):
         out_desc.type = "tuple"
-        for item in desc:
-            item = item.strip()
-            assert item.isidentifier(), \
-                f"Invalid symbol name in output description tuple: {item}"
-            out_desc.mapping[item] = item
+        for i, item in enumerate(desc):
+            symbol_name, alias = _parse_single_desc(item)
+            out_desc.mapping[str(i)] = (symbol_name, alias)
     elif isinstance(desc, dict):
         out_desc.type = "dict"
-        for alias, symbol in desc.items():
-            out_desc.mapping[symbol] = alias
+        for key, desc in desc.items():
+            symbol_name, alias = _parse_single_desc(desc)
+            out_desc.mapping[key] = (symbol_name, alias)
     else:
         raise ValueError(f"Invalid output description type: {type(desc)}, must be one of str, tuple, dict")
     return out_desc
@@ -227,15 +247,18 @@ class FragmentParser:
         name_to_sym = symbol_extractor._assigned_symbols
 
         output_handles: list[BackendHandle] = []
-        for sym_name, alias in output_desc.mapping.items():
+        for dict_key, (sym_name, alias) in output_desc.mapping.items():
             # TODO better error here.
             assert sym_name in cur_scope, \
                 f"Output symbol {sym_name} not found in global scope"
             sym_handle = cur_scope[sym_name].copy()
             sym_handle.handle.source_node_id = node_id
             sym_handle.handle.source_handle_id = sym_handle.handle.id
-            sym_handle.handle.name = alias
+            name = alias
+            sym_handle.handle.name = name
             sym_handle.handle.symbol_name = alias
+            if output_desc.type == "dict":
+                sym_handle.handle.dict_key = dict_key
             output_handles.append(sym_handle)
         input_handles: list[BackendHandle] = []
         for sym_name, sym_handle in name_to_sym.items():
