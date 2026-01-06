@@ -32,10 +32,9 @@ from tensorpc.dock.core.common import handle_standard_event
 from tensorpc.dock.core.datamodel import DataModel
 from tensorpc.dock.jsonlike import asdict_flatten_field_only, asdict_flatten_field_only_no_undefined, merge_props_not_undefined, undefined_dict_factory
 from tensorpc.utils.uniquename import UniqueNamePool
-
 from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                               DataclassType, FrontendEventType, NumberType,
-                              UIType, Undefined, undefined)
+                              UIType, Undefined, undefined, LOGGER)
 from .mui import (ContainerBaseProps, LayoutType, MUIBasicProps,
                   MUIComponentBase, MUIComponentBaseProps, MUIComponentType,
                   MUIContainerBase, FlexBoxProps, MenuItem, Theme,
@@ -69,6 +68,7 @@ class FlowProps(ContainerBaseProps):
     selectNodesOnDrag: Union[Undefined, bool] = undefined
     connectOnClick: Union[Undefined, bool] = undefined
     connectionMode: Union[Undefined, Literal["loose", "strict"]] = undefined
+    controlledConnection: Union[Undefined, bool] = undefined
     panOnDrag: Union[Undefined, bool] = undefined
     panOnScroll: Union[Undefined, bool] = undefined
     panOnScrollSpeed: Union[Undefined, int] = undefined
@@ -1212,7 +1212,6 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self,
             value: dict):
         flow_user_id = self.props.flowUserUid
-        print(value, flow_user_id)
         if not isinstance(flow_user_id, Undefined) and "flowUserUid" in value:
             if flow_user_id != value["flowUserUid"]:
                 # when we repeatly switch different flow, the debounced change event
@@ -1251,10 +1250,17 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             [n["id"] for n in nodes], _internal_dont_send_comp_event=True)
 
     async def _handle_new_edge(self, data: dict[str, Any]):
+        if data["controlled"] is True:
+            LOGGER.error("[flowui] when you use controlled connection, you must "
+                "clear this default handler (`event_edge_connection.clear()`) "
+                "and define yours based on this handler. return True if this connection "
+                "is OK, False to reject it.", stack_info=True)
+            return False
         new_edge = Edge(**data["newEdge"])
         self.childs_complex.edges.append(new_edge)
         self._internals.add_edge(new_edge)
-        # self._update_graph_data()
+        # if controlledConnection is set, frontend will only add new edge iff we return True
+        return True
 
     def _validate_node_ids(self, node_ids: list[str]):
         for node_id in node_ids:

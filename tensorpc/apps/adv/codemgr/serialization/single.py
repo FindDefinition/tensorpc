@@ -4,11 +4,6 @@ from tensorpc.apps.adv import api as ADV
 import dataclasses
 
 
-
-# ------ ADV Flow Meta Region ------
-
-ADV.mark_flow_meta(node_id="some_node_id...", position=[0, 0])
-
 # ------ ADV Global Script Region ------
 
 ADV.mark_global_script("some_node_id...", [0, 100])
@@ -19,8 +14,7 @@ ADV.mark_global_script("other_node_id...", [0, 300])
 import numpy as np 
 
 ADV.mark_global_end()
-
-# ------ ADV Symnol Dependency Region ------
+# ------ ADV Symbol Dependency Region ------
 ADV.mark_symbol_dep()
 
 from torch import Tensor
@@ -28,18 +22,18 @@ from torch import Tensor
 
 ADV.mark_symbol_dep_end()
 
-# ------ ADV Ref Nodes Dependency Region (Optional) ------
+
+# ------ ADV Flow Meta Region ------
+
+ADV.mark_flow_meta(node_id="some_node_id...", position=[0, 0])
+
+
+# ------ ADV Ref/Subflow Nodes Dependency Region (Optional) ------
 ADV.mark_ref_node_dep()
 
 from ... import Node1_main_function
 
 ADV.mark_ref_node_dep_end()
-# ------ ADV Nested Flow (fragment) Import Region ------
-ADV.mark_nested_flow_dep()
-
-from .nested_flow1 import nested_flow1
-
-ADV.mark_nested_flow_dep_end()
 
 # ------ ADV Symbol Def Region ------
 

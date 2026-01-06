@@ -48,6 +48,22 @@ _PFLTYPE_TO_SUPPORTED_METHODS = {
         "join":
         inspect.Signature([param_fn("iterable", list[str])],
                           return_annotation=str),  # join
+        "strip":
+        inspect.Signature([],
+                          return_annotation=str),  # strip
+        "rstrip":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "lstrip":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "lower":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "upper":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+
     },
 }
 

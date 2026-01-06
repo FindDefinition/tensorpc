@@ -1,6 +1,6 @@
 import ast
 import inspect
-from typing import Any, Self, Union
+from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
@@ -17,9 +17,21 @@ class FragmentOutputDesc:
     type: Literal["single", "tuple", "dict"]
     # symbol to alias
     mapping: dict[str, tuple[str, str]]
-    
+
+T = TypeVar("T")
+
+def mark_fragment_def(node_id: str, position: tuple[float, float], 
+        ref_node_id: Optional[str] = None,
+        alias_map: Optional[str] = None) -> Callable[[T], T]:
+    # TODO we actually don't use this metadata, we read ast directly.
+    def wrapper(fn_wrapped: T) -> T:
+        return fn_wrapped   
+    return wrapper
+
+
 @dataclasses.dataclass(kw_only=True)
 class FragmentParseResult(BaseParseResult):
+    func_name: str
     input_handles: list[BackendHandle]
     output_handles: list[BackendHandle]
     out_type: Literal["single", "tuple", "dict"]
@@ -34,8 +46,8 @@ class FragmentParseResult(BaseParseResult):
         new_input_handles: list[BackendHandle] = []
         for h in self.input_handles:
             new_h = h.copy()
-            h.handle.source_node_id = None
-            h.handle.source_handle_id = None
+            new_h.handle.source_node_id = None
+            new_h.handle.source_handle_id = None
             new_input_handles.append(new_h)
         return dataclasses.replace(
             self,
@@ -56,6 +68,45 @@ class FragmentParseResult(BaseParseResult):
             self,
             output_handles=new_output_handles,
         )
+
+    @staticmethod
+    def get_signature_lines_from_handles(input_handles: list[BackendHandle]) -> list[str]:
+        lines: list[str] = []
+        for i, handle in enumerate(input_handles):
+            line = f"{handle.handle.name}: {handle.handle.type}, "
+            lines.append(f"    {line}")
+        return lines
+
+    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]):
+        assert self.node is not None 
+        kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
+        if self.node.alias_map is not None:
+            kwarg_str += f', alias_map="{self.node.alias_map}"'
+        decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
+        # for fragment ref, we use inline Annotated instead of decorator
+        if self.node.ref_node_id is not None:
+            return [
+                f"{decorator}({self.func_name})",
+            ]
+        else:
+            impl = self.node.impl
+            assert impl is not None 
+            code = impl.code
+            code_lines = code.splitlines()
+            # generate signature from handles
+            # TODO class support 
+            lines = [
+                f"def {self.func_name}("
+            ]
+            lines += self.get_signature_lines_from_handles(self.input_handles)
+            lines.append(f") -> {self.out_type_anno}:")
+            code_lines_indented = [f"    {line}" for line in code_lines]
+            lines.extend(code_lines_indented)
+            return [
+                f"@{decorator}",
+                *lines,
+            ]
+
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:
@@ -228,7 +279,8 @@ class _ExtractSymbolFromFragment:
 
 
 class FragmentParser:
-    def parse_fragment(self, node_id: str, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle]):
+    def parse_fragment(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle]):
+        node_id = node.id
         tree = ast.parse(code) 
         chain_finder = _ChainAttrFinder(global_scope)
         chain_finder.visit(tree)
@@ -275,7 +327,9 @@ class FragmentParser:
         else:
             out_type_anno = f"dict[str, Any]"
         return FragmentParseResult(
+            node=node,
             succeed=True,
+            func_name=node.name,
             input_handles=input_handles,
             output_handles=output_handles,
             out_type=output_desc.type,

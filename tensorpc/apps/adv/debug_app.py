@@ -1,5 +1,5 @@
 from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackendManager
-from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, OutIndicatorWrapper
+from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IndicatorWrapper
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -109,7 +109,7 @@ return c + a
         id="nf1", 
         nType=ADVNodeType.FRAGMENT,
         position=flowui.XYPosition(600, 100), 
-        name="Nested Fr 0",
+        name="nested_fr_0",
         flow=ADVFlowModel(nodes={
             "nf1-s1": ADVNodeModel(
                 id="nf1-s1", 
@@ -134,8 +134,8 @@ return c + a
             ),
 
         }, edges={
-            "e0": ADVEdgeModel(
-                id="e0", 
+            "nf1-e0": ADVEdgeModel(
+                id="nf1-e0", 
                 source="nf1-f0",
                 sourceHandle=f"{ADVHandlePrefix.Output}-c",
                 target="nf1-oic0",
@@ -151,7 +151,7 @@ return c + a
     #     path=str(PACKAGE_ROOT / "adv" / "test_project"),
 
     # )
-    return ADVProject(
+    res_proj = ADVProject(
         flow=ADVFlowModel(nodes={
             "g1": ADVNodeModel(
                 id="g1", 
@@ -182,8 +182,16 @@ return c + a
                 position=flowui.XYPosition(400, 100), 
                 name="add_func2",
                 inline_subflow_name="inline0",
-
                 impl=InlineCode(fragment1),
+            ),
+            "f0-ref": ADVNodeModel(
+                id="f0-ref", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(200, 200), 
+                name="add_func",
+                inline_subflow_name="inline0",
+                ref_node_id="f0",
+                alias_map="c->C", 
             ),
             "oic0": ADVNodeModel(
                 id="oic0", 
@@ -193,12 +201,33 @@ return c + a
             ),
             "nf1": nested_model,
         }, edges={
+            # "e0": ADVEdgeModel(
+            #     id="e0", 
+            #     source="f1",
+            #     sourceHandle=f"{ADVHandlePrefix.Output}-d",
+            #     target="oic0",
+            #     targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
+            #     isAutoEdge=False,
+            # )
+            "e-f0-ref-a": ADVEdgeModel(
+                id="e-f0-ref-a", 
+                source="n1",
+                sourceHandle=f"{ADVHandlePrefix.Output}-a",
+                target="f0-ref",
+                targetHandle=f"{ADVHandlePrefix.Input}-a",
+                isAutoEdge=False,
+            )
+
         }),
 
         import_prefix="tensorpc.adv.test_project",
         path=str(PACKAGE_ROOT / "adv" / "test_project"),
     )
-
+    nid_to_path, nid_to_fpath = res_proj.assign_path_to_all_node()
+    res_proj.node_id_to_path = nid_to_path
+    res_proj.node_id_to_frontend_path = nid_to_fpath
+    res_proj.update_ref_path(nid_to_path, nid_to_fpath)
+    return res_proj
 
 class App:
     @mark_create_layout
@@ -211,7 +240,7 @@ class App:
         nid_to_path, nid_to_fpath = adv_proj["project"].assign_path_to_all_node()
         adv_proj["project"].node_id_to_path = nid_to_path
         adv_proj["project"].node_id_to_frontend_path = nid_to_fpath
-        adv_proj["project"].update_ref_path(nid_to_fpath)
+        adv_proj["project"].update_ref_path(nid_to_path, nid_to_fpath)
         
         
         model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
@@ -234,8 +263,8 @@ class App:
                 ADVHandlePrefix.Output: 1
             },
             ADVHandlePrefix.OutIndicator: {
-                # output indicator can connect to unlimited inputs
-                ADVHandlePrefix.Output: -1
+                # each out indicator can only connect one output (source)
+                ADVHandlePrefix.Output: 1
             },
         }
         self.graph.prop(targetValidConnectMap=target_conn_valid_map)
@@ -268,12 +297,12 @@ class App:
         manager.sync_project_model()
         manager.parse_all()
         manager.init_all_nodes()
-        import rich 
-        debug_flow = self.dm.get_model().adv_projects["project"].flow
-        rich.print({
-            "nodes": debug_flow.nodes,
-            "edges": debug_flow.edges,
-        })
+        # import rich 
+        # debug_flow = self.dm.get_model().adv_projects["project"].flow
+        # rich.print({
+        #     "nodes": debug_flow.nodes,
+        #     "edges": debug_flow.edges,
+        # })
         self._manager = manager
         graph_container.update_raw_props(default_compute_flow_css())
 
@@ -321,9 +350,10 @@ class App:
     def model_to_ui_node(self, flow: ADVFlowModel, node_id: str):
         node = flow.nodes[node_id]
         if node.nType == ADVNodeType.OUT_INDICATOR:
-            comp = OutIndicatorWrapper(
-                node_id, self.dm
+            comp = IndicatorWrapper(
+                node_id, self.dm, f"{ADVHandlePrefix.OutIndicator}-outputs"
             )
+
         else:
             comp = BaseNodeWrapper(
                 node_id,
@@ -401,12 +431,15 @@ class App:
 
 def _main():
     model = _test_model_symbol_group()
+
     manager = ADVProjectBackendManager(lambda: model.flow)
     manager.sync_project_model()
     manager.parse_all()
     manager.init_all_nodes()
     import rich 
+    parser = manager._flow_node_id_to_parser[""]
     debug_flow = model.flow
+    print("\n".join(parser.serialize_to_code()))
     # rich.print({
     #     "nodes": debug_flow.nodes,
     #     "edges": debug_flow.edges,

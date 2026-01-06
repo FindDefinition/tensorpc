@@ -14,9 +14,10 @@ __TENSORPC_ADV_SYMBOL_DCLS_META__ = "__tensorpc_adv_symbol_dcls_meta__"
 
 T = TypeVar("T")
 
-def mark_symbol_group(id: str, position: tuple[float, float]) -> Callable[[T], T]:
+def mark_symbol_group(node_id: str, position: tuple[float, float], ref_node_id: Optional[str] = None) -> Callable[[T], T]:
+    # TODO we actually don't use this metadata, we read ast directly.
     def wrapper(fn_wrapped: T) -> T:
-        setattr(fn_wrapped, __TENSORPC_ADV_SYMBOL_DCLS_META__, BaseNodeCodeMeta(id, position))
+        setattr(fn_wrapped, __TENSORPC_ADV_SYMBOL_DCLS_META__, BaseNodeCodeMeta(node_id, position, ref_node_id))
         return fn_wrapped   
     return wrapper
 
@@ -48,6 +49,23 @@ class SymbolParseResult(BaseParseResult):
             symbols=new_symbols,
             local_symbols=new_local_symbols,
         )
+
+    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]):
+        assert self.node is not None 
+        kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
+        decorator = f"ADV.{mark_symbol_group.__name__}({kwarg_str})"
+        if self.node.ref_node_id is not None:
+            # only generate line
+            return [
+                f"{decorator}({self.symbol_cls_name})",
+            ]
+        else:
+            impl = self.node.impl
+            assert impl is not None
+            return [
+                f"@{decorator}",
+                impl.code,
+            ]
 
 _default_typing_imports = [
     "Literal",
@@ -88,7 +106,8 @@ class SymbolParser:
     def __init__(self):
         self._cached_symbol_parse_res: dict[str, list[tuple[str, SymbolParseResult]]] = {}
 
-    def parse_symbol_node(self, node_id: str, code: str, global_scope: dict[str, Any], global_scripts: list[str]):
+    def parse_symbol_node(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], global_scripts: list[str]):
+        node_id = node.id
         code_to_exec = "\n".join(global_scripts + [code])
         code_to_exec_md5 = hashlib.md5(code_to_exec.encode()).hexdigest()
         if code_to_exec_md5 in self._cached_symbol_parse_res:
@@ -145,7 +164,6 @@ class SymbolParser:
                 is_input=False,
                 symbol_name=symbol_name,
                 default=default_str,
-                type_dep_qnames=local_qnames,
                 source_node_id=node_id,
                 source_handle_id=handle_id,
                 is_sym_handle=True,
@@ -154,17 +172,20 @@ class SymbolParser:
             symbol_handles.append(BackendHandle(
                 handle=handle,
                 index=cnt,
+                type_dep_qnames=local_qnames,
             ))
             local_handle = dataclasses.replace(handle, 
-                type=local_type_str, type_dep_qnames=[] if type_str_is_local else local_qnames)
+                type=local_type_str)
             local_backend_handle = BackendHandle(
                 handle=local_handle,
                 index=cnt,
+                type_dep_qnames=[] if type_str_is_local else local_qnames
             )
             symbol_handles_local_flow.append(local_backend_handle)
             cnt += 1
 
         parse_res = SymbolParseResult(
+            node=node,
             symbol_cls_name=cls_name,
             succeed=True,
             symbols=symbol_handles,

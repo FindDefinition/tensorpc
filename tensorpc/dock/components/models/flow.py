@@ -267,7 +267,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         edge_change_type = ev.type_dict["edges"]
         # handle whole flow change
         # TODO should we watch path draft change?
-        print(DraftEventType(node_change_type), DraftEventType(edge_change_type))
+        # print(DraftEventType(node_change_type), DraftEventType(edge_change_type))
         is_mount_change = node_change_type == DraftEventType.MountChange
         is_full_change = node_change_type == DraftEventType.ObjectIdChange and edge_change_type == DraftEventType.ObjectIdChange
         if is_full_change or is_mount_change:

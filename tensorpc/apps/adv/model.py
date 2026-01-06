@@ -71,15 +71,7 @@ class ADVNodeHandle:
     is_input: bool
     symbol_name: str = ""
     default: Optional[str] = None
-    # when user select a fragment node, we will use different
-    # border color to highlight it.
-    fragment_selected: bool = False
-    # when user select a variable in code editor,
-    # we will use different style to highlight it.
-    var_selected: bool = False
-    # this store all qualified names that this handle type depend on.
-    # e.g. list[torch.Tensor] will have ["torch.Tensor"]
-    type_dep_qnames: list[str] = dataclasses.field(default_factory=list)
+    flags: int = 0
     source_node_id: Optional[str] = None
     source_handle_id: Optional[str] = None
     is_sym_handle: bool = False
@@ -108,6 +100,7 @@ class ADVNodeModel(BaseNodeModel):
     # when this node have nested flow, this is the import code to import libraries.
     # if two node share same impl, this stores the key to original node.
     ref_fe_path: Optional[list[str]] = None
+    ref_import_path: Optional[list[str]] = None
     ref_node_id: Optional[str] = None
 
     inline_subflow_name: Optional[str] = None
@@ -121,6 +114,9 @@ class ADVNodeModel(BaseNodeModel):
     # fields
     # base classes
     # decorators
+    # --- out indicator node props ---
+    oic_alias: str = ""
+
 
 @dataclasses.dataclass
 class ADVEdgeModel(BaseEdgeModel):
@@ -217,11 +213,12 @@ class ADVProject:
             _assign(n, ["nodes", n_id], [n.name], 0)
         return node_id_to_path, node_id_to_frontend_path
 
-    def update_ref_path(self, node_id_to_frontend_path: dict[str, list[str]]):
+    def update_ref_path(self, node_id_to_path: dict[str, list[str]], node_id_to_frontend_path: dict[str, list[str]]):
         def _update(node: ADVNodeModel, path: list[str]):
             if node.ref_node_id is not None:
                 assert node.ref_node_id in node_id_to_frontend_path, f"ref node id {node.ref_node_id} not found"
                 node.ref_fe_path = node_id_to_frontend_path[node.ref_node_id]
+                node.ref_import_path = node_id_to_path[node.ref_node_id]
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
                     _update(n, path + ["flow", "nodes", n_id])
@@ -354,13 +351,28 @@ class ADVRoot:
                 node_is_ref = True
         return node, node_is_ref
 
+    @mui.DataModel.mark_pfl_func
+    def get_real_node_pair_by_id(self, node_id: str) -> tuple[Optional[ADVNodeModel], Optional[ADVNodeModel], bool]:
+        cur_proj = self.adv_projects[self.cur_adv_project]
+        node_frontend_path = cur_proj.node_id_to_frontend_path[node_id]
+        node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+            cur_proj.flow, node_frontend_path)
+        node_is_ref = False
+        real_node: Optional[ADVNodeModel] = node
+        if node is not None:
+            if node.ref_node_id is not None and node.ref_fe_path is not None:
+                real_node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+                    cur_proj.flow, node.ref_fe_path)
+                node_is_ref = True
+        return node, real_node, node_is_ref
+
     @mui.DataModel.mark_pfl_query_nested_func
     def get_handle(self, paths: list[Any], node_id: str) -> dict[str, Any]:
-        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
+        node, real_node, real_node_is_ref = self.get_real_node_pair_by_id(node_id)
         res: dict[str, Any] = {}
-        if real_node is not None:
+        if node is not None and real_node is not None:
             handle_idx: int = paths[0]
-            handle = real_node.handles[handle_idx]
+            handle = node.handles[handle_idx]
             is_input = handle.is_input
             if handle.dict_key is not None:
                 # we need to show original key if dict output.
@@ -369,6 +381,8 @@ class ADVRoot:
                 name = handle.name + "(" + handle.dict_key + ")"
             else:
                 name = handle.name
+            # if real_node_is_ref:
+            #     print(node_id, real_node.id, handle)
             res = {
                 "id": handle.id,
                 "name": name,
@@ -408,6 +422,21 @@ class ADVRoot:
                 # "hpos": "left" if is_input else "right",
                 # "textAlign": "start" if is_input else "end",
             }
+            # output indicator props
+            if real_node.nType == ADVNodeType.OUT_INDICATOR:
+                if len(real_node.handles) == 0:
+                    res["header"] = "..."
+                else:
+                    first_handle = real_node.handles[0]
+                    sym_name = first_handle.symbol_name
+                    if sym_name == "":
+                        res["header"] = "..."
+                    
+                    elif real_node.oic_alias.strip() != "":
+                        res["header"] = sym_name + "->" + real_node.oic_alias.strip()
+                    else:
+                        res["header"] = sym_name
+
             # if is_input:
             #     res["hborder"] = "1px solid #4caf50"
         return res

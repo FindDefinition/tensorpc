@@ -1,14 +1,36 @@
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components.mui.editor import MonacoRange
-from tensorpc.apps.adv.model import ADVNodeHandle
+from tensorpc.apps.adv.model import ADVNodeHandle, ADVNodeModel
 from typing import Any, Optional, Self
 
 
 @dataclasses.dataclass(kw_only=True)
 class BaseParseResult:
+    # root flow don't have parent node, so this can be None.
+    node: Optional[ADVNodeModel]
     succeed: bool
     error_msg: str = ""
     inline_error_msgs: list[tuple[MonacoRange, str]] = dataclasses.field(default_factory=list)
+
+    @staticmethod
+    def get_node_meta_kwargs(node: ADVNodeModel) -> list[str]:
+        # most of nodes in a flow needs to serialize their position and id.
+        # e.g. `@ADV.mark_symbol_def(node_id=..., position=[100, 200], ref_node_id=...)`
+        # this function is used to generate kwarg strings.
+        assert node is not None 
+        position_tuple = (node.position.x, node.position.y)
+        id_str = node.id 
+
+        res = [
+            f'node_id="{id_str}"',
+            f'position={position_tuple}',
+        ]
+        if node.ref_node_id is not None:
+            res.append(f'ref_node_id="{node.ref_node_id}"')
+        return res
+
+    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]) -> list[str]:
+        raise NotImplementedError
 
 @dataclasses.dataclass(kw_only=True)
 class BackendHandle:
@@ -17,8 +39,10 @@ class BackendHandle:
     index: int 
      # list of (node_id, handle_id) except edges that connect to output indicators
     target_node_handle_id: set[tuple[str, str]] = dataclasses.field(default_factory=set)
-
-    is_subflow_output: bool = False
+    is_inlineflow_out: bool = False
+    # this store all qualified names that this handle type depend on.
+    # e.g. list[torch.Tensor] will have ["torch.Tensor"]
+    type_dep_qnames: list[str] = dataclasses.field(default_factory=list)
 
     @property 
     def symbol_name(self) -> str:
@@ -63,3 +87,10 @@ class BackendHandle:
 class BaseNodeCodeMeta:
     id: str 
     position: tuple[float, float]
+    ref_node_id: Optional[str] = None
+
+@dataclasses.dataclass 
+class RefNodeMeta:
+    id: str 
+    position: tuple[float, float]
+    alias_map: Optional[str] = None
