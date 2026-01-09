@@ -115,11 +115,12 @@ class FragmentParseResult(BaseParseResult):
         if len(self.output_handles) != len(other_res.output_handles):
             return True
         for h1, h2 in zip(self.input_handles, other_res.input_handles):
-            if h1.symbol_name != h2.symbol_name:
+            if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
                 return True
         for h1, h2 in zip(self.output_handles, other_res.output_handles):
-            if h1.symbol_name != h2.symbol_name:
+            if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
                 return True
+                
         return False
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:

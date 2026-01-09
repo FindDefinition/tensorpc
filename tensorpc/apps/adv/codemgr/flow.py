@@ -17,7 +17,7 @@ import dataclasses as dataclasses_plain
 from tensorpc.apps.adv.codemgr import markers as adv_markers
 
 
-from tensorpc.core.funcid import get_attribute_name
+from tensorpc.core.funcid import clean_source_code, get_attribute_name
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.apps.adv import api as _ADV
 _ROOT_FLOW_ID = ""
@@ -283,6 +283,7 @@ class FlowParseResult(FragmentParseResult):
                 arg_name_parts: list[str] = []
                 for h in parse_res.input_handles:
                     if h.handle.source_node_id is None:
+                        # TODO handle default value
                         arg_name_parts.append("ADV.MISSING")
                     else:
                         arg_name_parts.append(h.handle.symbol_name)
@@ -356,10 +357,20 @@ class ADVProjectBackendManager:
             _ROOT_FLOW_ID: FlowParser()
         }
 
+        self._node_gid_to_ref_gids: dict[str, list[str]] = {}
+
     def get_subflow_parser(self, node_with_subflow: ADVNodeModel) -> "FlowParser":
         assert node_with_subflow.flow is not None, "Node has no nested flow."
         node_gid = node_with_subflow.get_global_uid()
         return self._flow_node_gid_to_parser[node_gid]
+
+    def _update_refs(self):
+        self._node_gid_to_node.clear()
+        for gid, node in self._node_gid_to_node.items():
+            if node.ref_node_id is not None:
+                ref_gids = self._node_gid_to_ref_gids.get(node.get_ref_global_uid(), [])
+                ref_gids.append(gid)
+                self._node_gid_to_ref_gids[node.ref_node_id] = ref_gids
 
     def sync_project_model(self):
         self._node_gid_to_node.clear()
@@ -390,6 +401,14 @@ class ADVProjectBackendManager:
         # must be called after sync_project_model
         visited: set[str] = set()
         for flow_gid, (flow, flow_parent_node) in self._node_gid_to_flow.items():
+            flow_parser = self._flow_node_gid_to_parser[flow_gid]
+            flow_parser._parse_flow_recursive(flow_parent_node, flow_gid, flow, self, visited)
+
+    def parse_by_flow_gids(self, flow_gids: list[str]):
+        # must be called after sync_project_model
+        visited: set[str] = set()
+        for flow_gid in flow_gids:
+            (flow, flow_parent_node) = self._node_gid_to_flow[flow_gid]
             flow_parser = self._flow_node_gid_to_parser[flow_gid]
             flow_parser._parse_flow_recursive(flow_parent_node, flow_gid, flow, self, visited)
 
@@ -440,11 +459,66 @@ class ADVProjectBackendManager:
     def modify_inline_flow_name(self, node_gid: str, new_inlineflow: str):
         pass
 
+    def _reparse_fragment_node(self, node_gid: str, node: ADVNodeModel, visited: set[str]):
+        pass 
+
+    def _reparse_symbol_node(self, node_gid: str, node: ADVNodeModel, visited: set[str]):
+        flow_gids_to_parse: set[str] = set()
+        node_gids = [node_gid] + self._node_gid_to_ref_gids.get(node_gid, [])
+        for node_gid in node_gids:
+            flow, parent_node = self._node_gid_to_flow[node_gid]
+            if parent_node is None:
+                flow_gid = _ROOT_FLOW_ID
+            else:
+                flow_gid = parent_node.get_global_uid()
+            flow_gids_to_parse.add(flow_gid)
+        for flow_gid in flow_gids_to_parse:
+            flow_parser = self._flow_node_gid_to_parser[flow_gid]
+            flow, parent_flow_node = self._node_gid_to_flow[flow_gid]
+            prev_parse_res = flow_parser._flow_parse_result
+            prev_node_id_to_parse_res = flow_parser._node_id_to_parse_result.copy()
+            flow_parser._node_id_to_parse_result.clear()
+            flow_parse_res = flow_parser._parse_flow_recursive(parent_flow_node, flow_gid, flow, self, visited) 
+            if prev_parse_res is not None:
+                node_id_to_parse_res = flow_parser._node_id_to_parse_result
+                need_to_trigger_inlineflow_parse = False
+                for node_id, parse_res in node_id_to_parse_res.items():
+                    cur_node = flow.nodes[node_id]
+                    prev_parse_res = prev_node_id_to_parse_res[node_id]
+                    # don't care ref node because edges of ref node is connected by user, not auto-generated.
+                    if cur_node.nType == ADVNodeType.FRAGMENT and cur_node.ref_node_id is None:
+                        assert isinstance(parse_res, FragmentParseResult)
+                        assert isinstance(prev_parse_res, FragmentParseResult)
+                        if parse_res.is_io_handle_changed(prev_parse_res):
+                            # need to reparse all ref fragment nodes
+                            self._reparse_fragment_node(cur_node.get_global_uid(), cur_node, visited)
+                            if cur_node.inlinesf_name is not None:
+                                need_to_trigger_inlineflow_parse = True
+                if need_to_trigger_inlineflow_parse:
+                    pass 
+        # TODO
+
     def modify_code_impl(self, node_gid: str, new_code: str):
         node = self._node_gid_to_node[node_gid]
+        assert node.impl is not None 
+        prev_code = node.impl.code
+        prev_code_clean = clean_source_code(prev_code.splitlines())
+        new_code_clean = clean_source_code(new_code.splitlines())
+        if prev_code_clean == new_code_clean:
+            # TODO only need to modify code in frontend/backend (file store).
+            return
+
         if node.nType == ADVNodeType.SYMBOLS:
+            # if we modify symbols, it's hard to determine which symbol changed,
+            # so we reparse the whole flow
+            self._reparse_symbol_node(node_gid, node, set())
+            # also all flows that contains ref node to this node
+            # need to be parsed.
+        elif node.nType == ADVNodeType.FRAGMENT:
+            # also all flows that contains ref node to this node
+            # need to be parsed.
+
             pass 
-        pass
 
     def modify_alias_map(self, node_gid: str, new_alias_map: str):
         pass
