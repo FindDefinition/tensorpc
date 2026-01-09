@@ -1,6 +1,7 @@
-from .codemgr.fragment import mark_outputs
+from .codemgr.fragment import mark_outputs, mark_stable_symbols
 
-from .codemgr.symbols import mark_symbol_group as _mark_symbol_group
+from .codemgr.markers import *
 
+from tensorpc.core.annolib import undefined as __undefined
 
-MISSING = None
+MISSING = __undefined

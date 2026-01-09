@@ -1,4 +1,5 @@
 from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackendManager
+from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser
 from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IndicatorWrapper
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
@@ -8,7 +9,7 @@ import tensorpc.core.datamodel.funcs as D
 from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
-from typing import Optional, Any
+from typing import Literal, Optional, Any
 from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 from tensorpc.core.datamodel.draft import (get_draft_pflpath)
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
@@ -83,6 +84,54 @@ def _test_model_simple():
         path=str(PACKAGE_ROOT / "adv" / "test_project"),
     )
 
+def _get_simple_flow(name: str, op: Literal["+", "-", "*", "/"], sym_import_path: list[str]):
+    fragment = f"""
+ADV.mark_outputs("c")
+return a {op} b
+    """
+    if op == "+":
+        op_name = "add"
+    elif op == "-":
+        op_name = "sub"
+    elif op == "*":
+        op_name = "mul"
+    elif op == "/":
+        op_name = "div"
+    else:
+        raise ValueError(f"Unsupported op: {op}")
+    return ADVFlowModel(nodes={
+        "sym_def": ADVNodeModel(
+            id="sym_def", 
+            nType=ADVNodeType.SYMBOLS,
+            position=flowui.XYPosition(0, 0), 
+            ref_node_id="sym_def",
+            ref_import_path=sym_import_path,
+        ),
+        "func": ADVNodeModel(
+            id="func", 
+            nType=ADVNodeType.FRAGMENT,
+            position=flowui.XYPosition(200, 0), 
+            name=f"{name}_func",
+            inlinesf_name=name,
+            impl=InlineCode(fragment),
+        ),
+        "o0": ADVNodeModel(
+            id="o0", 
+            nType=ADVNodeType.OUT_INDICATOR,
+            position=flowui.XYPosition(400, 0), 
+            name="Outputs",
+        ),
+        }, edges={
+            "e0": ADVEdgeModel(
+                id="e0", 
+                source="func",
+                sourceHandle=f"{ADVHandlePrefix.Output}-c",
+                target="o0",
+                targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
+                isAutoEdge=False,
+            )
+        })
+
 
 def _test_model_symbol_group():
     global_script_0 = f"""
@@ -97,7 +146,7 @@ class SymbolGroup0:
     d: int
     """
 
-    fragment0 = f"""
+    fragment_add = f"""
 ADV.mark_outputs("c")
 return a + b
     """
@@ -105,40 +154,112 @@ return a + b
 ADV.mark_outputs("d->D")
 return c + a
     """
+
+    nested_model_symbol_lib = ADVNodeModel(
+        id="sym_lib", 
+        nType=ADVNodeType.FRAGMENT,
+        position=flowui.XYPosition(0, 200), 
+        name="sym_lib",
+        flow=ADVFlowModel(nodes={
+            "sym_def": ADVNodeModel(
+                id="sym_def", 
+                nType=ADVNodeType.SYMBOLS,
+                position=flowui.XYPosition(0, 0), 
+                name="sym_def",
+                impl=InlineCode(symbolgroup0),
+            ),
+        }, edges={})
+    )
+    nested_model_op_lib = ADVNodeModel(
+        id="op_lib", 
+        nType=ADVNodeType.FRAGMENT,
+        position=flowui.XYPosition(600, 600), 
+        name="op_lib",
+        flow=ADVFlowModel(nodes={
+            "sym_lib": nested_model_symbol_lib,
+            "add": ADVNodeModel(
+                id="add", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(0, 0), 
+                name="add",
+                flow=_get_simple_flow("add", "+", ["op_lib", "sym_lib"]),
+            ),
+            "sub": ADVNodeModel(
+                id="sub", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(200, 0), 
+                name="sub",
+                flow=_get_simple_flow("sub", "-", ["op_lib", "sym_lib"]),
+            ),
+            "div": ADVNodeModel(
+                id="div", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(400, 0), 
+                name="div",
+                flow=_get_simple_flow("div", "/", ["op_lib", "sym_lib"]),
+            ),
+            "mul": ADVNodeModel(
+                id="mul", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(600, 0), 
+                name="mul",
+                flow=_get_simple_flow("mul", "*", ["op_lib", "sym_lib"]),
+            ),
+        }, edges={})
+    )
+
     nested_model = ADVNodeModel(
         id="nf1", 
         nType=ADVNodeType.FRAGMENT,
         position=flowui.XYPosition(600, 100), 
-        name="nested_fr_0",
+        name="nested0",
         flow=ADVFlowModel(nodes={
-            "nf1-s1": ADVNodeModel(
-                id="nf1-s1", 
+            "s1": ADVNodeModel(
+                id="s1", 
                 nType=ADVNodeType.SYMBOLS,
                 position=flowui.XYPosition(0, 0), 
                 name="SymbolGroup",
                 impl=InlineCode(symbolgroup0),
             ),
-            "nf1-f0": ADVNodeModel(
-                id="nf1-f0", 
+            "mul": ADVNodeModel(
+                id="mul", 
                 nType=ADVNodeType.FRAGMENT,
                 position=flowui.XYPosition(200, 0), 
-                name="add_func_nested",
-                inline_subflow_name=ADV_MAIN_FLOW_NAME,
-                impl=InlineCode(fragment0),
+                name="mul_func",
+                inlinesf_name="nested0",
+                ref_node_id="func",
+                ref_import_path=["op_lib", "mul"],
             ),
-            "nf1-oic0": ADVNodeModel(
-                id="nf1-oic0", 
+            "oic0": ADVNodeModel(
+                id="oic0", 
                 nType=ADVNodeType.OUT_INDICATOR,
                 position=flowui.XYPosition(400, 100), 
                 name="Outputs",
             ),
 
         }, edges={
-            "nf1-e0": ADVEdgeModel(
-                id="nf1-e0", 
-                source="nf1-f0",
+            "ea": ADVEdgeModel(
+                id="ea", 
+                source="s1",
+                sourceHandle=f"{ADVHandlePrefix.Output}-a",
+                target="mul",
+                targetHandle=f"{ADVHandlePrefix.Input}-a",
+                isAutoEdge=False,
+            ),
+            "eb": ADVEdgeModel(
+                id="eb", 
+                source="s1",
+                sourceHandle=f"{ADVHandlePrefix.Output}-b",
+                target="mul",
+                targetHandle=f"{ADVHandlePrefix.Input}-b",
+                isAutoEdge=False,
+            ),
+
+            "eo": ADVEdgeModel(
+                id="eo", 
+                source="mul",
                 sourceHandle=f"{ADVHandlePrefix.Output}-c",
-                target="nf1-oic0",
+                target="oic0",
                 targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
                 isAutoEdge=False,
             )
@@ -153,6 +274,7 @@ return c + a
     # )
     res_proj = ADVProject(
         flow=ADVFlowModel(nodes={
+            "op_lib": nested_model_op_lib,
             "g1": ADVNodeModel(
                 id="g1", 
                 nType=ADVNodeType.GLOBAL_SCRIPT,
@@ -168,29 +290,30 @@ return c + a
                 name="SymbolGroup",
                 impl=InlineCode(symbolgroup0),
             ),
-            "f0": ADVNodeModel(
-                id="f0", 
+            "add": ADVNodeModel(
+                id="add", 
                 nType=ADVNodeType.FRAGMENT,
                 position=flowui.XYPosition(200, 0), 
                 name="add_func",
-                inline_subflow_name="inline0",
-                impl=InlineCode(fragment0),
+                inlinesf_name="inline0",
+                impl=InlineCode(fragment_add),
             ),
             "f1": ADVNodeModel(
                 id="f1", 
                 nType=ADVNodeType.FRAGMENT,
                 position=flowui.XYPosition(400, 100), 
                 name="add_func2",
-                inline_subflow_name="inline0",
+                inlinesf_name="inline0",
                 impl=InlineCode(fragment1),
             ),
-            "f0-ref": ADVNodeModel(
-                id="f0-ref", 
+            "add-ref": ADVNodeModel(
+                id="add-ref", 
                 nType=ADVNodeType.FRAGMENT,
                 position=flowui.XYPosition(200, 200), 
                 name="add_func",
-                inline_subflow_name="inline0",
-                ref_node_id="f0",
+                inlinesf_name="inline0",
+                ref_node_id="add",
+                ref_import_path=[],
                 alias_map="c->C", 
             ),
             "oic0": ADVNodeModel(
@@ -200,6 +323,27 @@ return c + a
                 name="Outputs",
             ),
             "nf1": nested_model,
+            "nf1-mul-ref": ADVNodeModel(
+                id="nf1-mul-ref", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(800, 400), 
+                name="fn_nested",
+                # inlinesf_name="inline0",
+                ref_node_id="mul",
+                ref_import_path=["op_lib"],
+                # alias_map="c->C", 
+            ),
+            # "sub-ref": ADVNodeModel(
+            #     id="nf2-sub-ref", 
+            #     nType=ADVNodeType.FRAGMENT,
+            #     position=flowui.XYPosition(800, 600), 
+            #     name="fn_nested",
+            #     # inlinesf_name="inline0",
+            #     ref_node_id="sub",
+            #     ref_import_path=["nested0", "nested1"],
+            #     # alias_map="c->C", 
+            # ),
+
         }, edges={
             # "e0": ADVEdgeModel(
             #     id="e0", 
@@ -209,11 +353,11 @@ return c + a
             #     targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
             #     isAutoEdge=False,
             # )
-            "e-f0-ref-a": ADVEdgeModel(
-                id="e-f0-ref-a", 
+            "e-add-ref-a": ADVEdgeModel(
+                id="e-add-ref-a", 
                 source="n1",
                 sourceHandle=f"{ADVHandlePrefix.Output}-a",
-                target="f0-ref",
+                target="add-ref",
                 targetHandle=f"{ADVHandlePrefix.Input}-a",
                 isAutoEdge=False,
             )
@@ -223,10 +367,32 @@ return c + a
         import_prefix="tensorpc.adv.test_project",
         path=str(PACKAGE_ROOT / "adv" / "test_project"),
     )
-    nid_to_path, nid_to_fpath = res_proj.assign_path_to_all_node()
-    res_proj.node_id_to_path = nid_to_path
-    res_proj.node_id_to_frontend_path = nid_to_fpath
-    res_proj.update_ref_path(nid_to_path, nid_to_fpath)
+    ngid_to_path, ngid_to_fpath = res_proj.assign_path_to_all_node()
+    res_proj.node_gid_to_path = ngid_to_path
+    res_proj.node_gid_to_frontend_path = ngid_to_fpath
+    res_proj.update_ref_path(ngid_to_path, ngid_to_fpath)
+
+    # manager = ADVProjectBackendManager(lambda: res_proj.flow)
+    # manager.sync_project_model()
+    # manager.parse_all()
+    # manager.init_all_nodes()
+    # path_to_code: dict[str, str] = {}
+    # for flow_id, parser in manager._flow_node_gid_to_parser.items():
+    #     assert parser._flow_parse_result is not None 
+    #     parse_res = parser._flow_parse_result
+    #     path = ".".join(parse_res.get_path_list())
+    #     code_lines = parse_res.generated_code_lines
+    #     code = "\n".join(code_lines)
+    #     path_to_code[path] = code
+
+    # proj_parser = ADVProjectParser(lambda path: path_to_code[".".join(path)])
+    # flow = proj_parser._parse_desc_to_flow_model([], set())
+    # res_proj.flow = flow
+    # ngid_to_path, ngid_to_fpath = res_proj.assign_path_to_all_node()
+    # res_proj.node_gid_to_path = ngid_to_path
+    # res_proj.node_gid_to_frontend_path = ngid_to_fpath
+    # res_proj.update_ref_path(ngid_to_path, ngid_to_fpath)
+
     return res_proj
 
 class App:
@@ -237,10 +403,10 @@ class App:
             "project": _test_model_symbol_group()
 
         }
-        nid_to_path, nid_to_fpath = adv_proj["project"].assign_path_to_all_node()
-        adv_proj["project"].node_id_to_path = nid_to_path
-        adv_proj["project"].node_id_to_frontend_path = nid_to_fpath
-        adv_proj["project"].update_ref_path(nid_to_path, nid_to_fpath)
+        ngid_to_path, ngid_to_fpath = adv_proj["project"].assign_path_to_all_node()
+        adv_proj["project"].node_gid_to_path = ngid_to_path
+        adv_proj["project"].node_gid_to_frontend_path = ngid_to_fpath
+        adv_proj["project"].update_ref_path(ngid_to_path, ngid_to_fpath)
         
         
         model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
@@ -349,14 +515,14 @@ class App:
 
     def model_to_ui_node(self, flow: ADVFlowModel, node_id: str):
         node = flow.nodes[node_id]
+        node_gid = node.get_global_uid()
         if node.nType == ADVNodeType.OUT_INDICATOR:
             comp = IndicatorWrapper(
-                node_id, self.dm, f"{ADVHandlePrefix.OutIndicator}-outputs"
+                node_gid, self.dm, f"{ADVHandlePrefix.OutIndicator}-outputs"
             )
-
         else:
             comp = BaseNodeWrapper(
-                node_id,
+                node_gid,
                 self.dm,
                 ADVNodeType(node.nType),
             )
@@ -430,6 +596,7 @@ class App:
 
 
 def _main():
+    import rich 
     model = _test_model_symbol_group()
 
     manager = ADVProjectBackendManager(lambda: model.flow)
@@ -437,9 +604,30 @@ def _main():
     manager.parse_all()
     manager.init_all_nodes()
     import rich 
-    parser = manager._flow_node_id_to_parser[""]
-    debug_flow = model.flow
-    print("\n".join(parser.serialize_to_code()))
+    path_to_code: dict[str, str] = {}
+    for flow_id, parser in manager._flow_node_gid_to_parser.items():
+
+        assert parser._flow_parse_result is not None 
+        parse_res = parser._flow_parse_result
+        path = ".".join(parse_res.get_path_list())
+        code_lines = parse_res.generated_code_lines
+        code = "\n".join(code_lines)
+        path_to_code[path] = code
+        print("+" * 80)
+        print("+" * 80)
+
+        print(code)
+
+    proj_parser = ADVProjectParser(lambda path: path_to_code[".".join(path)])
+    flow = proj_parser._parse_desc_to_flow_model([], set())
+    model.flow = flow
+    ngid_to_path, ngid_to_fpath = model.assign_path_to_all_node()
+    model.node_gid_to_path = ngid_to_path
+    model.node_gid_to_frontend_path = ngid_to_fpath
+    model.update_ref_path(ngid_to_path, ngid_to_fpath)
+
+    # rich.print(desc)
+    # proj_parser._parse_desc_to_flow_model(["test", "adv"], set())
     # rich.print({
     #     "nodes": debug_flow.nodes,
     #     "edges": debug_flow.edges,

@@ -6,9 +6,9 @@ from typing import Any, Optional, TypedDict, Union
 from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
 
 class BaseHandle(mui.FlexBox):
-    def __init__(self, node_id: str,
+    def __init__(self, node_gid: str,
                  dm: mui.DataModel[ADVRoot]):
-        get_handle_fn = partial(ADVRoot.get_handle, node_id=node_id)
+        get_handle_fn = partial(ADVRoot.get_handle, node_gid=node_gid)
         handle = flowui.Handle("target", "left", "")
         handle.prop(className=f"{ComputeFlowClasses.IOHandleBase} {ComputeFlowClasses.InputHandle}")
         handle.bind_pfl_query(dm, 
@@ -53,12 +53,12 @@ class BaseHandle(mui.FlexBox):
 class BaseNodeWrapper(mui.FlexBox):
 
     def __init__(self,
-                 node_id: str,
+                 node_gid: str,
                  dm: mui.DataModel[ADVRoot],
                  node_type: ADVNodeType,
                  children: Optional[mui.LayoutType] = None,
                  child_overflow: Optional[mui.OverflowType] = None):
-        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_id=node_id)
+        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_gid=node_gid)
         header = mui.Typography("").prop(variant="body2", flex=1)
         # header.bind_fields(value=node_model_draft.node.name)
 
@@ -72,8 +72,8 @@ class BaseNodeWrapper(mui.FlexBox):
             icon=(get_node_fn, "iconType"))
         icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small", muiColor="primary")
         icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small", muiColor="primary")
-        icon_is_shortcut.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isRef"))
-        icon_is_main_flow.bind_pfl_query(dm, show=(partial(ADVRoot.get_node_frontend_props, node_id=node_id), "isMainFlow"))
+        icon_is_shortcut.bind_pfl_query(dm, show=(get_node_fn, "isRef"))
+        icon_is_main_flow.bind_pfl_query(dm, show=(get_node_fn, "isMainFlow"))
 
         header_icons = mui.HBox([
             icon_is_shortcut,
@@ -86,7 +86,7 @@ class BaseNodeWrapper(mui.FlexBox):
         ]).prop(className=
                 f"{ComputeFlowClasses.Header} {ComputeFlowClasses.NodeItem}")
         handles = mui.DataFlexBox(BaseHandle(
-            node_id, dm))
+            node_gid, dm))
         handles.prop(variant="fragment")
         handles.bind_pfl_query(dm, 
             dataList=(get_node_fn, "handles"))
@@ -124,13 +124,13 @@ class BaseNodeWrapper(mui.FlexBox):
         self.prop(minWidth="150px")
 
         self._node_type = node_type
-        self._node_id = node_id
+        self._node_gid = node_gid
 
 class IndicatorWrapper(mui.FlexBox):
-    def __init__(self, node_id: str,
+    def __init__(self, node_gid: str,
                  dm: mui.DataModel[ADVRoot],
                  handle_id: str):
-        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_id=node_id)
+        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_gid=node_gid)
         handle = flowui.Handle("target", "left", handle_id)
         handle.prop(className=f"{ComputeFlowClasses.IOHandleBase} {ComputeFlowClasses.InputHandle}")
         handle_desc = mui.Typography("").prop(

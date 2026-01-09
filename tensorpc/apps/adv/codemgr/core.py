@@ -1,16 +1,17 @@
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components.mui.editor import MonacoRange
 from tensorpc.apps.adv.model import ADVNodeHandle, ADVNodeModel
-from typing import Any, Optional, Self
-
+from typing import Any, Optional, Self, Union
+import abc 
 
 @dataclasses.dataclass(kw_only=True)
 class BaseParseResult:
     # root flow don't have parent node, so this can be None.
     node: Optional[ADVNodeModel]
-    succeed: bool
+    succeed: bool = True
     error_msg: str = ""
     inline_error_msgs: list[tuple[MonacoRange, str]] = dataclasses.field(default_factory=list)
+    lineno: int = -1
 
     @staticmethod
     def get_node_meta_kwargs(node: ADVNodeModel) -> list[str]:
@@ -92,5 +93,9 @@ class BaseNodeCodeMeta:
 @dataclasses.dataclass 
 class RefNodeMeta:
     id: str 
-    position: tuple[float, float]
+    ref_node_id: str
+    position: tuple[Union[int, float], Union[int, float]]
     alias_map: Optional[str] = None
+    is_local_ref: bool = False
+
+

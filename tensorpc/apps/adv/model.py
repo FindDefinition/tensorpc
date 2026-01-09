@@ -1,7 +1,8 @@
 from collections.abc import Sequence
 from pathlib import Path
 import traceback
-from typing import Annotated, Any, Callable, Mapping, Optional, Self, cast
+from typing import Annotated, Any, Callable, Mapping, Optional, Self, Union, cast
+from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
@@ -103,7 +104,7 @@ class ADVNodeModel(BaseNodeModel):
     ref_import_path: Optional[list[str]] = None
     ref_node_id: Optional[str] = None
 
-    inline_subflow_name: Optional[str] = None
+    inlinesf_name: Optional[str] = None
     # --- fragment node props ---
     # alias_map_str: use alias->new_alias,alias2->new_alias2
     # to rename a output handle of a ref node or subflow node 
@@ -117,6 +118,13 @@ class ADVNodeModel(BaseNodeModel):
     # --- out indicator node props ---
     oic_alias: str = ""
 
+    def get_global_uid(self):
+        # TODO should we use node id list instead of names + [last_id]？
+        return UniqueTreeIdForTree.from_parts(self.path + [self.id]).uid_encoded
+
+    def get_ref_global_uid(self):
+        assert self.ref_node_id is not None and self.ref_import_path is not None
+        return UniqueTreeIdForTree.from_parts(self.ref_import_path + [self.ref_node_id]).uid_encoded
 
 @dataclasses.dataclass
 class ADVEdgeModel(BaseEdgeModel):
@@ -152,6 +160,10 @@ class ADVFlowModel(BaseFlowModel[ADVNodeModel, ADVEdgeModel]):
         name = uuid.uuid4().hex + "E-" + name
         return self._make_unique_name(self.edges, name, max_count)
 
+    def __post_init__(self):
+        # disable runtime
+        pass
+
 @dataclasses.dataclass(kw_only=True)
 class ADVProject:
     flow: ADVFlowModel
@@ -160,10 +172,10 @@ class ADVProject:
     # example: ['nodes', 'node_id_0', flow, 'nodes', 'node_id_1', 'flow']
     cur_path: list[str] = dataclasses.field(default_factory=list)
     # node id to relative fs path
-    node_id_to_path: dict[str, list[str]] = dataclasses.field(
+    node_gid_to_path: dict[str, list[str]] = dataclasses.field(
         default_factory=dict)
     # node id to path in dataclass model
-    node_id_to_frontend_path: dict[str, list[str]] = dataclasses.field(
+    node_gid_to_frontend_path: dict[str, list[str]] = dataclasses.field(
         default_factory=dict)
 
     def get_uid_from_path(self, prefix_parts: Optional[list[str]] = None):
@@ -184,46 +196,52 @@ class ADVProject:
                 return None
         return cast(Optional[ADVFlowModel], cur_obj)
 
-    def get_flow_node_by_fe_path(self, frontend_path: list[str]) -> Optional[tuple["ADVFlowModel", ADVNodeModel]]:
-        id_path = self.get_node_id_path_from_fe_path(frontend_path)
-        cur_parent = self.flow
+    @staticmethod
+    def get_flow_node_by_fe_path(root_flow: ADVFlowModel, frontend_path: list[str]) -> Optional[tuple[Optional[ADVNodeModel], ADVNodeModel]]:
+        id_path = ADVProject.get_node_id_path_from_fe_path(frontend_path)
+        cur_parent: tuple[ADVFlowModel, Optional[ADVNodeModel]] = (root_flow, None)
         cur_node: Optional[ADVNodeModel] = None
         for i, node_id in enumerate(id_path):
-            cur_node = cur_parent.nodes[node_id]
+            cur_node = cur_parent[0].nodes[node_id]
             if i != len(id_path) - 1:
                 if cur_node.flow is None:
                     return None
-                cur_parent = cur_node.flow
+                cur_parent = (cur_node.flow, cur_node)
         if cur_node is None:
             return None
-        return (cur_parent, cur_node)
+        return (cur_parent[1], cur_node)
+
 
     def assign_path_to_all_node(self):
-        node_id_to_path: dict[str, list[str]] = {}
-        node_id_to_frontend_path: dict[str, list[str]] = {}
+        node_gid_to_import_path: dict[str, list[str]] = {}
+        node_gid_to_frontend_path: dict[str, list[str]] = {}
 
         def _assign(node: ADVNodeModel, frontend_path: list[str], path: list[str], depth: int):
             node.frontend_path = frontend_path
-            node_id_to_path[node.id] = path
-            node_id_to_frontend_path[node.id] = frontend_path
+            node.path = path
+            node_gid_to_import_path[node.get_global_uid()] = path
+            # print(node.get_global_uid(), frontend_path)
+            node_gid_to_frontend_path[node.get_global_uid()] = frontend_path
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
-                    _assign(n, frontend_path + ["flow", "nodes", n_id], path + [n.name], depth + 1)
+                    _assign(n, frontend_path + ["flow", "nodes", n_id], path + [node.name], depth + 1)
         for n_id, n in self.flow.nodes.items():
-            _assign(n, ["nodes", n_id], [n.name], 0)
-        return node_id_to_path, node_id_to_frontend_path
+            _assign(n, ["nodes", n_id], [], 0)
+        # raise NotImplementedError
+        return node_gid_to_import_path, node_gid_to_frontend_path
 
-    def update_ref_path(self, node_id_to_path: dict[str, list[str]], node_id_to_frontend_path: dict[str, list[str]]):
+    def update_ref_path(self, node_gid_to_path: dict[str, list[str]], node_gid_to_frontend_path: dict[str, list[str]]):
         def _update(node: ADVNodeModel, path: list[str]):
             if node.ref_node_id is not None:
-                assert node.ref_node_id in node_id_to_frontend_path, f"ref node id {node.ref_node_id} not found"
-                node.ref_fe_path = node_id_to_frontend_path[node.ref_node_id]
-                node.ref_import_path = node_id_to_path[node.ref_node_id]
+                ref_gid = node.get_ref_global_uid()
+                assert ref_gid in node_gid_to_frontend_path, f"node {ref_gid} not found in {path}"
+                node.ref_fe_path = node_gid_to_frontend_path[ref_gid]
+                node.ref_import_path = node_gid_to_path[ref_gid]
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
-                    _update(n, path + ["flow", "nodes", n_id])
+                    _update(n, path + [node.id])
         for n_id, n in self.flow.nodes.items():
-            _update(n, ["nodes", n_id])
+            _update(n, [])
         return 
 
     @staticmethod 
@@ -232,7 +250,7 @@ class ADVProject:
 
     def draft_get_node_by_id(self,
                         node_id: str):
-        node_fe_path = self.node_id_to_frontend_path[node_id]
+        node_fe_path = self.node_gid_to_frontend_path[node_id]
         node: Optional[ADVNodeModel] = D.getitem_path_dynamic(self.flow, node_fe_path, Optional[ADVNodeModel])
         
         real_node: Optional[ADVNodeModel] = D.where(
@@ -338,9 +356,9 @@ class ADVRoot:
             return res
 
     @mui.DataModel.mark_pfl_func
-    def get_real_node_by_id(self, node_id: str) -> tuple[Optional[ADVNodeModel], bool]:
+    def get_real_node_by_gid(self, node_gid: str) -> tuple[Optional[ADVNodeModel], bool]:
         cur_proj = self.adv_projects[self.cur_adv_project]
-        node_frontend_path = cur_proj.node_id_to_frontend_path[node_id]
+        node_frontend_path = cur_proj.node_gid_to_frontend_path[node_gid]
         node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
             cur_proj.flow, node_frontend_path)
         node_is_ref = False
@@ -352,9 +370,9 @@ class ADVRoot:
         return node, node_is_ref
 
     @mui.DataModel.mark_pfl_func
-    def get_real_node_pair_by_id(self, node_id: str) -> tuple[Optional[ADVNodeModel], Optional[ADVNodeModel], bool]:
+    def get_real_node_pair_by_gid(self, node_gid: str) -> tuple[Optional[ADVNodeModel], Optional[ADVNodeModel], bool]:
         cur_proj = self.adv_projects[self.cur_adv_project]
-        node_frontend_path = cur_proj.node_id_to_frontend_path[node_id]
+        node_frontend_path = cur_proj.node_gid_to_frontend_path[node_gid]
         node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
             cur_proj.flow, node_frontend_path)
         node_is_ref = False
@@ -367,8 +385,8 @@ class ADVRoot:
         return node, real_node, node_is_ref
 
     @mui.DataModel.mark_pfl_query_nested_func
-    def get_handle(self, paths: list[Any], node_id: str) -> dict[str, Any]:
-        node, real_node, real_node_is_ref = self.get_real_node_pair_by_id(node_id)
+    def get_handle(self, paths: list[Any], node_gid: str) -> dict[str, Any]:
+        node, real_node, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
         res: dict[str, Any] = {}
         if node is not None and real_node is not None:
             handle_idx: int = paths[0]
@@ -397,8 +415,8 @@ class ADVRoot:
         return res
 
     @mui.DataModel.mark_pfl_query_func
-    def get_node_frontend_props(self, node_id: str) -> dict[str, Any]:
-        real_node, real_node_is_ref = self.get_real_node_by_id(node_id)
+    def get_node_frontend_props(self, node_gid: str) -> dict[str, Any]:
+        real_node, real_node_is_ref = self.get_real_node_by_gid(node_gid)
         res: dict[str, Any] = {}
         if real_node is not None:
             if real_node.nType == ADVNodeType.CLASS:
@@ -417,7 +435,7 @@ class ADVRoot:
                 "isRef": real_node_is_ref,
                 "bottomMsg": "hello world!",
                 "handles": real_node.handles,
-                "isMainFlow": not real_node_is_ref and real_node.inline_subflow_name is not None,
+                "isMainFlow": not real_node_is_ref and real_node.inlinesf_name is not None,
                 # "htype": "target" if is_input else "source",
                 # "hpos": "left" if is_input else "right",
                 # "textAlign": "start" if is_input else "end",

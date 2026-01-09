@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
-
+from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
 from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
 
@@ -19,14 +19,6 @@ class FragmentOutputDesc:
     mapping: dict[str, tuple[str, str]]
 
 T = TypeVar("T")
-
-def mark_fragment_def(node_id: str, position: tuple[float, float], 
-        ref_node_id: Optional[str] = None,
-        alias_map: Optional[str] = None) -> Callable[[T], T]:
-    # TODO we actually don't use this metadata, we read ast directly.
-    def wrapper(fn_wrapped: T) -> T:
-        return fn_wrapped   
-    return wrapper
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -72,8 +64,12 @@ class FragmentParseResult(BaseParseResult):
     @staticmethod
     def get_signature_lines_from_handles(input_handles: list[BackendHandle]) -> list[str]:
         lines: list[str] = []
-        for i, handle in enumerate(input_handles):
-            line = f"{handle.handle.name}: {handle.handle.type}, "
+        for i, bh in enumerate(input_handles):
+            handle = bh.handle
+            if handle.default is not None:
+                line = f"{handle.name}: {handle.type} = {handle.default}, "
+            else:
+                line = f"{handle.name}: {handle.type}, "
             lines.append(f"    {line}")
         return lines
 
@@ -82,6 +78,8 @@ class FragmentParseResult(BaseParseResult):
         kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
         if self.node.alias_map is not None:
             kwarg_str += f', alias_map="{self.node.alias_map}"'
+        if self.node.inlinesf_name is not None:
+            kwarg_str += f', inlineflow_name="{self.node.inlinesf_name}"'
         decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
         # for fragment ref, we use inline Annotated instead of decorator
         if self.node.ref_node_id is not None:
@@ -107,6 +105,22 @@ class FragmentParseResult(BaseParseResult):
                 *lines,
             ]
 
+    def is_io_handle_changed(self, other_res: Self):
+        """Compare io handles between two flow parse result. 
+        if changed, all flows that depend on this fragment node (may flow) need to be re-parsed.
+        TODO default change?
+        """
+        if len(self.input_handles) != len(other_res.input_handles):
+            return True
+        if len(self.output_handles) != len(other_res.output_handles):
+            return True
+        for h1, h2 in zip(self.input_handles, other_res.input_handles):
+            if h1.symbol_name != h2.symbol_name:
+                return True
+        for h1, h2 in zip(self.output_handles, other_res.output_handles):
+            if h1.symbol_name != h2.symbol_name:
+                return True
+        return False
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:
@@ -129,6 +143,12 @@ def parse_alias_map(alias_map: str) -> dict[str, str]:
         alias, new_alias = _parse_single_desc(item)
         mapping[alias] = new_alias
     return mapping
+
+def mark_stable_symbols(*args: Any):
+    # used to make auto-generated inputs stable.
+    # we will look for all ast.Name to determine inputs of fragment,
+    # so we can use this function to create dummy references to symbols
+    pass 
 
 def mark_outputs(desc: Union[str, tuple[str, ...], dict[str, str]], /) -> FragmentOutputDesc:
     # we actually don't run this function, we will parse ast
@@ -319,7 +339,7 @@ class FragmentParser:
             sym_handle.handle.is_input = True
             input_handles.append(sym_handle)
         # make order of input handles stable.
-        input_handles.sort(key=lambda h: h.index)
+        input_handles.sort(key=lambda h: (h.handle.default is not None, h.index))
         if output_desc.type == "single":
             out_type_anno = output_handles[0].handle.type
         elif output_desc.type == "tuple":

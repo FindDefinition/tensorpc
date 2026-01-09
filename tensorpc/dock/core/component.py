@@ -2847,8 +2847,9 @@ class ContainerBase(Component[T_container_props, T_child]):
                  inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None,
                  uid: Optional[UniqueTreeIdForComp] = None,
-                 app_comp_core: Optional[AppComponentCore] = None) -> None:
-        super().__init__(base_type, prop_cls, allowed_events, uid)
+                 app_comp_core: Optional[AppComponentCore] = None,
+                 json_only: bool = False) -> None:
+        super().__init__(base_type, prop_cls, allowed_events, uid, json_only)
         self._flow_comp_core = app_comp_core
         if inited:
             assert app_comp_core is not None  # and uid_to_comp is not None

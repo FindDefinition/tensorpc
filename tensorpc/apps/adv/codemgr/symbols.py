@@ -9,17 +9,7 @@ from tensorpc.apps.adv.logger import ADV_LOGGER
 from tensorpc.apps.adv.model import ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
 from tensorpc.core.annolib import dataclass_flatten_fields_generator, unparse_type_expr
-
-__TENSORPC_ADV_SYMBOL_DCLS_META__ = "__tensorpc_adv_symbol_dcls_meta__"
-
-T = TypeVar("T")
-
-def mark_symbol_group(node_id: str, position: tuple[float, float], ref_node_id: Optional[str] = None) -> Callable[[T], T]:
-    # TODO we actually don't use this metadata, we read ast directly.
-    def wrapper(fn_wrapped: T) -> T:
-        setattr(fn_wrapped, __TENSORPC_ADV_SYMBOL_DCLS_META__, BaseNodeCodeMeta(node_id, position, ref_node_id))
-        return fn_wrapped   
-    return wrapper
+from tensorpc.apps.adv.codemgr.markers import mark_symbol_group
 
 
 @dataclasses.dataclass
@@ -146,9 +136,11 @@ class SymbolParser:
                         assert meta.alias.strip().isidentifier()
                         symbol_name = meta.alias.strip()
                         break
+            # TODO parse default?
             default_str = None 
             if field.default is not dataclasses.MISSING:
-                default_str = str(field.default)
+                # TODO this only valids for simple defaults
+                default_str = repr(field.default)
             local_qnames: list[str] = []
             type_str = unparse_type_expr(field_type, get_type_str=partial(_get_type_str, out_list=local_qnames))
             local_type_str = type_str

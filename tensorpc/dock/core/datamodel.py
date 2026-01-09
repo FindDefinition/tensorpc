@@ -125,7 +125,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         model: _T,
         children: Union[Sequence[Component], Mapping[str, Component]],
         model_type: Optional[type[_T]] = None,
-        debug: bool = False
+        debug: bool = False,
+        json_only: bool = False,
     ) -> None:
         """
         Args:
@@ -142,10 +143,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         """
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
+        assert not json_only, "not implemented for now"
+        # TODO make pfllibrary special props to let user enable json_only
         super().__init__(UIType.DataModel,
                          DataModelProps,
                          children,
-                         allowed_events=[])
+                         allowed_events=[],
+                         json_only=json_only)
         self.prop(dataObject=model)
         self._model: _T = model
         self._model_type = model_type or type(model)
