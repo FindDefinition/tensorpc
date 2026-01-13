@@ -2,7 +2,7 @@ import ast
 from functools import partial
 import inspect
 from typing import Any, Callable, Optional, Self, TypeVar
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseNodeCodeMeta, BaseParseResult
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseNodeCodeMeta, BaseParseResult, BaseParser
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.logger import ADV_LOGGER
@@ -57,6 +57,18 @@ class SymbolParseResult(BaseParseResult):
                 impl.code,
             ]
 
+    def is_io_handle_changed(self, other_res: Self):
+        """Compare io handles between two flow parse result. 
+        if changed, all flows that depend on this fragment node (may flow) need to be re-parsed.
+        TODO default change?
+        """
+        if len(self.symbols) != len(other_res.symbols):
+            return True
+        for h1, h2 in zip(self.symbols, other_res.symbols):
+            if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
+                return True                
+        return False
+
 _default_typing_imports = [
     "Literal",
     "Union",
@@ -92,7 +104,7 @@ def _get_type_str(type_obj, out_list: list[str]):
     out_list.append(first_qname_with_module)
     return qname
 
-class SymbolParser:
+class SymbolParser(BaseParser):
     def __init__(self):
         self._cached_symbol_parse_res: dict[str, list[tuple[str, SymbolParseResult]]] = {}
 

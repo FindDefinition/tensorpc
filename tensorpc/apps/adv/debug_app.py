@@ -633,5 +633,24 @@ def _main():
     #     "edges": debug_flow.edges,
     # })
 
+def _main_change_debug():
+    import rich 
+    model = _test_model_symbol_group()
+
+    manager = ADVProjectBackendManager(lambda: model.flow)
+    manager.sync_project_model()
+    manager.parse_all()
+    manager.init_all_nodes()
+    add_func2_node = model.flow.nodes["f1"]
+    fragment_changed = f"""
+ADV.mark_outputs("d->D")
+return c + b
+    """
+    # add_func2_node.impl.code = fragment_changed
+    print(add_func2_node.get_global_uid())
+    changed_nodes, changed_edges = manager.modify_code_impl(add_func2_node.get_global_uid(), fragment_changed)
+    import rich 
+    rich.print(changed_nodes, changed_edges)
+
 if __name__ == "__main__":
-    _main()
+    _main_change_debug()

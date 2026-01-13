@@ -99,3 +99,5 @@ class RefNodeMeta:
     is_local_ref: bool = False
 
 
+class BaseParser:
+    pass 

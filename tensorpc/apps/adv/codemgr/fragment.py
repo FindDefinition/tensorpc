@@ -3,10 +3,12 @@ import inspect
 from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser
 from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
 from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
+import dataclasses as dataclasses_plain
+from tensorpc.core.funcid import clean_source_code
 
 @dataclasses.dataclass
 class FragmentInputDesc:
@@ -228,6 +230,39 @@ class _ChainAttrFinder(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute):
         return self._visit_Attribute_or_name(node)
 
+class _ChainAttrFinderV2(ast.NodeVisitor):
+    def __init__(self):
+        self.map_res: dict[ast.AST, list[str]] = {}
+
+    def _extract_attr_chain(self, node: ast.AST):
+        parts: list[str] = []
+        cur_node = node
+        name_found = False
+        while isinstance(cur_node, (ast.Attribute, ast.Name)):
+            if isinstance(cur_node, ast.Attribute):
+                parts.append(cur_node.attr)
+                cur_node = cur_node.value
+            else:
+                parts.append(cur_node.id)
+                name_found = True
+                break
+        return parts, name_found
+
+    def _visit_Attribute_or_name(self, node: Union[ast.Attribute, ast.Name]):
+        # TODO block nesetd function def support
+        parts, name_found = self._extract_attr_chain(
+            node)
+        if not name_found:
+            return self.generic_visit(node)
+        parts = parts[::-1]
+        self.map_res[node] = parts
+
+    def visit_Name(self, node: ast.Name):
+        return self._visit_Attribute_or_name(node)
+
+    def visit_Attribute(self, node: ast.Attribute):
+        return self._visit_Attribute_or_name(node)
+
 
 class _FragmentApiFinder(ast.NodeVisitor):
     def __init__(self, chain_attr_map: dict[ast.AST, tuple[str, Any]]):
@@ -239,6 +274,19 @@ class _FragmentApiFinder(ast.NodeVisitor):
             full_name, obj = self._chain_attr_map[node.func]
             if obj is mark_outputs:
                 self.map_res[node] = obj
+        self.generic_visit(node)
+
+class _FragmentApiFinderV2(ast.NodeVisitor):
+    def __init__(self, chain_attr_map: dict[ast.AST, list[str]]):
+        self._chain_attr_map = chain_attr_map 
+        self.map_res: dict[ast.Call, Any] = {}
+
+    def visit_Call(self, node: ast.Call):
+        if node.func in self._chain_attr_map:
+            parts = self._chain_attr_map[node.func]
+            full_name = ".".join(parts)
+            if full_name.startswith("ADV.mark_outputs"):
+                self.map_res[node] = mark_outputs
         self.generic_visit(node)
 
 def _parse_mark_outputs_ast(node: ast.Call) -> FragmentOutputDesc:
@@ -298,22 +346,66 @@ class _ExtractSymbolFromFragment:
             else:
                 self._extract_symbol_from_node(stmt, scope)
 
+@dataclasses_plain.dataclass
+class _FragmentPrepCache:
+    code_clean: str 
+    tree: ast.Module
+    output_desc: FragmentOutputDesc
 
-class FragmentParser:
-    def parse_fragment(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle]):
-        node_id = node.id
-        tree = ast.parse(code) 
-        chain_finder = _ChainAttrFinder(global_scope)
+class FragmentParser(BaseParser):
+    def __init__(self):
+        self._cache : Optional[_FragmentPrepCache] = None
+    
+    def _cached_parse_output_desc(self, code: str) -> _FragmentPrepCache:
+        code_for_compare = "\n".join(clean_source_code(code.splitlines()))
+        if self._cache is not None and self._cache.code_clean == code_for_compare:
+            return self._cache
+        tree = ast.parse(code)
+        chain_finder = _ChainAttrFinderV2()
         chain_finder.visit(tree)
         chain_map = chain_finder.map_res
 
-        api_finder = _FragmentApiFinder(chain_map)
+        api_finder = _FragmentApiFinderV2(chain_map)
         api_finder.visit(tree)
         api_map = api_finder.map_res
         # TODO check number of api calls, should be exactly one.
 
         first_node = next(iter(api_map.keys()))
         output_desc = _parse_mark_outputs_ast(first_node)
+        cache = _FragmentPrepCache(
+            code_clean=code_for_compare,
+            tree=tree,
+            output_desc=output_desc,
+        )
+        return cache
+
+    def _cached_parse_ast(self, code: str) -> ast.Module:
+        code_for_compare = "\n".join(clean_source_code(code.splitlines()))
+        if self._prev_code == code_for_compare and self._prev_ast is not None:
+            return self._prev_ast
+        tree = ast.parse(code)
+        self._prev_code = code_for_compare
+        self._prev_ast = tree
+        return tree
+
+    def parse_fragment(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle],
+            ):
+        node_id = node.id
+        # tree = self._cached_parse_ast(code)
+        # chain_finder = _ChainAttrFinder(global_scope)
+        # chain_finder.visit(tree)
+        # chain_map = chain_finder.map_res
+
+        # api_finder = _FragmentApiFinder(chain_map)
+        # api_finder.visit(tree)
+        # api_map = api_finder.map_res
+        # # TODO check number of api calls, should be exactly one.
+
+        # first_node = next(iter(api_map.keys()))
+        # output_desc = _parse_mark_outputs_ast(first_node)
+        prep_cache = self._cached_parse_output_desc(code)
+        tree = prep_cache.tree
+        output_desc = prep_cache.output_desc
         local_scope = cur_scope.copy()
         symbol_extractor = _ExtractSymbolFromFragment()
         symbol_extractor.parse_block(tree.body, local_scope)

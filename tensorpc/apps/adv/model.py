@@ -109,7 +109,7 @@ class ADVNodeModel(BaseNodeModel):
     # alias_map_str: use alias->new_alias,alias2->new_alias2
     # to rename a output handle of a ref node or subflow node 
     # which don't support ADV.
-    alias_map: Optional[str] = None
+    alias_map: str = ""
 
     # --- class node props ---
     # fields
