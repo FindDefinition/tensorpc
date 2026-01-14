@@ -2,9 +2,10 @@ from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackend
 from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser
 from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IndicatorWrapper
 from tensorpc.constants import PACKAGE_ROOT
+from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
-from tensorpc.core.datamodel.draft import create_literal_draft
+from tensorpc.core.datamodel.draft import create_draft_type_only, create_literal_draft
 import tensorpc.core.datamodel.funcs as D
 from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
@@ -439,6 +440,20 @@ class App:
         path_breadcrumb = mui.Breadcrumbs([]).prop(keepHistoryPath=True)
         detail = mui.JsonEditor()
         editor = mui.MonacoEditor("", "python", "default").prop(flex=1, minHeight=0, minWidth=0)
+        editor_acts: list[mui.MonacoEditorAction] = [
+            mui.MonacoEditorAction(id="ToggleEditableAreas", 
+                label="Toggle Editable Areas", contextMenuOrder=1.5,
+                contextMenuGroupId="tensorpc-editor-action", 
+            ),
+        ]
+
+        self.editor = editor.prop(enableConstrainedEditing=True, actions=editor_acts)
+        self.editor.event_editor_action.on(self._handle_editor_acts)
+        self.editor.update_raw_props({
+            ".monaco-editor-content-decoration": {
+                "background": "lightblue"
+            }
+        })
         editor_ct = mui.MatchCase.binary_selection(True, mui.VBox([
             editor.prop(flex=1),
         ]).prop(flex=1, overflow="hidden"))
@@ -458,8 +473,12 @@ class App:
         self.dm = mui.DataModel(model, [
             graph_container,
             detail_ct,
-        ])
-        manager = ADVProjectBackendManager(lambda: self.dm.get_model().adv_projects["project"].flow)
+        ], json_only=True)
+        draft = self.dm.get_draft()
+        cur_root_proj = draft.draft_get_cur_adv_project()
+        cur_model_draft = draft.draft_get_cur_model()
+
+        manager = ADVProjectBackendManager(lambda: self.dm.get_model().adv_projects["project"].flow, cur_root_proj.flow)
         manager.sync_project_model()
         manager.parse_all()
         manager.init_all_nodes()
@@ -472,9 +491,6 @@ class App:
         self._manager = manager
         graph_container.update_raw_props(default_compute_flow_css())
 
-        draft = self.dm.get_draft()
-        cur_root_proj = draft.draft_get_cur_adv_project()
-        cur_model_draft = draft.draft_get_cur_model()
         self.graph.event_pane_context_menu.on(partial(self.handle_context_menu, target_flow_draft=cur_model_draft))
         # self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=preview_model_draft))
         # draft only support raw path, so we use [1::3] to convert from raw path to real node path
@@ -497,9 +513,17 @@ class App:
         binder.bind_flow_comp_with_base_model(self.dm, cur_model_draft.selected_nodes)
         # detail.bind_fields(data=cur_root_proj.draft_get_selected_node())
         detail.bind_pfl_query(self.dm, data=(ADVRoot.get_cur_node_flows, "selectedNode"))
-        has_code, code_draft, path_draft = cur_root_proj.draft_get_node_impl_editor(cur_root_proj.draft_get_selected_node().id)
-        editor.bind_draft_change_uncontrolled(code_draft, path_draft=path_draft)
+        # has_code, code_draft, path_draft = cur_root_proj.draft_get_node_impl_editor(cur_root_proj.draft_get_selected_node().id)
+        # editor.bind_draft_change_uncontrolled(code_draft, path_draft=path_draft)
         # editor_ct.bind_fields(condition=has_code)
+        handler, _ = self.dm.install_draft_change_handler(
+            {
+                "sel_node": cur_model_draft.selected_nodes,
+                "cur_path": cur_root_proj.cur_path,
+            },
+            partial(self._code_editor_draft_change),
+            installed_comp=editor)
+
         editor_ct.bind_pfl_query(self.dm, condition=(ADVRoot.get_cur_node_flows, "enableCodeEditor"))
         # self.dm.debug_print_draft_change(has_code)
 
@@ -507,6 +531,31 @@ class App:
             self.dm,
         ]).prop(width="100%", height="100%", overflow="hidden")
     
+    async def _code_editor_draft_change(self, draft_ev: DraftChangeEvent):
+        select_node = draft_ev.new_value_dict["sel_node"]
+        cur_fe_path = draft_ev.new_value_dict["cur_path"]
+        adv_proj = self.dm.get_model().get_cur_adv_project()
+        if select_node is not None and len(select_node) == 1:
+            # print(cur_fe_path)
+            pair = ADVProject.get_flow_node_by_fe_path(adv_proj.flow, cur_fe_path + ["nodes", select_node[0]])
+            assert pair is not None 
+            node_gid = pair[1].get_global_uid()
+            flow_code, path, code_range = self._manager._get_flow_code_lineno_by_node_gid(node_gid)
+            # print(pair[1].id, pair[1].nType, path, lineno)
+            constrained_ranges = [
+                mui.MonacoConstrainedRange(code_range, "editarea", allowMultiline=True, decorationOptions=mui.MonacoModelDecoration(
+                    className="monaco-editor-content-decoration", isWholeLine=True,
+                    minimap=mui.MonacoModelDecorationMinimapOptions(mui.MonacoMinimapPosition.Inline
+                )))
+            ]
+            if code_range[0] > 0:
+                await self.editor.write(flow_code, path, line=code_range[0], 
+                    language="python", constrained_ranges=constrained_ranges)
+            else:
+                await self.editor.write(flow_code, path, language="python")
+        else:
+            await self.editor.write("", "", language="python", constrained_ranges=[])
+
     def _get_preview_flow_uid(self, path_draft):
         path = D.evaluate_draft(path_draft, self.dm.model)
         if path is None:
@@ -594,37 +643,41 @@ class App:
         node_ids = [n.id for n in cur_model.nodes.values()]
         await self.graph.update_node_internals(node_ids)
 
+    async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
+        if act.action == "ToggleEditableAreas":
+            await self.editor.toggle_editable_areas()
+
 
 def _main():
     import rich 
     model = _test_model_symbol_group()
 
-    manager = ADVProjectBackendManager(lambda: model.flow)
+    manager = ADVProjectBackendManager(lambda: model.flow, create_draft_type_only(type(model.flow)))
     manager.sync_project_model()
     manager.parse_all()
     manager.init_all_nodes()
     import rich 
     path_to_code: dict[str, str] = {}
-    for flow_id, parser in manager._flow_node_gid_to_parser.items():
+    for flow_id, fcache in manager._flow_node_gid_to_cache.items():
 
-        assert parser._flow_parse_result is not None 
-        parse_res = parser._flow_parse_result
+        assert fcache.parser._flow_parse_result is not None 
+        parse_res = fcache.parser._flow_parse_result
         path = ".".join(parse_res.get_path_list())
         code_lines = parse_res.generated_code_lines
         code = "\n".join(code_lines)
         path_to_code[path] = code
-        print("+" * 80)
-        print("+" * 80)
+        # print("+" * 80)
+        # print("+" * 80)
 
-        print(code)
+        # print(code)
 
-    proj_parser = ADVProjectParser(lambda path: path_to_code[".".join(path)])
-    flow = proj_parser._parse_desc_to_flow_model([], set())
-    model.flow = flow
-    ngid_to_path, ngid_to_fpath = model.assign_path_to_all_node()
-    model.node_gid_to_path = ngid_to_path
-    model.node_gid_to_frontend_path = ngid_to_fpath
-    model.update_ref_path(ngid_to_path, ngid_to_fpath)
+    # proj_parser = ADVProjectParser(lambda path: path_to_code[".".join(path)])
+    # flow = proj_parser._parse_desc_to_flow_model([], set())
+    # model.flow = flow
+    # ngid_to_path, ngid_to_fpath = model.assign_path_to_all_node()
+    # model.node_gid_to_path = ngid_to_path
+    # model.node_gid_to_frontend_path = ngid_to_fpath
+    # model.update_ref_path(ngid_to_path, ngid_to_fpath)
 
     # rich.print(desc)
     # proj_parser._parse_desc_to_flow_model(["test", "adv"], set())
@@ -637,7 +690,7 @@ def _main_change_debug():
     import rich 
     model = _test_model_symbol_group()
 
-    manager = ADVProjectBackendManager(lambda: model.flow)
+    manager = ADVProjectBackendManager(lambda: model.flow, create_draft_type_only(type(model.flow)))
     manager.sync_project_model()
     manager.parse_all()
     manager.init_all_nodes()
@@ -653,4 +706,4 @@ return c + b
     rich.print(changed_nodes, changed_edges)
 
 if __name__ == "__main__":
-    _main_change_debug()
+    _main()

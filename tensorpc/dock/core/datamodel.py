@@ -60,8 +60,6 @@ class DataModelPeriodUpdateSelf(DataModelUpdateSelf):
 @dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
-    # include all datamodel methods marked with pfl function.
-    pfllibrary: Union[Undefined, bytes] = undefined
     modelUpdateCallbacks: Union[Undefined, dict[str, DataModelUpdateSelf]] = undefined
     modelPeriodCallbacks: Union[Undefined, dict[str, DataModelPeriodUpdateSelf]] = undefined
 
@@ -143,19 +141,18 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         """
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
-        assert not json_only, "not implemented for now"
+        # assert not json_only, "not implemented for now"
         # TODO make pfllibrary special props to let user enable json_only
         super().__init__(UIType.DataModel,
                          DataModelProps,
                          children,
-                         allowed_events=[],
-                         json_only=json_only)
+                         allowed_events=[])
         self.prop(dataObject=model)
         self._model: _T = model
         self._model_type = model_type or type(model)
         self._backend_draft_update_event_key = "__backend_draft_update"
         self._backend_storage_fetched_event_key = "__backend_storage_fetched"
-
+        self._json_only = json_only
         self.event_draft_update: EventSlotEmitter[
             list[DraftUpdateOp]] = self._create_emitter_event_slot(
                 self._backend_draft_update_event_key)
@@ -171,7 +168,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             self._pfl_library = _compile_pfllibrary(model_type_real)
             if self._pfl_library is not None:
                 lib_binary = json.dumps(self._pfl_library.dump_to_json_dict()).encode("utf-8")
-                self.prop(pfllibrary=lib_binary)
+                self._flow_pfl_library = lib_binary
 
         self._debug = debug
         self._is_model_dataclass = dataclasses.is_dataclass(model_type_real)
@@ -536,12 +533,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         # convert dynamic node to static in op to avoid where op.
         ops = ops.copy()
+        fe_ops = ops.copy()
         for i in range(len(ops)):
             op = ops[i]
             if op.has_dynamic_node_in_main_path():
                 ops[i] = stabilize_getitem_path_in_op_main_path(
                     op, self.get_draft_type_only(), self._model)
-        frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        frontend_ops = list(filter(lambda op: not op.is_external, fe_ops))
         backend_ops = [dataclasses.replace(op) for op in ops]
 
         # any modify on external field won't be included in frontend.

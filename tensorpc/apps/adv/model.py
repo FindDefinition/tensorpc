@@ -118,6 +118,12 @@ class ADVNodeModel(BaseNodeModel):
     # --- out indicator node props ---
     oic_alias: str = ""
 
+    @staticmethod
+    def get_global_uid_ext(path: list[str], id: str):
+        # TODO should we use node id list instead of names + [last_id]？
+        return UniqueTreeIdForTree.from_parts(path + [id]).uid_encoded
+
+
     def get_global_uid(self):
         # TODO should we use node id list instead of names + [last_id]？
         return UniqueTreeIdForTree.from_parts(self.path + [self.id]).uid_encoded

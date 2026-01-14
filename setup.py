@@ -13,11 +13,11 @@ from setuptools import Command, find_packages, setup
 
 # Package meta-data.
 NAME = 'tensorpc'
-DESCRIPTION = 'Backend for devflow.'
+DESCRIPTION = 'Backend for devdock.'
 URL = 'https://github.com/FindDefinition/tensorpc'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.8'
+REQUIRES_PYTHON = '>=3.10'
 VERSION = None
 
 # What packages are required for this module to be executed?

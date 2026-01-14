@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Self, TypeGuard, TypeVar, Union
 
 import rich
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.fragment import FragmentParseResult, FragmentParser, parse_alias_map
 from tensorpc.apps.adv.codemgr.symbols import SymbolParseResult, SymbolParser
 from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
@@ -22,6 +22,15 @@ from tensorpc.apps.adv.codemgr import markers as adv_markers
 from tensorpc.core.funcid import clean_source_code, get_attribute_name
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.apps.adv import api as _ADV
+
+_NTYPE_TO_ID_PREFIX = {
+    ADVNodeType.FRAGMENT: "Frag",
+    ADVNodeType.SYMBOLS: "Sym",
+    ADVNodeType.GLOBAL_SCRIPT: "GS",
+    ADVNodeType.OUT_INDICATOR: "Out",
+
+}
+
 _ROOT_FLOW_ID = ""
 
 ADV_MAIN_FLOW_NAME = "__adv_flow_main__"
@@ -80,9 +89,9 @@ class OutIndicatorParseResult(BaseParseResult):
         ])
         kwarg_str = ", ".join(kwargs_parts)
         decorator = f"ADV.{adv_markers.mark_out_indicator.__name__}({kwarg_str})"
-        return [
+        return ImplCodeSpec([
             f"{decorator}",
-        ]
+        ], -1, -1, 1, -1)
 
 @dataclasses.dataclass(kw_only=True)
 class GlobalScriptParseResult(BaseParseResult):
@@ -93,11 +102,14 @@ class GlobalScriptParseResult(BaseParseResult):
         kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
         mark_stmt = f"ADV.{adv_markers.mark_global_script.__name__}(name=\"{self.node.name}\", {kwarg_str})"
         mark_end_stmt = f"ADV.{adv_markers.mark_global_script_end.__name__}()"
-        return [
+        lines = self.code.splitlines()
+        assert len(lines) > 0
+        end_column = len(lines[-1]) + 1
+        return ImplCodeSpec([
             mark_stmt,
-            *self.code.splitlines(),
+            *lines,
             mark_end_stmt,
-        ]
+        ], 1, 1, len(lines), end_column)
 
 @dataclasses.dataclass
 class FlowConnInternals:
@@ -163,7 +175,10 @@ class FlowParseResult(FragmentParseResult):
             parse_res = id_to_parse_res.get(node.id, None)
             assert parse_res is not None and isinstance(parse_res, GlobalScriptParseResult)
             parse_res.lineno = len(lines) + len(gs_lines_all) + 1
-            gs_lines_all.extend(parse_res.to_code_lines(id_to_parse_res))
+            code_spec = parse_res.to_code_lines(id_to_parse_res)
+            parse_res.loc = code_spec
+            # code_spec.
+            gs_lines_all.extend(code_spec.lines)
         lines.extend(gs_lines_all)
         # symbol deps
         symbol_dep_lines: list[str] = []
@@ -249,7 +264,9 @@ class FlowParseResult(FragmentParseResult):
             parse_res = id_to_parse_res.get(node.id, None)
             assert parse_res is not None and isinstance(parse_res, SymbolParseResult)
             parse_res.lineno = len(lines) + len(symbol_group_lines) + 1
-            symbol_group_lines.extend(parse_res.to_code_lines(id_to_parse_res))
+            code_spec = parse_res.to_code_lines(id_to_parse_res)
+            parse_res.loc = code_spec
+            symbol_group_lines.extend(code_spec.lines)
         lines.extend(symbol_group_lines)
         # isolate fragments
         isolate_fragment_lines: list[str] = []
@@ -257,7 +274,9 @@ class FlowParseResult(FragmentParseResult):
             parse_res = id_to_parse_res.get(node.id, None)
             assert parse_res is not None and isinstance(parse_res, FragmentParseResult)
             parse_res.lineno = len(lines) + len(isolate_fragment_lines) + 1
-            isolate_fragment_lines.extend(parse_res.to_code_lines(id_to_parse_res))
+            code_spec = parse_res.to_code_lines(id_to_parse_res)
+            parse_res.loc = code_spec
+            isolate_fragment_lines.extend(code_spec.lines)
         lines.extend(isolate_fragment_lines)
         # subflow nodes
         inlineflow_lines: list[str] = []
@@ -268,7 +287,11 @@ class FlowParseResult(FragmentParseResult):
                     continue 
                 parse_res = id_to_parse_res.get(node.id, None)
                 assert parse_res is not None and isinstance(parse_res, FragmentParseResult)
-                inlineflow_lines.extend(parse_res.to_code_lines(id_to_parse_res))
+                parse_res.lineno = len(lines) + len(inlineflow_lines) + 1
+                code_spec = parse_res.to_code_lines(id_to_parse_res)
+                parse_res.loc = code_spec
+
+                inlineflow_lines.extend(code_spec.lines)
             # build subflow
             func_name = inline_name
             inlineflow_fn_lines = [
@@ -330,7 +353,9 @@ class FlowParseResult(FragmentParseResult):
             parse_res = id_to_parse_res.get(node.id, None)
             assert parse_res is not None and isinstance(parse_res, OutIndicatorParseResult)
             parse_res.lineno = len(lines) + len(out_indicator_lines) + 1
-            out_indicator_lines.extend(parse_res.to_code_lines(id_to_parse_res))
+            code_spec = parse_res.to_code_lines(id_to_parse_res)
+            parse_res.loc = code_spec
+            out_indicator_lines.extend(code_spec.lines)
         if out_indicator_lines:
             lines.extend(out_indicator_lines)
 
@@ -341,7 +366,9 @@ class FlowParseResult(FragmentParseResult):
                          f"target=\"{edge.target}\", "
                          f"target_handle=\"{edge.targetHandle}\")")
 
-        return lines
+        return ImplCodeSpec(
+            lines, -1, -1, -1, -1
+        )
 
 @dataclasses_plain.dataclass
 class ModifyParseCache:
@@ -355,9 +382,10 @@ class FlowCache:
     parser: "FlowParser"
     parent_node: Optional[ADVNodeModel]
     node_name_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
+    node_id_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
 
 class ADVProjectBackendManager:
-    def __init__(self, root_flow_getter: Callable[[], ADVFlowModel]):
+    def __init__(self, root_flow_getter: Callable[[], ADVFlowModel], root_flow_draft: ADVFlowModel):
         self._root_flow_getter = root_flow_getter
         
         self._node_gid_to_node: dict[str, ADVNodeModel] = {
@@ -369,6 +397,8 @@ class ADVProjectBackendManager:
 
 
         self._node_gid_to_ref_gids: dict[str, list[str]] = {}
+
+        self._root_flow_draft = root_flow_draft
 
     def get_subflow_parser(self, node_with_subflow: ADVNodeModel) -> "FlowParser":
         assert node_with_subflow.flow is not None, "Node has no nested flow."
@@ -393,9 +423,6 @@ class ADVProjectBackendManager:
             FlowParser(), 
             None
         )
-        # flow_node_gid_to_parser: dict[str, FlowParser] = {
-        #     _ROOT_FLOW_ID: self._flow_node_gid_to_parser[_ROOT_FLOW_ID]
-        # }
         def _traverse_node(node: ADVNodeModel):
             node_gid = node.get_global_uid()
             self._node_gid_to_node[node_gid] = node
@@ -406,29 +433,41 @@ class ADVProjectBackendManager:
                 for child_node in node.flow.nodes.values():
                     self._node_gid_to_flow_node_gid[child_node.get_global_uid()] = node_gid
                     fcache.node_name_pool(child_node.name)
+                    fcache.node_id_pool(child_node.id)
                     _traverse_node(child_node)
         
         for node in root_flow.nodes.values():
             self._node_gid_to_flow_node_gid[node.get_global_uid()] = _ROOT_FLOW_ID
             _traverse_node(node)
 
-        # self._flow_node_gid_to_parser = flow_node_gid_to_parser
 
     def parse_all(self):
         # must be called after sync_project_model
         visited: set[str] = set()
         for flow_gid, fcache in self._flow_node_gid_to_cache.items():
             flow_parser = fcache.parser
-            flow_parser._parse_flow_recursive(fcache.parent_node, flow_gid, fcache.flow, self, visited)
+            res = flow_parser._parse_flow_recursive(fcache.parent_node, flow_gid, fcache.flow, self, visited)
+            # fcache.flow_code = "\n".join(res.to_code_lines(flow_parser._node_id_to_parse_result))
 
     def parse_by_flow_gids(self, flow_gids: list[str]):
         # must be called after sync_project_model
         visited: set[str] = set()
         for flow_gid in flow_gids:
             fcache = self._flow_node_gid_to_cache[flow_gid]
-
             flow_parser = fcache.parser
-            flow_parser._parse_flow_recursive(fcache.parent_node, flow_gid, fcache.flow, self, visited)
+            res = flow_parser._parse_flow_recursive(fcache.parent_node, flow_gid, fcache.flow, self, visited)
+            # fcache.flow_code = "\n".join(res.to_code_lines(flow_parser._node_id_to_parse_result))
+
+    def _get_flow_code_lineno_by_node_gid(self, node_gid: str):
+        flow_gid = self._get_flow_gid_from_node_gid(node_gid)
+        fcache = self._flow_node_gid_to_cache[flow_gid]
+        parser = fcache.parser
+        flow_parse_res = parser.get_flow_parse_result_checked()
+        parse_res = parser._node_id_to_parse_result[self._node_gid_to_node[node_gid].id]
+        flow_code = "\n".join(flow_parse_res.to_code_lines(parser._node_id_to_parse_result).lines)
+        loc = parse_res.get_global_loc()
+        code_range = (loc.lineno_offset, loc.column, loc.end_lineno_offset, loc.end_column)
+        return flow_code, str(flow_parse_res.get_code_relative_path()), code_range 
 
     def init_all_nodes(self):
         # init all names and node handles in model
@@ -469,7 +508,6 @@ class ADVProjectBackendManager:
 
     def _reparse_flow(self, flow_gid: str):
         return self._reparse_changed_node_internal(flow_gid, [])
-
 
     def _reparse_changed_node_internal(self, flow_gid: str, node_gids: list[str]):
         # all modify operations should only change handles and edges
@@ -615,6 +653,20 @@ class ADVProjectBackendManager:
             cur_layer = list(next_layer.items())
         return changed_nodes_res, changed_edges_res
 
+    def modify_flow_code(self, flow_node_gid: str, new_code: str) -> tuple[dict[str, BaseParseResult], dict[str, list[ADVEdgeModel]]]:
+        old_code_lines = self._flow_node_gid_to_cache[flow_node_gid].parser.get_flow_parse_result_checked().generated_code_lines
+        old_code = "\n".join(old_code_lines)
+        node = self._node_gid_to_node[node_gid]
+        assert node.impl is not None 
+        prev_code = node.impl.code
+        prev_code_clean = clean_source_code(prev_code.splitlines())
+        new_code_clean = clean_source_code(new_code.splitlines())
+        node.impl.code = new_code
+        if prev_code_clean == new_code_clean:
+            # TODO only need to modify code in frontend/backend (file store).
+            return {}, {}
+        return self._reparse_changed_node(node_gid)
+
     def modify_code_impl(self, node_gid: str, new_code: str) -> tuple[dict[str, BaseParseResult], dict[str, list[ADVEdgeModel]]]:
         node = self._node_gid_to_node[node_gid]
         assert node.impl is not None 
@@ -660,6 +712,7 @@ class ADVProjectBackendManager:
         # flow, parent_flow_node = self._flow_node_gid_to_flow[flow_node_gid]
         fcache = self._flow_node_gid_to_cache[flow_node_gid]
         node_name = fcache.node_name_pool(name)
+        node_id = fcache.node_id_pool(f"{_NTYPE_TO_ID_PREFIX}-{name}")
         pass 
 
     def create_fragment(self, name: str, is_inline_flow: bool):
@@ -719,6 +772,10 @@ class FlowParser:
         self._node_id_to_parse_result = {}
         self._flow_parse_result = None
         self._edge_uid_pool.clear()
+
+    def get_flow_parse_result_checked(self) -> FlowParseResult:
+        assert self._flow_parse_result is not None
+        return self._flow_parse_result
 
     def serialize_to_code(self):
         assert self._flow_parse_result is not None
@@ -832,6 +889,11 @@ class FlowParser:
             node_def = node_prep.node_def
             assert node_def.nType == ADVNodeType.GLOBAL_SCRIPT
             assert node_def.impl is not None, f"GLOBAL_SCRIPT node {node_def.id} has no code."
+            code = node_def.impl.code
+            code_lines = code.splitlines()
+            assert len(code_lines) > 0
+            end_column = len(code_lines[-1]) + 1
+
             global_scripts[node_def.id] = (node_def.impl.code)
             self._node_id_to_parse_result[node_def.id] = GlobalScriptParseResult(
                 node=node_prep.node,
@@ -1189,7 +1251,7 @@ class FlowParser:
         )
         self._flow_parse_result = flow_parse_res
         code_lines = flow_parse_res.to_code_lines(self._node_id_to_parse_result)
-        flow_parse_res.generated_code_lines = code_lines
+        flow_parse_res.generated_code_lines = code_lines.lines
         return flow_parse_res
 
     def _post_order_access_nodes(self, accessor: Callable[[ADVNodeModel], None], node: ADVNodeModel, 

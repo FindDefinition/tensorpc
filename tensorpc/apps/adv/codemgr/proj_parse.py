@@ -352,7 +352,7 @@ class ADVProjectParser:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
             
-            alias_map = desc.marker.kwargs.get("alias_map", None)
+            alias_map = desc.marker.kwargs.get("alias_map", "")
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
             adv_node = ADVNodeModel(
                 id=node_id, 
@@ -393,7 +393,7 @@ class ADVProjectParser:
             position = desc.marker.kwargs["position"]
             ref_node_id = desc.marker.kwargs.get("ref_node_id", None)
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
-            alias_map = desc.marker.kwargs.get("alias_map", None)
+            alias_map = desc.marker.kwargs.get("alias_map", "")
 
             ref_node_name_node = desc.marker.marker_node.args[0]
             assert isinstance(ref_node_name_node, ast.Name)

@@ -2,7 +2,7 @@ import ast
 from functools import partial
 import inspect
 from typing import Any, Callable, Optional, Self, TypeVar
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseNodeCodeMeta, BaseParseResult, BaseParser
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseNodeCodeMeta, BaseParseResult, BaseParser, ImplCodeSpec
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.logger import ADV_LOGGER
@@ -46,16 +46,18 @@ class SymbolParseResult(BaseParseResult):
         decorator = f"ADV.{mark_symbol_group.__name__}({kwarg_str})"
         if self.node.ref_node_id is not None:
             # only generate line
-            return [
+            return ImplCodeSpec([
                 f"{decorator}({self.symbol_cls_name})",
-            ]
+            ], -1, -1, 1, -1)
         else:
             impl = self.node.impl
             assert impl is not None
-            return [
+            lines = impl.code.splitlines()
+            end_column = len(lines[-1]) + 1
+            return ImplCodeSpec([
                 f"@{decorator}",
-                impl.code,
-            ]
+                *lines,
+            ], 1, 1, len(lines), end_column)
 
     def is_io_handle_changed(self, other_res: Self):
         """Compare io handles between two flow parse result. 
@@ -110,6 +112,9 @@ class SymbolParser(BaseParser):
 
     def parse_symbol_node(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], global_scripts: list[str]):
         node_id = node.id
+        code_lines = code.splitlines()
+        assert len(code_lines) > 0
+        end_column = len(code_lines[-1]) + 1
         code_to_exec = "\n".join(global_scripts + [code])
         code_to_exec_md5 = hashlib.md5(code_to_exec.encode()).hexdigest()
         if code_to_exec_md5 in self._cached_symbol_parse_res:
@@ -197,6 +202,8 @@ class SymbolParser(BaseParser):
             dep_qnames=list(set(import_qnames)),
             dep_qnames_for_ext=list(set(import_qnames + import_qnames_for_ref)),
             num_symbols=cnt,
+            end_column=end_column,
+            num_lines=len(code_lines),
         )
         if code_to_exec_md5 not in self._cached_symbol_parse_res:
             self._cached_symbol_parse_res[code_to_exec_md5] = []

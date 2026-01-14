@@ -4,6 +4,21 @@ from tensorpc.apps.adv.model import ADVNodeHandle, ADVNodeModel
 from typing import Any, Optional, Self, Union
 import abc 
 
+
+@dataclasses.dataclass
+class ImplCodeSpec:
+    lines: list[str]
+    lineno_offset: int 
+    column: int 
+    num_lines: int
+    end_column: int
+
+    @property 
+    def end_lineno_offset(self):
+        assert self.lineno_offset > 0 and self.num_lines > 0 
+        return self.lineno_offset + self.num_lines - 1
+
+
 @dataclasses.dataclass(kw_only=True)
 class BaseParseResult:
     # root flow don't have parent node, so this can be None.
@@ -12,6 +27,7 @@ class BaseParseResult:
     error_msg: str = ""
     inline_error_msgs: list[tuple[MonacoRange, str]] = dataclasses.field(default_factory=list)
     lineno: int = -1
+    loc: Optional[ImplCodeSpec] = None
 
     @staticmethod
     def get_node_meta_kwargs(node: ADVNodeModel) -> list[str]:
@@ -30,8 +46,16 @@ class BaseParseResult:
             res.append(f'ref_node_id="{node.ref_node_id}"')
         return res
 
-    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]) -> list[str]:
+    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]) -> ImplCodeSpec:
         raise NotImplementedError
+
+    def get_global_loc(self) -> ImplCodeSpec:
+        assert self.lineno > 0 and self.loc is not None
+        return dataclasses.replace(
+            self.loc,
+            lineno_offset=self.lineno + self.loc.lineno_offset,
+        )
+
 
 @dataclasses.dataclass(kw_only=True)
 class BackendHandle:
@@ -95,9 +119,10 @@ class RefNodeMeta:
     id: str 
     ref_node_id: str
     position: tuple[Union[int, float], Union[int, float]]
-    alias_map: Optional[str] = None
+    alias_map: str = ""
     is_local_ref: bool = False
 
 
 class BaseParser:
     pass 
+

@@ -3,7 +3,7 @@ import inspect
 from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
 from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
@@ -85,9 +85,9 @@ class FragmentParseResult(BaseParseResult):
         decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
         # for fragment ref, we use inline Annotated instead of decorator
         if self.node.ref_node_id is not None:
-            return [
+            return ImplCodeSpec([
                 f"{decorator}({self.func_name})",
-            ]
+            ], -1, -1, 1, -1)
         else:
             impl = self.node.impl
             assert impl is not None 
@@ -96,16 +96,16 @@ class FragmentParseResult(BaseParseResult):
             # generate signature from handles
             # TODO class support 
             lines = [
-                f"def {self.func_name}("
+                f"@{decorator}",
+                f"def {self.func_name}(",
             ]
             lines += self.get_signature_lines_from_handles(self.input_handles)
             lines.append(f") -> {self.out_type_anno}:")
+            line_offset = len(lines)
             code_lines_indented = [f"    {line}" for line in code_lines]
             lines.extend(code_lines_indented)
-            return [
-                f"@{decorator}",
-                *lines,
-            ]
+            end_column = len(code_lines_indented[-1]) + 1
+            return ImplCodeSpec(lines, line_offset, 1, len(code_lines_indented), end_column)
 
     def is_io_handle_changed(self, other_res: Self):
         """Compare io handles between two flow parse result. 
@@ -351,13 +351,17 @@ class _FragmentPrepCache:
     code_clean: str 
     tree: ast.Module
     output_desc: FragmentOutputDesc
+    end_column: int
+    num_lines: int
 
 class FragmentParser(BaseParser):
     def __init__(self):
         self._cache : Optional[_FragmentPrepCache] = None
     
     def _cached_parse_output_desc(self, code: str) -> _FragmentPrepCache:
-        code_for_compare = "\n".join(clean_source_code(code.splitlines()))
+        lines = code.splitlines()
+        assert len(lines) > 0
+        code_for_compare = "\n".join(clean_source_code(lines))
         if self._cache is not None and self._cache.code_clean == code_for_compare:
             return self._cache
         tree = ast.parse(code)
@@ -376,6 +380,8 @@ class FragmentParser(BaseParser):
             code_clean=code_for_compare,
             tree=tree,
             output_desc=output_desc,
+            end_column=len(lines[-1]) + 1,
+            num_lines=len(lines),
         )
         return cache
 
@@ -446,5 +452,8 @@ class FragmentParser(BaseParser):
             input_handles=input_handles,
             output_handles=output_handles,
             out_type=output_desc.type,
-            out_type_anno=out_type_anno
+            out_type_anno=out_type_anno,
+            end_column=prep_cache.end_column,
+            num_lines=prep_cache.num_lines,
+
         )

@@ -1619,6 +1619,7 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
 
+        self._flow_pfl_library: Optional[bytes] = None
         self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str], _DataModelPFLQueryDesc]] = {}
         self._flow_exclude_field_ids: set[int] = set()
 
@@ -1952,7 +1953,8 @@ class Component(Generic[T_base_props, T_child]):
             dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)
             res["dmProps"] = dm_paths_new
             res["dmPropsGrouped"] = dm_paths_new_grouped
-
+        if self._flow_pfl_library is not None:
+            res["pflLibraryBin"] = self._flow_pfl_library
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
@@ -2273,7 +2275,8 @@ class Component(Generic[T_base_props, T_child]):
         return AppEvent("", [(AppEventType.UIUpdateEvent, ev)])
 
     def _create_update_base_props_event(self, dm_props: Optional[Union[dict[str, Any], Undefined]] = None, 
-                used_events: Optional[Union[list[Any], Undefined]] = None):
+                used_events: Optional[Union[list[Any], Undefined]] = None,
+                pfl_library: Optional[Union[bytes, Undefined]] = None):
         data_no_und = {}
         data_unds = []
         if isinstance(dm_props, Undefined):
@@ -2289,6 +2292,12 @@ class Component(Generic[T_base_props, T_child]):
         else:
             if used_events is not None:
                 data_no_und["usedEvents"] = used_events
+        if isinstance(pfl_library, Undefined):
+            data_unds.append("pflLibraryBin")
+        else:
+            if used_events is not None:
+                data_no_und["pflLibraryBin"] = pfl_library
+
         assert self._flow_uid is not None
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, False)
