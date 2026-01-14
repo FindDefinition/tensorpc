@@ -547,6 +547,25 @@ class IconBaseProps:
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
+    color: Union[str, Undefined] = undefined
+    @field_validator('icon')
+    def svg_validator(cls, v):
+        if isinstance(v, Undefined):
+            return v
+        if isinstance(v, int):
+            return v
+        # if not v.startswith('data:image/svg+xml;base64'):
+        #     raise ValueError(
+        #         'you must use mui.IconButton.encode_svg to encode svg string')
+        return v
+
+@dataclasses.dataclass
+class IconOptionalBaseProps:
+    icon: Union[IconType, str, Undefined] = undefined
+    iconSize: Union[Literal["small", "medium", "large", "inherit"],
+                    Undefined] = undefined
+    iconFontSize: Union[ValueType, Undefined] = undefined
+    color: Union[str, Undefined] = undefined
 
     @field_validator('icon')
     def svg_validator(cls, v):
@@ -559,9 +578,9 @@ class IconBaseProps:
         #         'you must use mui.IconButton.encode_svg to encode svg string')
         return v
 
-
 @dataclasses.dataclass
-class IconProps(BasicProps, IconBaseProps, TooltipBaseProps):
+class IconProps(BasicProps, IconOptionalBaseProps, TooltipBaseProps):
+    show: Union[bool, Undefined] = undefined
     takeDragRef: Union[Undefined, bool] = undefined
     tooltip: Union[str, Undefined] = undefined
     muiColor: Union[_IconColorNoDefault, Undefined] = undefined
@@ -569,11 +588,11 @@ class IconProps(BasicProps, IconBaseProps, TooltipBaseProps):
 
 class Icon(MUIComponentBase[IconProps]):
 
-    def __init__(self, icon: Union[IconType, str]) -> None:
+    def __init__(self, icon: Union[IconType, str, Undefined] = undefined) -> None:
         super().__init__(UIType.Icon, IconProps)
         if isinstance(icon, IconType):
-            self.props.icon = icon
-        else:
+            self.prop(icon=icon)
+        elif not isinstance(icon, Undefined):
             self.prop(icon=self.encode_svg(icon))
 
     @staticmethod
@@ -1632,7 +1651,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, content)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     def json(self):
         assert not isinstance(self.props.value, Undefined)
@@ -1870,7 +1889,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, checked)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     def __bool__(self):
         return self.props.checked
@@ -2024,7 +2043,7 @@ class Select(MUIComponentBase[SelectProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2117,7 +2136,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, values)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2261,7 +2280,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2369,7 +2388,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2551,7 +2570,7 @@ class Slider(_SliderBase[SliderProps, NumberType]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2611,7 +2630,7 @@ class RangeSlider(_SliderBase[RangeSliderProps, tuple[NumberType, NumberType]]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2700,7 +2719,7 @@ class BlenderSlider(_SliderBase[BlenderSliderProps, NumberType]):
         uiev = UIEvent(
             {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2841,7 +2860,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             (FrontendEventType.Change.value, TaskLoopEvent.Start.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def headless_stop(self):
         uiev = UIEvent({
@@ -2849,7 +2868,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             (FrontendEventType.Change.value, TaskLoopEvent.Stop.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         if self._raw_update:
@@ -2938,7 +2957,7 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
             self._flow_uid_encoded: (FrontendEventType.Change.value, ev.value)
         })
         return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -4796,17 +4815,9 @@ class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
     dataList: List[Any] = dataclasses.field(default_factory=list)
     idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined
-
-    # variant?: "default" | "list"
-    # filter?: string
-    # filterKey?: string
-
-    # // for list only
-    # disablePadding?: boolean
-    # dense?: boolean
-    # divider?: boolean
-    # disableGutters?: boolean
-    variant: Union[Undefined, Literal["default", "list"]] = undefined
+    # if fragment, all flexbox-related attrs and event handlers
+    # are ignored
+    variant: Union[Undefined, Literal["default", "list", "fragment"]] = undefined
     filter: Union[Undefined, str] = undefined
     filterKey: Union[Undefined, str] = undefined
 

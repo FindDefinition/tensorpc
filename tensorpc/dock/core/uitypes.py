@@ -98,6 +98,12 @@ class IconType(enum.IntEnum):
     KeyboardArrowUp = 81
     KeyboardDoubleArrowDown = 82
     KeyboardDoubleArrowUp = 83
+    Shortcut = 84
+    Input = 85
+    Output = 86
+    # non-material icons
+    Reactflow = 200
+    Markdown = 201
 
 @dataclasses.dataclass
 class MenuItem:

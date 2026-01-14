@@ -67,7 +67,7 @@ from tensorpc.dock.coretypes import (Message, MessageEvent, MessageEventType,
                                      UserContentEvent, UserDataUpdateEvent,
                                      UserEvent, UserStatusEvent, get_unique_node_id,
                                      StorageType, StorageMeta)
-from tensorpc.dock.core.component import (AppEvent, AppEventType, ComponentEvent,
+from tensorpc.dock.core.component import (APP_EVENT_TYPES, AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
                                         UIEvent, UISaveStateEvent,
@@ -1590,22 +1590,6 @@ class Flow:
     async def app_event(self):
         # ws client wait for this event to get new app event
         appev = await self._app_q.get()
-        if AppEventType.ComponentEvent in appev.type_to_event:
-            ev = appev.type_to_event[AppEventType.ComponentEvent]
-            assert isinstance(ev, ComponentEvent)
-            name_to_data: List[Tuple[str, Any]] = []
-            for k, v in ev.uid_to_data.items():
-                # new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}-{k}"
-                # name_to_data.append((new_k, v))
-                new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}"
-                name_to_data.append((new_k, {
-                    "uid": k,
-                    "data": v,
-                }))
-            appev.type_to_event.pop(AppEventType.ComponentEvent)
-            if appev.type_to_event:
-                name_to_data.append((appev.get_event_uid(), appev.to_dict()))
-            return prim.DynamicEvents(name_to_data)
         return prim.DynamicEvent(appev.get_event_uid(), appev.to_dict())
 
     @marker.mark_websocket_event
@@ -1621,10 +1605,10 @@ class Flow:
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
         ev = app_event_from_data(ev_dict)
-        new_t2e = {}
+        new_t2e = []
         gid, nid = _extract_graph_node_id(ev.uid)
         app_node, _ = self._get_app_node_and_driver(gid, nid)
-        for k, v in ev.type_to_event.items():
+        for k, v in ev.type_event_tuple:
             if k == AppEventType.ScheduleNext:
                 assert isinstance(v, ScheduleNextForApp)
                 gid, nid = _extract_graph_node_id(ev.uid)
@@ -1643,8 +1627,8 @@ class Flow:
                         save_ev.to_dict(),
                         use_grpc=True)
             else:
-                new_t2e[k] = v
-        ev.type_to_event = new_t2e
+                new_t2e.append((k, v))
+        ev.type_event_tuple = new_t2e
         if new_t2e:
             await self._app_q.put(ev)
 

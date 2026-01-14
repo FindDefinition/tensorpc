@@ -1,13 +1,14 @@
 import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
+import contextvars
 from functools import partial
 import inspect
 import io
 import json
 import time
 from typing import (Any, Callable, Coroutine, Generic, Optional, Type, TypeVar,
-                    Union, cast)
+                    Union, cast, overload)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
@@ -59,8 +60,6 @@ class DataModelPeriodUpdateSelf(DataModelUpdateSelf):
 @dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
-    # include all datamodel methods marked with pfl function.
-    pfllibrary: Union[Undefined, bytes] = undefined
     modelUpdateCallbacks: Union[Undefined, dict[str, DataModelUpdateSelf]] = undefined
     modelPeriodCallbacks: Union[Undefined, dict[str, DataModelPeriodUpdateSelf]] = undefined
 
@@ -124,7 +123,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         model: _T,
         children: Union[Sequence[Component], Mapping[str, Component]],
         model_type: Optional[type[_T]] = None,
-        debug: bool = False
+        debug: bool = False,
+        json_only: bool = False,
     ) -> None:
         """
         Args:
@@ -141,6 +141,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         """
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
+        # assert not json_only, "not implemented for now"
+        # TODO make pfllibrary special props to let user enable json_only
         super().__init__(UIType.DataModel,
                          DataModelProps,
                          children,
@@ -150,7 +152,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._model_type = model_type or type(model)
         self._backend_draft_update_event_key = "__backend_draft_update"
         self._backend_storage_fetched_event_key = "__backend_storage_fetched"
-
+        self._json_only = json_only
         self.event_draft_update: EventSlotEmitter[
             list[DraftUpdateOp]] = self._create_emitter_event_slot(
                 self._backend_draft_update_event_key)
@@ -166,7 +168,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             self._pfl_library = _compile_pfllibrary(model_type_real)
             if self._pfl_library is not None:
                 lib_binary = json.dumps(self._pfl_library.dump_to_json_dict()).encode("utf-8")
-                self.prop(pfllibrary=lib_binary)
+                self._flow_pfl_library = lib_binary
 
         self._debug = debug
         self._is_model_dataclass = dataclasses.is_dataclass(model_type_real)
@@ -531,12 +533,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp], is_json_only: bool = False, need_freeze: bool = False):
         # convert dynamic node to static in op to avoid where op.
         ops = ops.copy()
+        fe_ops = ops.copy()
         for i in range(len(ops)):
             op = ops[i]
             if op.has_dynamic_node_in_main_path():
                 ops[i] = stabilize_getitem_path_in_op_main_path(
                     op, self.get_draft_type_only(), self._model)
-        frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        frontend_ops = list(filter(lambda op: not op.is_external, fe_ops))
         backend_ops = [dataclasses.replace(op) for op in ops]
 
         # any modify on external field won't be included in frontend.
@@ -700,6 +703,40 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 partial(DataModel._op_proc, handlers=handlers)):
             yield
 
+    @staticmethod
+    def mark_pfl_update_func(fn: Callable[[T, Any], Any]) -> Callable[[T, Any], Any]:
+        """Mark a function as pfl update function.
+        Update function have two arguments, self and event data.
+        """
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 0,
+        })(fn)
+
+    @staticmethod
+    def mark_pfl_query_func(fn: T) -> T:
+        """Mark a function as pfl cached query function.
+        Cached query function don't have any argument except self, and
+        the result will be cached during each data model update.
+        """
+        
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 1,
+        })(fn)
+
+    @staticmethod
+    def mark_pfl_query_nested_func(fn: T) -> T:
+        """Mark a function as pfl query function.
+        Query function have two arguments, self and path list.        
+        """
+        return pfl.mark_pfl_compilable(userdata={
+            "dmFuncType": 2,
+        })(fn)
+        
+    @staticmethod
+    def mark_pfl_func(fn: T) -> T:
+        """Mark a function as regular pfl function. can be used by other pfl function.
+        """
+        return pfl.mark_pfl_compilable()(fn)
 
 @dataclasses.dataclass
 class DataPortalProps(ContainerBaseProps):

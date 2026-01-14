@@ -65,6 +65,14 @@ class MonacoBreakpoint:
         return self
 
 @dataclasses.dataclass
+class MonacoConstrainedRange:
+    range: tuple[int, int, int, int]
+    label: str
+    allowMultiline: Union[bool, Undefined] = undefined
+    decorationOptions: Union[Undefined, "MonacoModelDecoration"] = undefined
+
+
+@dataclasses.dataclass
 class MonacoEditorOptions:
     # you need to enable glyphMargin to use breakpoints.
     glyphMargin: Union[bool, Undefined] = undefined
@@ -84,12 +92,17 @@ class MonacoEditorProps(FlexComponentBaseProps, ContainerBaseProps):
     actions: Union[list[MonacoEditorAction], Undefined] = undefined
     options: Union[MonacoEditorOptions, Undefined] = undefined
     bkpts: Union[list[MonacoBreakpoint], Undefined] = undefined
+    line: Union[int, Undefined] = undefined
+    enableConstrainedEditing: Union[bool, Undefined] = undefined
+    constrainedRanges: Union[list[MonacoConstrainedRange], Undefined] = undefined
 
 class _MonacoEditorControlType(enum.IntEnum):
     SetLineNumber = 0
     Save = 1
     SetValue = 2
     SetDecoration = 3
+    # only valid for constrained model.
+    ToggleHighlightOfEditableArea = 4
 
 @dataclasses.dataclass
 class MonacoPosition:
@@ -103,6 +116,7 @@ class MonacoRange:
     endLineNumber: int
     endColumn: int
 
+
 @dataclasses.dataclass
 class MonacoSaveEvent:
     value: str
@@ -113,6 +127,7 @@ class MonacoSaveEvent:
     lang: Optional[str] = None 
     path: Optional[str] = None 
     decorationsRanges: Optional[dict[str, List[MonacoRange]]] = None
+    constrainedValues: Optional[dict[str, str]] = None
 
 @dataclasses.dataclass
 class MonacoSelection(MonacoRange):
@@ -393,6 +408,18 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         ev = self.create_comp_event(ev_dict)
         await self.send_and_wait(ev)
 
+    async def toggle_editable_areas(self, css_single_line: Optional[str] = None, css_multi_line: Optional[str] = None):
+        ev_dict: dict[str, Any] = {
+            "type":
+            int(_MonacoEditorControlType.ToggleHighlightOfEditableArea),
+        }
+        if css_single_line is not None:
+            ev_dict["cssClassForSingleLine"] = css_single_line
+        if css_multi_line is not None:
+            ev_dict["cssClassForMultiLine"] = css_multi_line
+        ev = self.create_comp_event(ev_dict)
+        await self.send_and_wait(ev)
+
     async def set_breakpoints(self, bkpts: list[MonacoBreakpoint]):
         """set bkpt from backend.
         this method won't trigger frontend event EditorBreakpointChange.
@@ -404,12 +431,16 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                     content: str,
                     path: Optional[str] = None,
                     language: Optional[str] = None,
+                    line: Optional[int] = None,
+                    constrained_ranges: Optional[list[MonacoConstrainedRange]] = None,
                     use_comp_event: bool = True):
         if not use_comp_event:
+            line_val = undefined if line is None else line
             await self.send_and_wait(
                 self.update_event(value=content,
                                   path=path or undefined,
-                                  language=language or undefined))
+                                  language=language or undefined,
+                                  line=line_val))
         else:
             data = {
                 "type": int(_MonacoEditorControlType.SetValue),
@@ -418,12 +449,16 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
             self.prop(value=content)
             if path is not None:
                 self.prop(path=path)
-            if language is not None:
-                self.prop(language=language)
-            if path is not None:
                 data["path"] = path
             if language is not None:
+                self.prop(language=language)
                 data["language"] = language
+            if line is not None:
+                self.prop(line=line)
+                data["line"] = line
+            if constrained_ranges is not None:
+                self.prop(constrainedRanges=constrained_ranges)
+                data["constrainedRanges"] = constrained_ranges
             ev = self.create_comp_event(data)
             await self.send_and_wait(ev)
 
@@ -459,6 +494,13 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                 # evaluate failed, use a default value
                 value = self._init_value
             modified_props["value"] = value
+        if draft_ev.is_item_changed("line"):
+            value = draft_ev.new_value_dict["line"]
+            if value is None:
+                # evaluate failed, use a default value
+                value = self._init_value
+            modified_props["line"] = value
+
         batch_ev += (self.update_event(**modified_props))
 
     def _handle_editor_save_for_draft(self, ev: MonacoSaveEvent,
@@ -478,6 +520,7 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
             lang_draft: Optional[Any] = None,
             path_modifier: Optional[Callable[[str], str]] = None,
             lang_modifier: Optional[Callable[[str], str]] = None,
+            line_draft: Optional[Any] = None,
             save_event_prep: Optional[Callable[[MonacoSaveEvent], None]] = None):
         assert not self.is_mounted(), "must be called when unmount"
         assert isinstance(draft, DraftBase)
@@ -491,6 +534,9 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
         if lang_draft is not None:
             assert isinstance(lang_draft, DraftBase)
             draft_dict["language"] = lang_draft
+        if line_draft is not None:
+            assert isinstance(line_draft, DraftBase)
+            draft_dict["line"] = line_draft
         handler, _ = model_comp.install_draft_change_handler(
             draft_dict,
             partial(self._handle_draft_change,

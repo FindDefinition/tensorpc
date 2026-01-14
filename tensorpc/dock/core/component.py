@@ -1070,18 +1070,19 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
 
 
 def app_event_from_data(data: dict[str, Any]) -> "AppEvent":
-    type_to_event: dict[AppEventType, APP_EVENT_TYPES] = {}
+    type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]] = []
     for evtypeval, evdata in data["typeToEvents"]:
         found = False
         for k, v in ALL_APP_EVENTS.items():
             if k == evtypeval:
-                type_to_event[AppEventType(k)] = v.from_dict(evdata)
+                type_event_tuple.append(
+                    (AppEventType(k), v.from_dict(evdata)))
                 found = True
                 break
         if not found:
             raise ValueError("not found", evtypeval)
     return AppEvent(data["uid"],
-                    type_to_event,
+                    type_event_tuple,
                     remote_prefixes=data.get("remotePrefixes", None))
 
 
@@ -1099,7 +1100,7 @@ class AppEvent:
 
     def __init__(self,
                  uid: str,
-                 type_to_event: dict[AppEventType, APP_EVENT_TYPES],
+                 type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]],
                  sent_event: Optional[asyncio.Event] = None,
                  event_id: str = "",
                  is_loopback: bool = False,
@@ -1107,7 +1108,7 @@ class AppEvent:
                  after_send_callback: Optional[Callable[[], Awaitable[None]]] = None) -> None:
         # node uid, not component uid
         self.uid = uid
-        self.type_to_event = type_to_event
+        self.type_event_tuple = type_event_tuple
         # event that indicate this app event is sent
         # used for callback
         self.sent_event = sent_event
@@ -1121,11 +1122,24 @@ class AppEvent:
         self._after_send_callback = after_send_callback
 
     def is_empty(self):
-        return not self.type_to_event and not self._additional_events
+        return not self.type_event_tuple and not self._additional_events
+
+    def replace_type_event_tuple(self, new_type_event_tuple: list[tuple[AppEventType, APP_EVENT_TYPES]]):
+        new_app_event = AppEvent(
+            self.uid,
+            new_type_event_tuple,
+            self.sent_event,
+            self.event_id,
+            self.is_loopback,
+            self._remote_prefixes,
+            self._after_send_callback,
+        )
+        new_app_event._additional_events = self._additional_events
+        return new_app_event
 
     def to_dict(self):
         # here we don't use dict for typeToEvents because key in js must be string.
-        t2e = [(k.value, v.to_dict()) for k, v in self.type_to_event.items()]
+        t2e = [(k.value, v.to_dict()) for k, v in self.type_event_tuple]
         # make sure layout is proceed firstly.
         t2e.sort(key=lambda x: x[0])
         res = {"uid": self.uid, "typeToEvents": t2e}
@@ -1138,19 +1152,13 @@ class AppEvent:
         return app_event_from_data(data)
 
     def merge_new(self, new: "AppEvent") -> "AppEvent":
-        new_type_to_event: dict[AppEventType,
-                                APP_EVENT_TYPES] = new.type_to_event.copy()
+        new_type_ev_tuple = [e for e in new.type_event_tuple]
         if self.sent_event is not None:
             assert new.sent_event is None, "sent event of new must be None"
             sent_event = self.sent_event
         else:
             sent_event = new.sent_event
-        for k, v in self.type_to_event.items():
-            if k in new.type_to_event:
-                new_type_to_event[k] = v.merge_new(new.type_to_event[k])
-            else:
-                new_type_to_event[k] = v
-        res = AppEvent(self.uid, new_type_to_event, sent_event)
+        res = AppEvent(self.uid, self.type_event_tuple + new_type_ev_tuple, sent_event)
         res._additional_events = self._additional_events + new._additional_events
         return res 
 
@@ -1164,12 +1172,12 @@ class AppEvent:
 
     def __iadd__(self, other: "AppEvent"):
         ret = self.merge_new(other)
-        self.type_to_event = ret.type_to_event
+        self.type_event_tuple = ret.type_event_tuple
         self.sent_event = ret.sent_event
         return self
 
     def patch_keys_prefix_inplace(self, prefixes: list[str]):
-        for v in self.type_to_event.values():
+        for _, v in self.type_event_tuple:
             if isinstance(v, (UpdateUsedEventsEvent, UIUpdateEvent,
                               ComponentEvent, UpdateComponentsEvent)):
                 v.patch_keys_prefix_inplace(prefixes)
@@ -1190,6 +1198,40 @@ class ContainerBaseProps(BasicProps):
     pass 
     # childs: list[str] = dataclasses_strict.field(default_factory=list)
 
+@dataclasses_strict.dataclass
+class _DataModelPFLQueryDesc:
+    dm: Any
+    func_uid: str 
+    key: str
+    query_desc: Any
+
+def _preprocess_pfl_func(func: Callable, num_fixed_args: int = 2) -> tuple[Callable, Optional[list[Any]]]:
+    tail_kws = None
+    
+    if isinstance(func, partial):
+        assert not func.args, "args isn't supported in partial, use keywords instead."
+        tail_kws = func.keywords
+        func = func.func
+    assert not inspect.ismethod(func), "use Class.method instead of obj.method"
+    fing_sig = inspect.signature(func)
+    for k, p in fing_sig.parameters.items():
+        assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
+    tail_args = None
+    if tail_kws is not None:
+        bind_args = fing_sig.bind_partial(**tail_kws)
+        bind_args.apply_defaults()
+        cnt = 0
+        tail_args = []
+        for k, p in fing_sig.parameters.items():
+            if cnt >= num_fixed_args:
+                assert k in bind_args.arguments, "you must use partial to set tail keywords."
+                tail_args.append(bind_args.arguments[k])
+            else:
+                assert k not in tail_kws, "you can't use partial on first and second argument."
+            cnt += 1
+    else:
+        assert len(fing_sig.parameters) == num_fixed_args, "func must have two arguments, first is self, second is event data."
+    return func, tail_args
 
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
 T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
@@ -1337,32 +1379,7 @@ class _EventSlotBase(Generic[TEventData]):
         # TODO use string targetPath can cause unexpected bugs, consider use draft expr and type check.
         assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
         assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
-        tail_kws = None
-        
-        if isinstance(func, partial):
-            assert not func.args, "args isn't supported in partial, use keywords instead."
-            tail_kws = func.keywords
-            func = func.func
-        assert not inspect.ismethod(func), "use Class.method instead of obj.method"
-        fing_sig = inspect.signature(func)
-        for k, p in fing_sig.parameters.items():
-            assert p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD, "pfl func only support positional or keyword arguments."
-        tail_args = undefined
-        if tail_kws is not None:
-            bind_args = fing_sig.bind_partial(**tail_kws)
-            bind_args.apply_defaults()
-            cnt = 0
-            tail_args = []
-            for k, p in fing_sig.parameters.items():
-                if cnt >= 2:
-                    assert k in bind_args.arguments, "you must use partial to set tail keywords."
-                    tail_args.append(bind_args.arguments[k])
-                else:
-                    assert k not in tail_kws, "you can't use partial on first and second argument."
-                cnt += 1
-        else:
-            assert len(fing_sig.parameters) == 2, "func must have two arguments, first is self, second is event data."
-        
+        func, tail_args = _preprocess_pfl_func(func, num_fixed_args=2)
         func_specs = dm._pfl_library.get_compiled_unit_specs(func)
         assert len(func_specs) == 1, "func can't be template"
         if targetPath != "":
@@ -1371,7 +1388,7 @@ class _EventSlotBase(Generic[TEventData]):
         op = EventFrontendUpdateOp(
             attr="",
             targetPath=undefined if targetPath == "" else targetPath,
-            partialTailArgs=tail_args,
+            partialTailArgs=tail_args if tail_args is not None else undefined,
             pflFuncUid=func_specs[0].uid,
         )
         if not use_immer:
@@ -1602,7 +1619,8 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
 
-        self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str]]] = {}
+        self._flow_pfl_library: Optional[bytes] = None
+        self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str], _DataModelPFLQueryDesc]] = {}
         self._flow_exclude_field_ids: set[int] = set()
 
         # tensorpc will scan your prop dict to find
@@ -1875,10 +1893,13 @@ class Component(Generic[T_base_props, T_child]):
     def get_raw_props(self):
         return self.__raw_props
 
-    def _get_dm_props_for_frontend(self, model_paths):
+    def _get_dm_props_for_frontend(self, model_paths: dict[str, Union[str, tuple["Component", str], _DataModelPFLQueryDesc]]):
         dm_paths_new = {}
         for k, v in model_paths.items():
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                dm_paths_new[k] = (v.dm._flow_uid, (v.func_uid, v.key, v.query_desc))
+
+            elif not isinstance(v, str):
                 dm_paths_new[k] = (v[0]._flow_uid, v[1])
             else:
                 dm_paths_new[k] = v
@@ -1886,14 +1907,20 @@ class Component(Generic[T_base_props, T_child]):
         dm_paths_new_grouped = {}
         id_to_containers = {}
         for k, v in model_paths.items():
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                container = id(v.dm)
+                id_to_containers[container] = v.dm
+
+            elif not isinstance(v, str):
                 container = id(v[0])
                 id_to_containers[id(v[0])] = v[0]
             else:
                 container = None
             if container not in dm_paths_new_grouped:
                 dm_paths_new_grouped[container] = []
-            if not isinstance(v, str):
+            if isinstance(v, _DataModelPFLQueryDesc):
+                dm_paths_new_grouped[container].append((k, (v.func_uid, v.key, v.query_desc)))
+            elif not isinstance(v, str):
                 dm_paths_new_grouped[container].append((k, v[1]))
             else:
                 dm_paths_new_grouped[container].append((k, v))
@@ -1926,7 +1953,8 @@ class Component(Generic[T_base_props, T_child]):
             dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)
             res["dmProps"] = dm_paths_new
             res["dmPropsGrouped"] = dm_paths_new_grouped
-
+        if self._flow_pfl_library is not None:
+            res["pflLibraryBin"] = self._flow_pfl_library
         evs = self._get_used_events_dict()
         if evs:
             res["usedEvents"] = evs
@@ -2000,10 +2028,10 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             assert self._flow_uid is not None
             return await self.queue.put(
-                AppEvent("", {
-                    AppEventType.UIEvent:
+                AppEvent("", [(
+                    AppEventType.UIEvent,
                     UIEvent({self._flow_uid.uid_encoded: ev})
-                },
+                )],
                          is_loopback=True))
 
     async def put_app_event(self, ev: AppEvent):
@@ -2040,6 +2068,59 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_data_model_paths.update(new_kwargs)
         return self
 
+    def bind_pfl_query(self, dm: "DataModel", **kwargs: tuple[Callable, str]):
+        for k in kwargs.keys():
+            assert k in self._prop_field_names, f"overrided prop must be defined in props class {self.__prop_cls}, {k}"
+        return self.bind_pfl_query_unchecked_dict(dm, kwargs)
+
+    def bind_pfl_query_unchecked_dict(self, dm: "DataModel", kwargs: Mapping[str, tuple[Callable, str]]):
+        assert isinstance(dm, Component) and dm._flow_comp_type == UIType.DataModel, "dm must be DataModel type."
+        assert dm._pfl_library is not None, "your datamodel must define pfl marked functions."
+        for prop, (func, key) in kwargs.items():
+            if isinstance(func, partial):
+                func_real = func.func 
+            else:
+                func_real = func 
+            meta = pfl.get_compilable_meta(func_real)
+            assert meta is not None 
+            assert meta.userdata is not None 
+            fn_type = meta.userdata["dmFuncType"]
+            assert fn_type in [1, 2], "only support mark_pfl_query_func/mark_pfl_query_nested_func"
+            if fn_type == 1:
+                num_fixed_args = 1
+            else:
+                num_fixed_args = 2
+
+            func, tail_args = _preprocess_pfl_func(func, num_fixed_args=num_fixed_args)
+            if tail_args is not None:
+                for arg in tail_args:
+                    assert isinstance(arg, (str, int, float, bool)), "only support primitive tail args in pfl query"
+            func_specs = dm._pfl_library.get_compiled_unit_specs(func)
+            assert len(func_specs) == 1, "func can't be template"
+            pfl_func_id = func_specs[0].uid
+            fn_cache_key = pfl_func_id
+            if tail_args is not None:
+                fn_cache_key_parts = [pfl_func_id]
+                for arg in tail_args:
+                    if isinstance(arg, float):
+                        prefix = "f"
+                    elif isinstance(arg, bool):
+                        prefix = "b"
+                    elif isinstance(arg, int):
+                        prefix = "i"
+                    else:
+                        prefix = "s"
+                    fn_cache_key_parts.append(f"{prefix}:{arg}")
+                fn_cache_key = UniqueTreeId.from_parts(fn_cache_key_parts).uid_encoded
+            query_desc: dict[str, Any] = {
+                "tailQueryUid": fn_cache_key,
+                "dmFuncType": fn_type,
+            }
+            if tail_args is not None:
+                query_desc["tailArgs"] = tail_args
+            self._flow_data_model_paths[prop] = _DataModelPFLQueryDesc(dm, pfl_func_id, key, query_desc)
+        return self 
+        
     def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
         return self.bind_fields_unchecked_dict(kwargs)
 
@@ -2191,10 +2272,11 @@ class Component(Generic[T_base_props, T_child]):
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, json_only)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdateEvent: ev})
+        return AppEvent("", [(AppEventType.UIUpdateEvent, ev)])
 
     def _create_update_base_props_event(self, dm_props: Optional[Union[dict[str, Any], Undefined]] = None, 
-                used_events: Optional[Union[list[Any], Undefined]] = None):
+                used_events: Optional[Union[list[Any], Undefined]] = None,
+                pfl_library: Optional[Union[bytes, Undefined]] = None):
         data_no_und = {}
         data_unds = []
         if isinstance(dm_props, Undefined):
@@ -2210,11 +2292,17 @@ class Component(Generic[T_base_props, T_child]):
         else:
             if used_events is not None:
                 data_no_und["usedEvents"] = used_events
+        if isinstance(pfl_library, Undefined):
+            data_unds.append("pflLibraryBin")
+        else:
+            if used_events is not None:
+                data_no_und["pflLibraryBin"] = pfl_library
+
         assert self._flow_uid is not None
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, False)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdateBasePropsEvent: ev})
+        return AppEvent("", [(AppEventType.UIUpdateBasePropsEvent, ev)])
 
     def create_update_used_events_event(self):
         used_events = self._get_used_events_dict()
@@ -2231,7 +2319,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = ComponentEvent(
             {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     def create_comp_raw_event(self, data: Any):
         """create component control event for
@@ -2241,7 +2329,7 @@ class Component(Generic[T_base_props, T_child]):
         ev = ComponentEvent(
             {self._flow_uid.uid_encoded: data})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     async def send_and_wait(self, ev: AppEvent, wait: bool = True):
         if ev.sent_event is None:
@@ -2255,29 +2343,29 @@ class Component(Generic[T_base_props, T_child]):
                                  deleted: Optional[list[str]]):
         ev = UpdateComponentsEvent(updates, deleted)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UpdateComponents: ev})
+        return AppEvent("", [(AppEventType.UpdateComponents, ev)])
 
     def create_delete_comp_event(self, deletes: list[str]):
         ev = UpdateComponentsEvent({}, deletes)
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UpdateComponents: ev})
+        return AppEvent("", [(AppEventType.UpdateComponents, ev)])
 
     def create_remote_comp_event(self, key: str, data: Any):
         """create event for remote comp to send to mounted master app.
         """
-        res = AppEvent("", {})
+        res = AppEvent("", [])
         res._additional_events = [RemoteCompEvent(key, data)]
         return res
 
     def create_user_msg_event(self, exc: UserMessage):
         ev = UIExceptionEvent([exc])
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIException: ev})
+        return AppEvent("", [(AppEventType.UIException, ev)])
 
     def create_editor_event(self, type: AppEditorEventType, data: Any):
         # uid is set in flowapp service later.
         ev = AppEditorEvent(type, data)
-        return AppEvent("", {AppEventType.AppEditor: ev})
+        return AppEvent("", [(AppEventType.AppEditor, ev)])
 
     def send_error(self, title: str, detail: str):
         assert self._flow_uid is not None
@@ -2358,7 +2446,7 @@ class Component(Generic[T_base_props, T_child]):
             datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
             try:
-                batch_ev = AppEvent("", {})
+                batch_ev = AppEvent("", [])
                 with enter_batch_event_context(batch_ev):
                     with datamodel_ctx as ctx:
                         coro = cb()
@@ -2438,7 +2526,7 @@ class Component(Generic[T_base_props, T_child]):
         res_list :list[Any] = []
         assert self._flow_uid is not None
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            batch_ev = AppEvent("", {})
+            batch_ev = AppEvent("", [])
             with enter_batch_event_context(batch_ev):
 
                 for cb in cbs:
@@ -2768,8 +2856,9 @@ class ContainerBase(Component[T_container_props, T_child]):
                  inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None,
                  uid: Optional[UniqueTreeIdForComp] = None,
-                 app_comp_core: Optional[AppComponentCore] = None) -> None:
-        super().__init__(base_type, prop_cls, allowed_events, uid)
+                 app_comp_core: Optional[AppComponentCore] = None,
+                 json_only: bool = False) -> None:
+        super().__init__(base_type, prop_cls, allowed_events, uid, json_only)
         self._flow_comp_core = app_comp_core
         if inited:
             assert app_comp_core is not None  # and uid_to_comp is not None
@@ -3076,7 +3165,8 @@ class ContainerBase(Component[T_container_props, T_child]):
                 await attach._run_mount_special_methods(self, reload_mgr)
 
     async def set_new_layout_locally(self, layout: Union[dict[str, Component],
-                                                         T_child_structure]):
+                                                         T_child_structure],
+                                    update_child_complex: bool = True):
         detached_uid_to_comp = self._prepare_detach_child()
         if isinstance(layout, dict):
             self._child_comps = layout
@@ -3110,7 +3200,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         child_uids = [self[c]._flow_uid for c in self._child_comps]
 
         update_msg: dict[str, Any] = {"childs": child_uids}
-        if self._child_structure is not None:
+        if self._child_structure is not None and update_child_complex:
             update_msg["childsComplex"] = asdict_no_deepcopy(
                 self._child_structure,
                 dict_factory=undefined_comp_dict_factory,
@@ -3126,7 +3216,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             layout: Union[dict[str, Component], list[Component],
                           T_child_structure],
             post_ev_creator: Optional[Callable[[], AppEvent]] = None,
-            disable_delay: bool = False):
+            disable_delay: bool = False,
+            update_child_complex: bool = True):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
 
@@ -3137,23 +3228,27 @@ class ContainerBase(Component[T_container_props, T_child]):
             evctx.delayed_callbacks.append(lambda: self._set_new_layout_delay(
                 layout,
                 comp_dont_need_cancel=evctx.comp_uid,
-                post_ev_creator=post_ev_creator))
+                post_ev_creator=post_ev_creator,
+                update_child_complex=update_child_complex))
         else:
             await self._set_new_layout_delay(
-                layout, post_ev_creator=post_ev_creator)
+                layout, post_ev_creator=post_ev_creator,
+                update_child_complex=update_child_complex)
 
     async def _lifecycle_center_cb(self, new_ev: AppEvent, post_ev_creator: Optional[Callable[[], AppEvent]] = None):
-        await self.put_app_event(new_ev)
         if post_ev_creator is not None:
-            await self.put_app_event(post_ev_creator())
+            await self.put_app_event(new_ev + post_ev_creator())
+        else:
+            await self.put_app_event(new_ev)
 
     async def _set_new_layout_delay(
             self,
             layout: Union[dict[str, Component], T_child_structure],
             comp_dont_need_cancel: Optional[UniqueTreeIdForComp] = None,
-            post_ev_creator: Optional[Callable[[], AppEvent]] = None):
+            post_ev_creator: Optional[Callable[[], AppEvent]] = None,
+            update_child_complex: bool = True):
         new_ev, attached, removed_dict = await self.set_new_layout_locally(
-            layout)
+            layout, update_child_complex=update_child_complex)
         for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
                 continue
@@ -3353,7 +3448,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         assert self._flow_uid is not None
         ev = ComponentEvent(
                 {self._flow_uid.uid_encoded: raw_ev_data})
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
     def create_comp_event(self, data: dict[str, Any]):
         """create component control event for
@@ -3371,7 +3466,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             ev = ComponentEvent(
                 {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.ComponentEvent: ev})
+        return AppEvent("", [(AppEventType.ComponentEvent, ev)])
 
 
 class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
@@ -3517,7 +3612,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             app_event = AppEvent.from_dict(app_event_dict)
                             # ev._remote_prefixes = prefixes
                             app_event.patch_keys_prefix_inplace(prefixes)
-                            for ui_ev in app_event.type_to_event.values():
+                            for _, ui_ev in app_event.type_event_tuple:
                                 if isinstance(ui_ev, UpdateComponentsEvent):
                                     assert ui_ev.remote_component_all_childs is not None
                                     ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(

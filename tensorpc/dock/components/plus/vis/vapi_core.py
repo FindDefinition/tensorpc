@@ -521,7 +521,7 @@ def group(name: str,
         # v_ctx._name_to_group[uid] = group
     # print(v_ctx._name_to_group)
     # print(v_ctx._group_assigns)
-    ev = AppEvent("", {})
+    ev = AppEvent("", [])
     if isinstance(group, three.Group):
         if pos is not None:
             ev += group.update_event(position=pos)

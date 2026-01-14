@@ -865,7 +865,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
                             duration: Optional[float] = None) -> AppEvent:
         self._state.status = status
         self._state.duration = duration
-        ev = AppEvent("", {})
+        ev = AppEvent("", [])
         if duration is not None:
             dt = datetime.timedelta(seconds=duration)
             ev += self._run_status.update_event(

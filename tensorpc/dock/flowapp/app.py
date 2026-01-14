@@ -168,7 +168,7 @@ class AppEditor:
         return state
 
     async def _send_editor_event(self, event: AppEditorEvent):
-        await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
+        await self._queue.put(AppEvent("", [(AppEventType.AppEditor, event)]))
 
     async def set_editor_value(self, value: str, language: str = ""):
         """use this method to set editor value and language.
@@ -510,7 +510,7 @@ class App:
             self.__persist_storage.update(state["persist_storage"])
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         if self._enable_value_cache:
-            ev = AppEvent("", {})
+            ev = AppEvent("", [])
             for k, s in uistate.items():
                 if k in uid_to_comp:
                     comp_to_restore = uid_to_comp[k]
@@ -611,22 +611,22 @@ class App:
             if raise_on_fail:
                 await self._queue.put(
                     AppEvent(
-                        "", {
-                            AppEventType.UIException:
-                            ev,
-                        }))
+                        "", [
+                            (AppEventType.UIException,
+                            ev),
+                        ]))
 
                 raise e
             else:
                 await self._queue.put(
                     AppEvent(
-                        "", {
-                            AppEventType.UIException:
-                            ev,
-                            AppEventType.UpdateLayout:
+                        "", [
+                            (AppEventType.UIException,
+                            ev),
+                            (AppEventType.UpdateLayout,
                             LayoutEvent(
-                                self._get_fallback_layout(fbm, with_code_editor))
-                        }))
+                                self._get_fallback_layout(fbm, with_code_editor)))
+                        ]))
             return
         if not new_is_flex:
             if isinstance(res, Sequence):
@@ -658,10 +658,10 @@ class App:
         if send_layout_ev:
             layout = await self._get_app_layout(with_code_editor)
             ev = AppEvent(
-                "", {
-                    AppEventType.UpdateLayout:
-                    LayoutEvent(layout)
-                })
+                "", [
+                    (AppEventType.UpdateLayout,
+                    LayoutEvent(layout))
+                ])
             await self._queue.put(ev)
             if reload:
                 # make sure did_mount is called from leaf to root (reversed breadth first order)
@@ -817,7 +817,7 @@ class App:
         return
 
     async def _send_editor_event(self, event: AppEditorEvent):
-        await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
+        await self._queue.put(AppEvent("", [(AppEventType.AppEditor, event)]))
 
     def set_editor_value_event(self,
                                value: str,
@@ -1103,7 +1103,7 @@ class App:
         await self._queue.put(
             AppEvent(
                 "",
-                {AppEventType.CopyToClipboard: CopyToClipboardEvent(text)}))
+                [(AppEventType.CopyToClipboard, CopyToClipboardEvent(text))]))
 
     def find_component(
             self,

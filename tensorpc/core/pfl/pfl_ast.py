@@ -18,7 +18,7 @@ from tensorpc.core.tree_id import UniqueTreeId
 
 from .core import (PFL_LOGGER, FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
                    get_parse_context_checked, param_fn, varparam_fn)
-
+from .typedefs import (BoolOpType, BinOpType, CompareType, UnaryOpType)
 
 _PFLTYPE_TO_SUPPORTED_METHODS = {
     PFLExprType.STRING: {
@@ -48,6 +48,22 @@ _PFLTYPE_TO_SUPPORTED_METHODS = {
         "join":
         inspect.Signature([param_fn("iterable", list[str])],
                           return_annotation=str),  # join
+        "strip":
+        inspect.Signature([],
+                          return_annotation=str),  # strip
+        "rstrip":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "lstrip":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "lower":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+        "upper":
+        inspect.Signature([],
+                          return_annotation=str),  # rstrip
+
     },
 }
 
@@ -170,47 +186,6 @@ _PFLAST_TYPE_TO_STR = {
     PFLASTType.SLICE: "slice",
 
 }
-
-
-class BoolOpType(enum.IntEnum):
-    AND = 0
-    OR = 1
-
-
-class BinOpType(enum.IntEnum):
-    ADD = 0
-    SUB = 1
-    MULT = 2
-    DIV = 3
-    MOD = 4
-    POW = 5
-    LSHIFT = 6
-    RSHIFT = 7
-    BIT_OR = 8
-    BIT_XOR = 9
-    BIT_AND = 10
-    FLOOR_DIV = 11
-    MATMUL = 12
-
-
-class UnaryOpType(enum.IntEnum):
-    INVERT = 0
-    NOT = 1
-    UADD = 2
-    USUB = 3
-
-
-class CompareType(enum.IntEnum):
-    EQUAL = 0
-    NOT_EQUAL = 1
-    LESS = 2
-    LESS_EQUAL = 3
-    GREATER = 4
-    GREATER_EQUAL = 5
-    IS = 6
-    IS_NOT = 7
-    IN = 8
-    NOT_IN = 9
 
 _PFL_UNARY_TYPE_TO_METHOD_NAME = {
     UnaryOpType.INVERT: "__invert__",
@@ -714,7 +689,7 @@ class PFLUnaryOp(PFLExpr):
                 # if any operand is unknown, and no custom type, result is unknown
                 self.st = PFLExprInfo(PFLExprType.UNKNOWN)
                 return self
-            self.operand.st.check_support_binary_op("left")
+            self.operand.st.check_support_unary_op("left")
             if self.op == UnaryOpType.NOT:
                 self.st = dataclasses.replace(self.operand.st, type=PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
             elif (self.op == UnaryOpType.UADD or self.op == UnaryOpType.USUB) and self.operand.st.type == PFLExprType.BOOL:
@@ -775,12 +750,14 @@ class PFLIfExp(PFLExpr):
         if not allow_partial or not _is_unknown_or_any(self.test.st):
             assert self.test.st.can_cast_to_bool(
             ), f"test must be convertable to bool, but got {self.test.st}"
+        res_st = self.body.st
         if not allow_partial or not operands_has_unk:
-            assert self.body.st.is_equal_type(self.orelse.st), f"body and orelse must be same type, but got {self.body.st} and {self.orelse.st}"
+            msg = f"body and orelse must be same type, but got {self.body.st} and {self.orelse.st}"
+            res_st = self.body.st._check_equal_type_with_unk_any_type_promption(self.orelse.st, msg) 
         if operands_has_unk:
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
         else:
-            self.st = dataclasses.replace(self.body.st)
+            self.st = dataclasses.replace(res_st)
         return self
 
     def consteval(self):
@@ -931,8 +908,11 @@ class PFLBinOp(PFLBinOpBase):
                 if self.op == BinOpType.DIV:
                     self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(float))
                 else:
-                    promotion_type = self.left.st.check_support_binary_op_and_promotion(self.right.st)
-                    self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
+                    promotion_type = self.left.st.check_support_binary_op_and_promotion(self.op, self.right.st)
+                    if self.left.st.type == PFLExprType.STRING:
+                        self.st = PFLExprInfo(PFLExprType.STRING, annotype=parse_type_may_optional_undefined(str))
+                    else:
+                        self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
         else:
             assert custom_res_type is not None
             self.st = custom_res_type
@@ -1011,8 +991,7 @@ class PFLCompare(PFLBinOpBase):
                     if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
                         assert self.left.st.type == PFLExprType.STRING and self.right.st.type == PFLExprType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
                     else:
-                        self.left.st.check_support_binary_op("left")
-                        self.right.st.check_support_binary_op("right")
+                        self.left.st.check_support_compare_op(self.op, self.right.st, "left")
             self.st = PFLExprInfo(PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
         else:
             assert custom_type_res is not None 
@@ -1652,9 +1631,10 @@ class PFLSubscript(PFLExpr):
     is_store: Union[Undefined, bool] = undefined
 
     def check_and_infer_type(self):
-        allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
+        parse_cfg = get_parse_context_checked().cfg
+        allow_partial = parse_cfg.allow_partial_type_infer
         if _is_unknown_or_any(self.value.st):
-            assert allow_partial
+            assert allow_partial, f"{self.value}"
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
             return
         slice_has_unk = False
@@ -1665,8 +1645,8 @@ class PFLSubscript(PFLExpr):
             for s in self.slice:
                 if _is_unknown_or_any(s.st):
                     slice_has_unk = True
-        if slice_has_unk:
-            assert allow_partial
+        if slice_has_unk and not parse_cfg.allow_partial_in_slice:
+            assert allow_partial, f"{self.slice}"
         assert not self.value.st.is_optional()
         if self.value.st.type == PFLExprType.ARRAY:
             assert not isinstance(self.slice, Sequence)
@@ -1968,7 +1948,8 @@ class PFLFunc(PFLAstStmt):
     deps: list[str] = dataclasses.field(default_factory=list)
 
     compile_info: _FuncCompileInfo = dataclasses.field(default_factory=_FuncCompileInfo)
-
+    # user can use compilable meta to store extra info.
+    userdata: Union[Undefined, dict[str, Any]] = undefined
     def get_module_import_path(self):
         return self.get_func_uid_no_spec().split("::")[0]
 

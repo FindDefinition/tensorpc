@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import enum
 import inspect
+import linecache
 from operator import is_
 import os
 import time
@@ -118,6 +119,9 @@ class AppInMemory(mui.FlexBox):
     async def _on_mount(self):
         reload_mgr = self.flow_app_comp_core.reload_mgr
         reload_mgr.in_memory_fs.add_file(self.path, self.code)
+        linecache.cache[self.path] = (len(self.code),
+                                              None, self.code.splitlines(True),
+                                              self.path)
         mod = reload_mgr.in_memory_fs.load_in_memory_module(self.path)
         app_cls = mod.__dict__[self.app_cls_name]
         if hasattr(app_cls, "Config"):
@@ -175,7 +179,7 @@ class CodeBlock(mui.FlexBox):
         is_horizontal: bool = True
         height: Union[mui.ValueType, mui.Undefined] = mui.undefined
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, dynamic_path: str):
         self.editor = mui.MonacoEditor(code, "python", "").prop(minWidth=0,
                                                                 minHeight=0)
         self.code = code
@@ -186,12 +190,13 @@ class CodeBlock(mui.FlexBox):
         self._layout_for_reload: Optional[mui.FlexBox] = None
         self.prop(flexFlow="column")
         self.editor.event_editor_save.on(self._on_editor_save)
+        self._dynamic_path = dynamic_path
 
     async def _on_editor_save(self, value: mui.MonacoSaveEvent):
         self.code = value.value
 
     async def _on_run(self):
-        code_comp = compile(self.code, f"", "exec")
+        code_comp = compile(self.code, self._dynamic_path, "exec")
         exec(code_comp)
 
 
@@ -213,8 +218,9 @@ class MarkdownTutorial(mui.FlexBox):
                         continue
                     blocks.append(mui.Markdown(block.content).prop(codeHighlight=True))
                 elif block.type == "code":
+                    dynamic_path = f"<{path_uid}-{i}>"
                     blocks.append(
-                        CodeBlock(block.content.lstrip()).prop(height="200px",
+                        CodeBlock(block.content.lstrip(), dynamic_path).prop(height="200px",
                                                                padding="10px"))
             book = mui.VBox(blocks).prop(overflow="auto", flex=1)
             layout = [complex_canvas, book]
@@ -265,7 +271,9 @@ class MarkdownTutorialV2(mui.FlexBox):
                         continue
                     md_blocks.append(block.content)
                 elif block.type == "code":
-                    comp_map[str(i)] = CodeBlock(block.content.lstrip()).prop(height="200px",
+                    dynamic_path = f"<{path_uid}-{i}>"
+
+                    comp_map[str(i)] = CodeBlock(block.content.lstrip(), dynamic_path).prop(height="200px",
                                                                padding="10px")
                     md_blocks.append(f":::component{{#{str(i)}}}")
                     md_blocks.append(f":::")

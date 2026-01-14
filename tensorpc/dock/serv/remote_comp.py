@@ -399,7 +399,7 @@ class RemoteComponentService:
             shouldn_t_set_sent_ev = False
             if self._ft_group is None or self._is_master:
                 # only master send event to UI
-                if ev.type_to_event:
+                if ev.type_event_tuple:
                     assert app_obj.mounted_app_meta.remote_gen_queue is not None
                     await app_obj.mounted_app_meta.remote_gen_queue.put(ev)
                     shouldn_t_set_sent_ev = True 
@@ -460,7 +460,7 @@ class RemoteComponentService:
             return (await asyncio.gather(*tasks))[0]
 
     def _patch_app_event(self, ev: AppEvent, prefixes: List[str], app: App,):
-        for ui_ev in ev.type_to_event.values():
+        for _, ui_ev in ev.type_event_tuple:
             if isinstance(ui_ev, UpdateComponentsEvent):
                 comp_dict = app.root._get_uid_encoded_to_comp_dict()
                 ui_ev.remote_component_all_childs = list(comp_dict.keys())

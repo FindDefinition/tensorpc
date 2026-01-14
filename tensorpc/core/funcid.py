@@ -356,6 +356,22 @@ def get_body_blocks_from_code(code: str, autorun_block_symbol: str = ""):
 
     return body_code_blocks
 
+def ast_constant_expr_to_value(node: ast.expr):
+    # support ast.Constant and list/dict/tuple of ast.Constant
+    if isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.List):
+        return [ast_constant_expr_to_value(elt) for elt in node.elts]
+    elif isinstance(node, ast.Tuple):
+        return tuple(ast_constant_expr_to_value(elt) for elt in node.elts)
+    elif isinstance(node, ast.Dict):
+        res = {}
+        for k, v in zip(node.keys, node.values):
+            assert k is not None
+            res[ast_constant_expr_to_value(k)] = ast_constant_expr_to_value(v)
+        return res
+    else:
+        raise ValueError(f"Unsupported ast node type: {type(node)}")
 
 def _main():
 
