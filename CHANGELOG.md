@@ -1,4 +1,7 @@
 # Changelog
+# [0.27.1] - 2026-01-15
+- [infra] fix missing files in MANIFEST.in
+
 # [0.26.0] - 2025-12-24
 - [infra] better datamodel query impl.
 - [infra] BREAKING CHANGE: better language server impl, you must upgrade tensorpc to 0.26 to use language server.

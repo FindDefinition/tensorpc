@@ -1,2 +1,3 @@
 include tensorpc/autossh/media/*.sh
+recursive-include tensorpc/autossh/media/.tensorpc_hooks-zsh
 recursive-include tensorpc/examples/tutorials *.md
