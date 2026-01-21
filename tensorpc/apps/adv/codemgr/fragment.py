@@ -16,7 +16,7 @@ class FragmentInputDesc:
 
 @dataclasses.dataclass
 class FragmentOutputDesc:
-    type: Literal["single", "tuple", "dict"]
+    type: Literal["single", "tuple", "dict", "none"]
     # symbol to alias
     mapping: dict[str, tuple[str, str]]
 
@@ -28,8 +28,9 @@ class FragmentParseResult(BaseParseResult):
     func_name: str
     input_handles: list[BackendHandle]
     output_handles: list[BackendHandle]
-    out_type: Literal["single", "tuple", "dict"]
+    out_type: Literal["single", "tuple", "dict", "none"]
     out_type_anno: str
+    alias_map: str
 
     def copy(self, node_id: str) -> Self:
         new_output_handles: list[BackendHandle] = []
@@ -373,9 +374,15 @@ class FragmentParser(BaseParser):
         api_finder.visit(tree)
         api_map = api_finder.map_res
         # TODO check number of api calls, should be exactly one.
-
-        first_node = next(iter(api_map.keys()))
-        output_desc = _parse_mark_outputs_ast(first_node)
+        if not api_map:
+            # None
+            output_desc = FragmentOutputDesc(
+                type="none",
+                mapping={},
+            )
+        else:
+            first_node = next(iter(api_map.keys()))
+            output_desc = _parse_mark_outputs_ast(first_node)
         cache = _FragmentPrepCache(
             code_clean=code_for_compare,
             tree=tree,
@@ -443,17 +450,19 @@ class FragmentParser(BaseParser):
             out_type_anno = output_handles[0].handle.type
         elif output_desc.type == "tuple":
             out_type_anno = f"tuple[{', '.join([h.handle.type for h in output_handles])}]"
+        elif output_desc.type == "none":
+            out_type_anno = "None"
         else:
             out_type_anno = f"dict[str, Any]"
         return FragmentParseResult(
-            node=node,
+            # we perform inplace op during update.
+            # so we clone node here to keep old node info.
+            node=dataclasses.replace(node), 
             succeed=True,
             func_name=node.name,
             input_handles=input_handles,
             output_handles=output_handles,
             out_type=output_desc.type,
             out_type_anno=out_type_anno,
-            end_column=prep_cache.end_column,
-            num_lines=prep_cache.num_lines,
-
+            alias_map="",
         )

@@ -9,7 +9,7 @@ MARKERS_REGISTRY = HashableRegistry[Callable]()
 
 @MARKERS_REGISTRY.register
 def mark_global_script(name: str, node_id: str, position: tuple[float, float], 
-        ref_node_id: Optional[str] = None) -> Callable[[T], T]:
+        ref_node_id: Optional[str] = None, ref_import_path: Optional[list[str]] = None) -> Callable[[T], T]:
     # TODO we actually don't use this metadata, we read ast directly.
     def wrapper(fn_wrapped: T) -> T:
         return fn_wrapped   

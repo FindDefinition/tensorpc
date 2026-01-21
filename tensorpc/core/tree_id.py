@@ -125,6 +125,12 @@ class UniqueTreeId:
             i += 1
         return i
 
+    def is_common_parent(self, other: Self) -> bool:
+        if len(self.parts) != len(other.parts):
+            return False
+        common_idx = self.common_prefix_index(other)
+        return common_idx == len(self.parts) - 1
+
     def copy(self) -> Self:
         return self.__class__(self.uid_encoded, self.splitter_length)
 

@@ -1,4 +1,5 @@
 from functools import partial
+import time
 import traceback
 from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
@@ -103,7 +104,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         cur_model = evaluate_draft_ast_noexcept(get_draft_ast_node(self._draft), root_model)
         return cast(Optional[T_flow_model], cur_model)
 
-    async def _sync_ui_edges_to_model(self):
+    async def _sync_ui_edges_to_model(self, override: bool = False):
         """Do basic sync between model and flow ui state. ui data is sync to data model.
         usually used to deal with rare race condition that cause flow-level out-of-sync.
         """
@@ -115,15 +116,11 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         else:
             try:
                 cur_model_edges_ids = set(cur_model.edges.keys())
-                ui_node_id_to_del = cur_ui_edge_ids - cur_model_edges_ids
                 ui_new_edges: list[Edge] = []
                 for n in cur_model_edges_ids:
-                    if n not in cur_ui_edge_ids:
-                        ui_new_edges.append(self._to_ui_edge(cast(T_edge_model, cur_model.edges[n])))
-                if ui_node_id_to_del:
-                    await self._flow_comp.delete_edges_by_ids(list(ui_node_id_to_del))
+                    ui_new_edges.append(self._to_ui_edge(cast(T_edge_model, cur_model.edges[n])))
                 if ui_new_edges:
-                    await self._flow_comp.add_edges(ui_new_edges)
+                    await self._flow_comp.set_edges(ui_new_edges)
             except:
                 # rich.print(as_dict_no_undefined(cur_model))
                 CFLOW_LOGGER.error("Flow %s set failed.", self._debug_id)
@@ -142,17 +139,13 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             # eval failed, this usually means current node don't have a sub flow.
             await self._flow_comp.clear()
         else:
-            cur_model_node_ids = set(cur_model.nodes.keys())
-            ui_node_id_to_del = cur_ui_node_ids - cur_model_node_ids
             ui_new_nodes: list[Node] = []
+            cur_model_node_ids = set(cur_model.nodes.keys())
             for n in cur_model_node_ids:
-                if n not in cur_ui_node_ids:
-                    ui_new_nodes.append(self._to_ui_node(cur_model, n))
-            if ui_node_id_to_del:
-                await self._flow_comp.delete_nodes_by_ids(list(ui_node_id_to_del))
+                ui_new_nodes.append(self._to_ui_node(cur_model, n))
             if ui_new_nodes:
-                await self._flow_comp.add_nodes(ui_new_nodes)
-        
+                await self._flow_comp.set_nodes(ui_new_nodes)
+
     async def _switch_flow(self, nodes: dict[str, T_node_model], edges: dict[str, T_edge_model], flow_user_uid: Optional[str] = None):
         """Do basic sync between model and flow ui state. ui data is sync to data model.
         usually used to deal with rare race condition that cause flow-level out-of-sync.
@@ -273,7 +266,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         # TODO should we watch path draft change?
         # print(DraftEventType(node_change_type), DraftEventType(edge_change_type))
         is_mount_change = node_change_type == DraftEventType.MountChange
-        is_full_change = node_change_type == DraftEventType.ObjectIdChange and edge_change_type == DraftEventType.ObjectIdChange
+        is_full_change = node_change_type != DraftEventType.NoChange and edge_change_type != DraftEventType.NoChange
         if is_full_change or is_mount_change:
             flow_user_uid = None
             if self._flow_uid_getter is not None:
@@ -282,8 +275,9 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             edges = ev.new_value_dict["edges"]
             if nodes is not None and edges is not None:
                 # print(ev.new_value_dict)
-                return await self._switch_flow(nodes, edges, flow_user_uid)
-        if node_change_type == DraftEventType.ObjectIdChange or edge_change_type == DraftEventType.ObjectIdChange:
+                res = await self._switch_flow(nodes, edges, flow_user_uid)
+                return res
+        if node_change_type == DraftEventType.ObjectIdChange and edge_change_type == DraftEventType.ObjectIdChange:
             await self._flow_comp.clear()
             if self._flow_uid_getter is not None:
                 flow_user_uid = self._flow_uid_getter()

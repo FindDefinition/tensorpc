@@ -1,8 +1,11 @@
+import enum
+import rich
 from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackendManager
 from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser
-from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IndicatorWrapper
+from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IONodeWrapper, IndicatorWrapper
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.datamodel.events import DraftChangeEvent
+from tensorpc.core.funcid import remove_common_indent_from_code
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import create_draft_type_only, create_literal_draft
@@ -10,10 +13,11 @@ import tensorpc.core.datamodel.funcs as D
 from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
-from typing import Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from typing import Callable, Coroutine, Literal, Optional, Any
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 from tensorpc.core.datamodel.draft import (get_draft_pflpath)
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
+from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
 
 def _test_model_simple():
     return ADVProject(
@@ -371,7 +375,7 @@ return c + a
     ngid_to_path, ngid_to_fpath = res_proj.assign_path_to_all_node()
     res_proj.node_gid_to_path = ngid_to_path
     res_proj.node_gid_to_frontend_path = ngid_to_fpath
-    res_proj.update_ref_path(ngid_to_path, ngid_to_fpath)
+    res_proj.update_ref_path(ngid_to_fpath)
 
     # manager = ADVProjectBackendManager(lambda: res_proj.flow)
     # manager.sync_project_model()
@@ -396,6 +400,65 @@ return c + a
 
     return res_proj
 
+class NodeContextMenu(enum.Enum):
+    EnterNested = "Enter Nested"
+    DeleteNode = "Delete Node"
+
+class PaneContextMenu(enum.Enum):
+    AddFragment = "Add Fragment Node"
+    AddNestedFragment = "Add Fragment Subflow"
+    AddGlobalScript = "Add Global Script"
+    AddSymbolGroup = "Add Symbol Group"
+    AddOutput = "Add Output"
+    AddRef = "Add Ref Node"
+    Debug = "Debug"
+
+class RefNodeSelectDialog(mui.Dialog):
+    def __init__(self, on_click: Callable[[str, tuple[mui.NumberType, mui.NumberType]], Coroutine[Any, Any, None]]):
+        self.title = mui.Typography().prop(variant="body1")
+        self.qname = mui.Typography().prop(variant="caption", enableTooltipWhenOverflow=True)
+
+
+        self.info_icon = mui.Icon()
+        self.title.bind_fields(value="title")
+        self.qname.bind_fields(value="qname")
+        self.info_icon.bind_fields(tooltip="info")
+
+        self.card = mui.Paper([
+            self.title,
+            self.qname,
+            self.info_icon
+        ]).prop(width="150px", height="150px", margin="10px", flexFlow="column",)
+        # card get bigger when hover
+        self.card.update_raw_props({
+            ":hover": {
+                "transform": "scale(1.05)",
+                "transition": "transform 0.2s",
+            }
+        })
+        self.card.event_click.on_standard(self._handle_click)
+        self.content = mui.DataFlexBox(self.card).prop(flex=1, overflowY="auto", flexFlow="row wrap",
+            filterKey="qname", flexDirection="row")
+        self.search = mui.TextField("nodes")
+        self.search.prop(valueChangeTarget=(self.content, "filter"))
+        self._on_click = on_click
+        super().__init__([
+            self.search,
+            self.content,
+        ])
+        self.prop(overflow="hidden", title="Create Ref Node", 
+            display="flex", dialogMaxWidth=False, fullWidth=False,
+            width="75vw", height="75vh", includeFormControl=False, flexDirection="column")
+
+        self.position: tuple[mui.NumberType, mui.NumberType] = (0, 0)
+
+    async def _handle_click(self, event: mui.Event):
+        gid = event.get_keys_checked()[0]
+        try:
+            await self._on_click(gid, self.position)
+        finally:
+            await self.set_open(False)
+
 class App:
     @mark_create_layout
     def my_layout(self):
@@ -407,17 +470,30 @@ class App:
         ngid_to_path, ngid_to_fpath = adv_proj["project"].assign_path_to_all_node()
         adv_proj["project"].node_gid_to_path = ngid_to_path
         adv_proj["project"].node_gid_to_frontend_path = ngid_to_fpath
-        adv_proj["project"].update_ref_path(ngid_to_path, ngid_to_fpath)
+        adv_proj["project"].update_ref_path(ngid_to_fpath)
         
         
         model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
         node_cm_items = [
-            mui.MenuItem(id="nested", label="Enter Nested"),
+            mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
+            mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value),
+
         ]
         items = [
-            mui.MenuItem(id="plain", label="Add Plain Node"),
-            mui.MenuItem(id="nested", label="Add Nested Flow Node"),
-        ]
+            mui.MenuItem(id=PaneContextMenu.AddRef.name, label=PaneContextMenu.AddRef.value),
+            mui.MenuItem(id="divider0", divider=True),
+
+            mui.MenuItem(id=PaneContextMenu.AddFragment.name, label=PaneContextMenu.AddFragment.value),
+            mui.MenuItem(id=PaneContextMenu.AddGlobalScript.name, label=PaneContextMenu.AddGlobalScript.value),
+            mui.MenuItem(id=PaneContextMenu.AddSymbolGroup.name, label=PaneContextMenu.AddSymbolGroup.value),
+            mui.MenuItem(id=PaneContextMenu.AddOutput.name, label=PaneContextMenu.AddOutput.value),
+            mui.MenuItem(id="divider1", divider=True),
+            mui.MenuItem(id=PaneContextMenu.AddNestedFragment.name, label=PaneContextMenu.AddNestedFragment.value),
+            mui.MenuItem(id="divider2", divider=True),
+            mui.MenuItem(id=PaneContextMenu.Debug.name, label=PaneContextMenu.Debug.value),
+
+
+        ]            
 
         self.graph = flowui.Flow([], [], [
             flowui.MiniMap(),
@@ -449,9 +525,13 @@ class App:
 
         self.editor = editor.prop(enableConstrainedEditing=True, actions=editor_acts)
         self.editor.event_editor_action.on(self._handle_editor_acts)
+        self.editor.event_editor_save.on(self._handle_editor_save)
+
         self.editor.update_raw_props({
             ".monaco-editor-content-decoration": {
-                "background": "lightblue"
+                "background": "lightblue",
+                "width": "5px !important",
+                # "marginLeft": "3px",
             }
         })
         editor_ct = mui.MatchCase.binary_selection(True, mui.VBox([
@@ -470,15 +550,19 @@ class App:
                 ]).prop(minHeight="24px"),
                 self.graph,
             ]).prop(flex=1)
+        self.new_node_dialog = ConfigPanelDialog(self._on_new_node_create)
+        self.new_ref_dialog = RefNodeSelectDialog(self._handle_new_ref_node)
         self.dm = mui.DataModel(model, [
             graph_container,
             detail_ct,
+            self.new_node_dialog,
+            self.new_ref_dialog,
         ], json_only=True)
         draft = self.dm.get_draft()
         cur_root_proj = draft.draft_get_cur_adv_project()
         cur_model_draft = draft.draft_get_cur_model()
 
-        manager = ADVProjectBackendManager(lambda: self.dm.get_model().adv_projects["project"].flow, cur_root_proj.flow)
+        manager = ADVProjectBackendManager(lambda: self.dm.get_model().adv_projects["project"], cur_root_proj.flow)
         manager.sync_project_model()
         manager.parse_all()
         manager.init_all_nodes()
@@ -491,7 +575,7 @@ class App:
         self._manager = manager
         graph_container.update_raw_props(default_compute_flow_css())
 
-        self.graph.event_pane_context_menu.on(partial(self.handle_context_menu, target_flow_draft=cur_model_draft))
+        self.graph.event_pane_context_menu.on(partial(self._handle_pane_context_menu, target_flow_draft=cur_model_draft))
         # self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=preview_model_draft))
         # draft only support raw path, so we use [1::3] to convert from raw path to real node path
         # we also need to add root to the beginning
@@ -537,17 +621,19 @@ class App:
         adv_proj = self.dm.get_model().get_cur_adv_project()
         if select_node is not None and len(select_node) == 1:
             # print(cur_fe_path)
+            # print("ASFASFASDASD")
             pair = ADVProject.get_flow_node_by_fe_path(adv_proj.flow, cur_fe_path + ["nodes", select_node[0]])
             assert pair is not None 
             node_gid = pair[1].get_global_uid()
             flow_code, path, code_range = self._manager._get_flow_code_lineno_by_node_gid(node_gid)
             # print(pair[1].id, pair[1].nType, path, lineno)
             constrained_ranges = [
-                mui.MonacoConstrainedRange(code_range, "editarea", allowMultiline=True, decorationOptions=mui.MonacoModelDecoration(
-                    className="monaco-editor-content-decoration", isWholeLine=True,
+                mui.MonacoConstrainedRange(code_range, node_gid, allowMultiline=True, decorationOptions=mui.MonacoModelDecoration(
+                    linesDecorationsClassName="monaco-editor-content-decoration", isWholeLine=True,
                     minimap=mui.MonacoModelDecorationMinimapOptions(mui.MonacoMinimapPosition.Inline
                 )))
             ]
+            # constrained_ranges = []
             if code_range[0] > 0:
                 await self.editor.write(flow_code, path, line=code_range[0], 
                     language="python", constrained_ranges=constrained_ranges)
@@ -567,10 +653,10 @@ class App:
         node_gid = node.get_global_uid()
         if node.nType == ADVNodeType.OUT_INDICATOR:
             comp = IndicatorWrapper(
-                node_gid, self.dm, f"{ADVHandlePrefix.OutIndicator}-outputs"
+                node_gid, self.dm
             )
         else:
-            comp = BaseNodeWrapper(
+            comp = IONodeWrapper(
                 node_gid,
                 self.dm,
                 ADVNodeType(node.nType),
@@ -608,23 +694,40 @@ class App:
 
     async def handle_node_cm(self, data: flowui.NodeContextMenuEvent):
         item_id = data.itemId
-        node_id = data.nodeId
+        if item_id == NodeContextMenu.EnterNested.name:
+            node_id = data.nodeId
 
-        cur_path_val = self.dm.model.get_cur_adv_project().cur_path
-        new_path_val = cur_path_val + ['nodes', node_id, 'flow']
-        new_logic_path = new_path_val[1::3]
-        # validate node contains nested flow
-        cur_model = self.dm.model.get_cur_adv_project().flow
-        for item in new_logic_path:
-            cur_model = cur_model.nodes[item].flow
-            if cur_model is None:
-                return
+            cur_path_val = self.dm.model.get_cur_adv_project().cur_path
+            new_path_val = cur_path_val + ['nodes', node_id, 'flow']
+            new_logic_path = new_path_val[1::3]
+            # validate node contains nested flow
+            cur_model = self.dm.model.get_cur_adv_project().flow
+            for item in new_logic_path:
+                cur_model = cur_model.nodes[item].flow
+                if cur_model is None:
+                    return
 
-        draft = self.dm.get_draft().draft_get_cur_adv_project()
-        # we have to clear selection before switch flow because xyflow don't support controlled selection.
-        # xyflow will clear previous selection and send clear-selection event when flow is switched.
-        D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
-        draft.cur_path = new_path_val
+            draft = self.dm.get_draft().draft_get_cur_adv_project()
+            # we have to clear selection before switch flow because xyflow don't support controlled selection.
+            # xyflow will clear previous selection and send clear-selection event when flow is switched.
+            D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
+            draft.cur_path = new_path_val
+        elif item_id == NodeContextMenu.DeleteNode.name:
+            
+            node_id = data.nodeId
+            cur_proj = self.dm.model.get_cur_adv_project()
+            cur_path_val = cur_proj.cur_path
+            new_path_val = cur_path_val + ['nodes', node_id, ]
+            pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, new_path_val)
+            assert pair is not None 
+
+            change = self._manager.delete_node(pair[1].get_global_uid())
+            rich.print(change.get_short_repr())
+            post_ev_ct = lambda: self.graph.get_update_node_internals_event(change.changed_node_ids_in_cur_flow)
+            async with self.dm.draft_update(post_ev_creator=post_ev_ct) as draft:
+                # draft = self.dm.get_draft().draft_get_cur_adv_project()
+                self._manager.create_draft_updates_from_change(draft.draft_get_cur_adv_project(), change)
+            # await self.graph.update_node_internals(change.changed_node_ids_in_cur_flow)
 
     def handle_breadcrumb_click(self, data: list[str]):
         logic_path = data[1:] # remove root
@@ -637,22 +740,162 @@ class App:
         D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
         draft.cur_path = res_path
 
-    async def handle_context_menu(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
+    def _get_cur_flow_gid(self):
+        cur_proj = self.dm.model.get_cur_adv_project()
+        cur_path_val = cur_proj.cur_path
+        if not cur_path_val:
+            flow_gid = ""
+        else:
+            pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, cur_path_val)
+            assert pair is not None 
+            flow_gid = pair[1].get_global_uid()
+        return flow_gid
+
+    async def _handle_pane_context_menu(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
         
-        cur_model = self.dm.model.get_cur_adv_project().flow
-        node_ids = [n.id for n in cur_model.nodes.values()]
-        await self.graph.update_node_internals(node_ids)
+        # cur_model = self.dm.model.get_cur_adv_project().flow
+        # node_ids = [n.id for n in cur_model.nodes.values()]
+        # await self.graph.update_node_internals(node_ids)
+        cur_flow_gid = self._get_cur_flow_gid()
+
+        if data.itemId in [PaneContextMenu.AddFragment.name]:
+            if data.itemId == PaneContextMenu.AddFragment.name:
+                ntype = ADVNodeType.FRAGMENT.value 
+            else:
+                raise NotImplementedError
+
+            assert data.flowPosition is not None 
+            position = (data.flowPosition.x, data.flowPosition.y)
+            await self.new_node_dialog.open_config_dialog(ADVNewNodeConfig(
+                name="new_fragment",
+            ), userdata={
+                "flow_gid": cur_flow_gid,
+                "ntype": ntype,
+                "position": position,
+                "is_subflow": False,
+            })
+        elif data.itemId == PaneContextMenu.AddRef.name:
+            all_ref_nodes = self._manager.collect_possible_ref_nodes(cur_flow_gid)
+            assert data.flowPosition is not None 
+
+            import rich 
+            rich.print([n.id for n in all_ref_nodes])
+            datas = []
+            for n in all_ref_nodes:
+                name = n.name
+                qname = ".".join(n.path + [n.name])
+                info = "TODO"
+                datas.append({
+                    "id": n.get_global_uid(),
+                    "title": name,
+                    "qname": qname,
+                    "info": info,
+                })
+            await self.new_ref_dialog.send_and_wait(self.new_ref_dialog.content.update_event(dataList=datas))
+            self.new_ref_dialog.position = (data.flowPosition.x, data.flowPosition.y)
+            await self.new_ref_dialog.set_open(True)
+        elif data.itemId == PaneContextMenu.Debug.name:
+            cur_model = self.dm.model.get_cur_adv_project().flow
+            node_ids = [n.id for n in cur_model.nodes.values()]
+            await self.graph.update_node_internals(node_ids)
 
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
         if act.action == "ToggleEditableAreas":
             await self.editor.toggle_editable_areas()
 
+    async def _handle_editor_save(self, ev: mui.MonacoSaveEvent):
+        print(ev.path, ev.constrainedValues)
+        if ev.constrainedValues is not None:
+            for node_gid, node_impl_val in ev.constrainedValues.items():
+
+                change = self._manager.modify_code_impl(node_gid, remove_common_indent_from_code(node_impl_val))
+                if ev.path in change.flow_code_changes:
+                    flow_code, path, code_range = self._manager._get_flow_code_lineno_by_node_gid(node_gid)
+                    constrained_ranges = [
+                        mui.MonacoConstrainedRange(code_range, node_gid, allowMultiline=True, decorationOptions=mui.MonacoModelDecoration(
+                            className="monaco-editor-content-decoration", isWholeLine=True,
+                            minimap=mui.MonacoModelDecorationMinimapOptions(mui.MonacoMinimapPosition.Inline
+                        )))
+                    ]
+                    # print(change.flow_code_changes[ev.path])
+                    await self.editor.write(change.flow_code_changes[ev.path], constrained_ranges=constrained_ranges)
+                rich.print(change.get_short_repr()) 
+                post_ev_ct = lambda: self.graph.get_update_node_internals_event(change.changed_node_ids_in_cur_flow)
+                async with self.dm.draft_update(post_ev_creator=post_ev_ct) as draft:
+                    # draft = self.dm.get_draft().draft_get_cur_adv_project()
+                    self._manager.create_draft_updates_from_change(draft.draft_get_cur_adv_project(), change)
+                # await self.graph.update_node_internals(change.changed_node_ids_in_cur_flow)
+
+    async def _on_new_node_create(self, event: ConfigDialogEvent[ADVNewNodeConfig]):
+        # TODO check name conflict
+        assert event.cfg.name.isidentifier()
+        flow_gid = event.userdata["flow_gid"]
+        ntype = ADVNodeType(event.userdata["ntype"])
+        is_subflow = event.userdata["is_subflow"]
+        subflow = None
+        position = event.userdata["position"]
+        impl: Optional[InlineCode] = None
+        if ntype == ADVNodeType.FRAGMENT:
+            if is_subflow:
+                subflow = ADVFlowModel(nodes={}, edges={})
+            else:
+                impl = InlineCode(f"pass")
+        elif ntype == ADVNodeType.GLOBAL_SCRIPT:
+            impl = InlineCode(f"")
+        elif ntype == ADVNodeType.SYMBOLS:
+            impl = InlineCode(f"""
+@dataclasses.dataclass
+class {event.cfg.name}:
+    pass
+            """)
+        elif ntype == ADVNodeType.OUT_INDICATOR:
+            pass
+        else:
+            raise NotImplementedError
+        node = ADVNodeModel(
+            id=event.cfg.name,
+            position=flowui.XYPosition(position[0], position[1]),
+            nType=ntype,
+            name=event.cfg.name,
+            impl=impl,
+            flow=subflow,
+        )
+        change = self._manager.add_new_node(flow_gid, node)
+        post_ev_ct = lambda: self.graph.get_update_node_internals_event(change.changed_node_ids_in_cur_flow)
+        async with self.dm.draft_update(post_ev_creator=post_ev_ct) as draft:
+            # draft = self.dm.get_draft().draft_get_cur_adv_project()
+            self._manager.create_draft_updates_from_change(draft.draft_get_cur_adv_project(), change)
+        rich.print(change.get_short_repr()) 
+
+    async def _handle_new_ref_node(self, gid: str, position: tuple[mui.NumberType, mui.NumberType]):
+        cur_flow_gid = self._get_cur_flow_gid()
+
+        import_path, node_id = ADVNodeModel.extract_path_and_id(gid)
+        cache = self._manager._node_gid_to_cache[gid]
+        node = ADVNodeModel(
+            id=node_id,
+            position=flowui.XYPosition(position[0], position[1]),
+            nType=cache.node.nType,
+            name=cache.node.name,
+            ref_node_id=node_id,
+            ref_import_path=import_path,
+        )
+        change = self._manager.add_new_node(cur_flow_gid, node)
+        import rich 
+        rich.print(node)
+        post_ev_ct = lambda: self.graph.get_update_node_internals_event(change.changed_node_ids_in_cur_flow)
+        async with self.dm.draft_update(post_ev_creator=post_ev_ct) as draft:
+            # draft = self.dm.get_draft().draft_get_cur_adv_project()
+            self._manager.create_draft_updates_from_change(draft.draft_get_cur_adv_project(), change)
+        rich.print(change.get_short_repr()) 
+
+        # print("_handle_new_ref_node", gid)
 
 def _main():
     import rich 
     model = _test_model_symbol_group()
 
-    manager = ADVProjectBackendManager(lambda: model.flow, create_draft_type_only(type(model.flow)))
+    manager = ADVProjectBackendManager(lambda: model, create_draft_type_only(type(model.flow)))
     manager.sync_project_model()
     manager.parse_all()
     manager.init_all_nodes()
@@ -690,7 +933,7 @@ def _main_change_debug():
     import rich 
     model = _test_model_symbol_group()
 
-    manager = ADVProjectBackendManager(lambda: model.flow, create_draft_type_only(type(model.flow)))
+    manager = ADVProjectBackendManager(lambda: model, create_draft_type_only(type(model.flow)))
     manager.sync_project_model()
     manager.parse_all()
     manager.init_all_nodes()
@@ -701,9 +944,23 @@ return c + b
     """
     # add_func2_node.impl.code = fragment_changed
     print(add_func2_node.get_global_uid())
-    changed_nodes, changed_edges = manager.modify_code_impl(add_func2_node.get_global_uid(), fragment_changed)
+    change = manager.modify_code_impl(add_func2_node.get_global_uid(), fragment_changed)
     import rich 
-    rich.print(changed_nodes, changed_edges)
+    rich.print(change.get_short_repr())
+
+def _main_change_debug2():
+    import rich 
+    model = _test_model_symbol_group()
+
+    manager = ADVProjectBackendManager(lambda: model, create_draft_type_only(type(model.flow)))
+    manager.sync_project_model()
+    manager.parse_all()
+    manager.init_all_nodes()
+    add_node = model.flow.nodes["add"]
+    change = manager.delete_node(add_node.get_global_uid())
+    import rich 
+    rich.print(change.get_short_repr())
+
 
 if __name__ == "__main__":
-    _main()
+    _main_change_debug2()

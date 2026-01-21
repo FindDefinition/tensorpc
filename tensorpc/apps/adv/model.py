@@ -3,7 +3,7 @@ from pathlib import Path
 import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, Self, Union, cast
 from tensorpc.core.annolib import Undefined, undefined
-from tensorpc.core.datamodel.draft import DraftFieldMeta
+from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
 from tensorpc.dock.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
@@ -115,8 +115,6 @@ class ADVNodeModel(BaseNodeModel):
     # fields
     # base classes
     # decorators
-    # --- out indicator node props ---
-    oic_alias: str = ""
 
     @staticmethod
     def get_global_uid_ext(path: list[str], id: str):
@@ -131,6 +129,22 @@ class ADVNodeModel(BaseNodeModel):
     def get_ref_global_uid(self):
         assert self.ref_node_id is not None and self.ref_import_path is not None
         return UniqueTreeIdForTree.from_parts(self.ref_import_path + [self.ref_node_id]).uid_encoded
+
+    def is_local_ref_node(self):
+        assert self.ref_import_path is not None
+        return len(self.ref_import_path) == len(self.path) and all(x == y for x, y in zip(self.ref_import_path, self.path))
+
+    def get_child_node_paths(self, new_node: Self) -> tuple[list[str], list[str]]:
+        new_path = self.path + [self.name]
+        new_frontend_path = self.frontend_path + ["flow", "nodes", new_node.id]
+        return new_path, new_frontend_path
+
+    @staticmethod 
+    def extract_path_and_id(gid: str) -> tuple[list[str], str]:
+        uti = UniqueTreeIdForTree(gid)
+        parts = uti.parts
+        return parts[:-1], parts[-1]
+
 
 @dataclasses.dataclass
 class ADVEdgeModel(BaseEdgeModel):
@@ -204,6 +218,8 @@ class ADVProject:
 
     @staticmethod
     def get_flow_node_by_fe_path(root_flow: ADVFlowModel, frontend_path: list[str]) -> Optional[tuple[Optional[ADVNodeModel], ADVNodeModel]]:
+        """Get node and its parent node by frontend path.
+        """
         id_path = ADVProject.get_node_id_path_from_fe_path(frontend_path)
         cur_parent: tuple[ADVFlowModel, Optional[ADVNodeModel]] = (root_flow, None)
         cur_node: Optional[ADVNodeModel] = None
@@ -217,6 +233,22 @@ class ADVProject:
             return None
         return (cur_parent[1], cur_node)
 
+    @staticmethod
+    def get_flow_node_by_fe_path_v2(root_flow: ADVFlowModel, frontend_path: list[str]) -> Optional[tuple[ADVFlowModel, Optional[ADVNodeModel], ADVNodeModel]]:
+        """Get node and its parent node by frontend path.
+        """
+        id_path = ADVProject.get_node_id_path_from_fe_path(frontend_path)
+        cur_parent: tuple[ADVFlowModel, Optional[ADVNodeModel]] = (root_flow, None)
+        cur_node: Optional[ADVNodeModel] = None
+        for i, node_id in enumerate(id_path):
+            cur_node = cur_parent[0].nodes[node_id]
+            if i != len(id_path) - 1:
+                if cur_node.flow is None:
+                    return None
+                cur_parent = (cur_node.flow, cur_node)
+        if cur_node is None:
+            return None
+        return (cur_parent[0], cur_parent[1], cur_node)
 
     def assign_path_to_all_node(self):
         node_gid_to_import_path: dict[str, list[str]] = {}
@@ -236,13 +268,12 @@ class ADVProject:
         # raise NotImplementedError
         return node_gid_to_import_path, node_gid_to_frontend_path
 
-    def update_ref_path(self, node_gid_to_path: dict[str, list[str]], node_gid_to_frontend_path: dict[str, list[str]]):
+    def update_ref_path(self, node_gid_to_frontend_path: dict[str, list[str]]):
         def _update(node: ADVNodeModel, path: list[str]):
             if node.ref_node_id is not None:
                 ref_gid = node.get_ref_global_uid()
                 assert ref_gid in node_gid_to_frontend_path, f"node {ref_gid} not found in {path}"
                 node.ref_fe_path = node_gid_to_frontend_path[ref_gid]
-                node.ref_import_path = node_gid_to_path[ref_gid]
             if node.flow is not None:
                 for n_id, n in node.flow.nodes.items():
                     _update(n, path + [node.id])
@@ -254,9 +285,9 @@ class ADVProject:
     def get_node_id_path_from_fe_path(fe_path: list[str]) -> list[str]:
         return fe_path[1::3]
 
-    def draft_get_node_by_id(self,
-                        node_id: str):
-        node_fe_path = self.node_gid_to_frontend_path[node_id]
+    def draft_get_real_node_by_id(self,
+                        node_gid: str):
+        node_fe_path = self.node_gid_to_frontend_path[node_gid]
         node: Optional[ADVNodeModel] = D.getitem_path_dynamic(self.flow, node_fe_path, Optional[ADVNodeModel])
         
         real_node: Optional[ADVNodeModel] = D.where(
@@ -266,10 +297,29 @@ class ADVProject:
             return_type=Optional[ADVNodeModel])  # type: ignore
         return real_node
 
+    def draft_get_node_by_id(self,
+                        node_gid: str):
+        node_fe_path = self.node_gid_to_frontend_path[node_gid]
+        node: Optional[ADVNodeModel] = D.getitem_path_dynamic(self.flow, node_fe_path, Optional[ADVNodeModel])
+        return node
+
+    def draft_get_node_by_fe_path(self, node_fe_path: list[str]):
+        if not isinstance(node_fe_path, DraftBase):
+            node_fe_path = D.literal_val(node_fe_path)
+        node: ADVNodeModel = D.getitem_path_dynamic(self.flow, node_fe_path, ADVNodeModel)
+        return node
+
+    def draft_get_node_by_id_path(self, node_id_path: list[str]):
+        assert not isinstance(node_id_path, DraftBase)
+        assert len(node_id_path) > 0
+        res = self.flow.nodes[node_id_path[0]]
+        for node_id in node_id_path[1:]:
+            res = res.flow[node_id]
+        return res
 
     def draft_get_node_impl_editor(self,
                         node_id: str):
-        real_node = self.draft_get_node_by_id(node_id)
+        real_node = self.draft_get_real_node_by_id(node_id)
         
         has_code = real_node.impl != None
         code_path = D.literal_val("%s/%s.py") % (self.path, D.literal_val("/").join(real_node.path))
@@ -396,7 +446,11 @@ class ADVRoot:
         res: dict[str, Any] = {}
         if node is not None and real_node is not None:
             handle_idx: int = paths[0]
+            # paths may contains invalid index. see doc of `mark_pfl_query_nested_func`.
+            if handle_idx >= len(node.handles):
+                return res
             handle = node.handles[handle_idx]
+            # print(node.id, handle.id, handle_idx, handle.name)
             is_input = handle.is_input
             if handle.dict_key is not None:
                 # we need to show original key if dict output.
@@ -456,11 +510,15 @@ class ADVRoot:
                     if sym_name == "":
                         res["header"] = "..."
                     
-                    elif real_node.oic_alias.strip() != "":
-                        res["header"] = sym_name + "->" + real_node.oic_alias.strip()
+                    elif real_node.name.strip() != "":
+                        res["header"] = sym_name + "->" + real_node.name.strip()
                     else:
                         res["header"] = sym_name
 
             # if is_input:
             #     res["hborder"] = "1px solid #4caf50"
         return res
+
+@dataclasses.dataclass
+class ADVNewNodeConfig:
+    name: str

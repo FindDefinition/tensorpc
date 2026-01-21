@@ -15,6 +15,8 @@
 import contextlib
 import contextvars
 import enum
+import time
+import traceback
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
@@ -549,9 +551,6 @@ class FlowInternals(Generic[T_node, T_edge]):
                 self.node_id_to_inp_handle_to_edges[edge.target][
                     edge.targetHandle].append(edge)
         except:
-            rich.print("nodes", nodes)
-
-            rich.print("edges", edges)
             raise
         all_node_ids = set(self.id_to_node.keys())
         self.unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
@@ -1250,7 +1249,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             [n["id"] for n in nodes], _internal_dont_send_comp_event=True)
 
     async def _handle_new_edge(self, data: dict[str, Any]):
-        if data["controlled"] is True:
+        if "controlled" in data and data["controlled"] is True:
             LOGGER.error("[flowui] when you use controlled connection, you must "
                 "clear this default handler (`event_edge_connection.clear()`) "
                 "and define yours based on this handler. return True if this connection "
@@ -1267,12 +1266,15 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             assert node_id in self._internals.id_to_node, f"node id {node_id} not exists"
 
     async def update_node_internals(self, node_ids: list[str]):
+        return await self.send_and_wait(self.get_update_node_internals_event(node_ids))
+
+    def get_update_node_internals_event(self, node_ids: list[str]):
         self._validate_node_ids(node_ids)
         res = {
             "type": FlowControlType.UpdateNodeInternals.value,
             "nodeIds": node_ids,
         }
-        return await self.send_and_wait(self.create_comp_event(res))
+        return self.create_comp_event(res)
 
     async def update_node_props(self, node_id: str, props: dict[str, Any]):
         self._validate_node_ids([node_id])
@@ -1548,7 +1550,43 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 post_ev_creator=lambda: self.create_comp_event(ev_new_node))
         else:
             return await self.send_and_wait(self.create_comp_event(ev_new_node))
-    
+
+    async def set_nodes(self,
+                        nodes: list[Node],
+                        screen_to_flow: Optional[bool] = None):
+        """Add new nodes to the flow.
+
+        Args:
+            nodes (Node): nodes to add.
+            screen_to_flow (Optional[bool], optional): Whether the node position is in screen coordinates. Defaults to None.
+                you should use this when you use position from pane context menu or drag-drop to add a node.
+        """
+
+        new_layout: dict[str, Component] = {}
+        new_nodes = []
+        for node in nodes:
+            comp = node.get_component()
+            if comp is not None:
+                new_layout[node.id] = comp
+            new_nodes.append(node)
+        self.childs_complex.nodes = new_nodes
+        self._update_graph_data()
+        ev_new_node = {
+            "type": FlowControlType.AddNewNodes.value,
+            "nodes": nodes,
+            "isOverride": True,
+        }
+        if screen_to_flow is not None:
+            ev_new_node["screenToFlowPosition"] = screen_to_flow
+        if new_layout:
+            return await self.update_childs(
+                new_layout,
+                update_child_complex=False,
+                post_ev_creator=lambda: self.create_comp_event(ev_new_node))
+        else:
+            return await self.send_and_wait(self.create_comp_event(ev_new_node))
+
+
     async def switch_flow(self,
                         nodes: list[Node],
                         edges: list[Edge],
@@ -1680,7 +1718,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return await self.send_and_wait(self.create_comp_event(ev_del_edge))
 
     async def add_edges(self,
-                        edges: list[Edge]):
+                        edges: list[Edge],
+                        update_in_raf: Optional[bool] = None):
         """Add new edges to the flow.
 
         Args:
@@ -1695,6 +1734,28 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             "type": FlowControlType.AddNewEdges.value,
             "edges": new_edges,
         }
+        if update_in_raf:
+            ev_new_edge["updateInRAF"] = update_in_raf
+        return await self.send_and_wait(self.create_comp_event(ev_new_edge))
+    
+    async def set_edges(self,
+                        edges: list[Edge],
+                        update_in_raf: Optional[bool] = None):
+        """Add new edges to the flow.
+
+        Args:
+            edges (Edge): edges to add.
+        """
+        self.childs_complex.edges = edges
+        # TODO add validation for unique-ids
+        self._update_graph_data()
+        ev_new_edge = {
+            "type": FlowControlType.AddNewEdges.value,
+            "edges": edges,
+            "isOverride": True,
+        }
+        if update_in_raf:
+            ev_new_edge["updateInRAF"] = update_in_raf
         return await self.send_and_wait(self.create_comp_event(ev_new_edge))
 
     async def clear(self):

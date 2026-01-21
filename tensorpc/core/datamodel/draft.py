@@ -1086,7 +1086,7 @@ def _apply_draft_update_op(cur_obj: Any,
             setattr(cur_obj, k, v)
     elif op.op == JMESPathOpType.Delete:
         for k in op.opData["keys"]:
-            cur_obj.pop(k)
+            cur_obj.pop(k, None) # no-op if key not exist
     elif op.op == JMESPathOpType.Extend:
         cur_obj.extend(op.opData["items"])
     elif op.op == JMESPathOpType.ArraySet:
@@ -1144,7 +1144,7 @@ def _apply_draft_update_op_to_json(cur_obj: Any,
             cur_obj[k] = v
     elif op.op == JMESPathOpType.Delete:
         for k in op.opData["keys"]:
-            cur_obj.pop(k)
+            cur_obj.pop(k, None) # no-op if key not exist
     elif op.op == JMESPathOpType.Extend:
         cur_obj.extend(op.opData["items"])
     elif op.op == JMESPathOpType.ArraySet:

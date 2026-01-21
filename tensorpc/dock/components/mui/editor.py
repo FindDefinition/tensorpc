@@ -436,10 +436,12 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                     use_comp_event: bool = True):
         if not use_comp_event:
             line_val = undefined if line is None else line
+            constrained_ranges_val = undefined if constrained_ranges is None else constrained_ranges
             await self.send_and_wait(
                 self.update_event(value=content,
                                   path=path or undefined,
                                   language=language or undefined,
+                                  constrainedRanges=constrained_ranges_val,
                                   line=line_val))
         else:
             data = {

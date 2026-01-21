@@ -194,7 +194,7 @@ class SymbolParser(BaseParser):
             cnt += 1
 
         parse_res = SymbolParseResult(
-            node=node,
+            node=dataclasses.replace(node),
             symbol_cls_name=cls_name,
             succeed=True,
             symbols=symbol_handles,
@@ -202,8 +202,6 @@ class SymbolParser(BaseParser):
             dep_qnames=list(set(import_qnames)),
             dep_qnames_for_ext=list(set(import_qnames + import_qnames_for_ref)),
             num_symbols=cnt,
-            end_column=end_column,
-            num_lines=len(code_lines),
         )
         if code_to_exec_md5 not in self._cached_symbol_parse_res:
             self._cached_symbol_parse_res[code_to_exec_md5] = []

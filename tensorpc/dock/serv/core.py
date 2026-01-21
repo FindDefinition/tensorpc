@@ -498,7 +498,7 @@ class NodeWithSSHBase(RunnableNodeBase):
         return await self.input_queue.put("\x03")
 
     async def shutdown(self):
-        print("NODE", self.id, "SHUTDOWN")
+        APP_SERV_LOGGER.warning(f"Node {self.readable_id}({self.id}) shutdown.")
         if self.task is not None:
             self.shutdown_ev.set()
             await cancel_task(self.task)
@@ -1995,13 +1995,15 @@ class Flow:
                 #     node.stdout += str(event.arg)
 
             elif isinstance(event, (EofEvent, ExceptionEvent)):
-                print(node.readable_id, "DISCONNECTING...", type(event))
+                reason_str = "EOF" if isinstance(event,
+                                                  EofEvent) else "Exception"
+                APP_SERV_LOGGER.warning(f"{node.readable_id}({node.id}) disconnecting... Reason: {reason_str}")
                 if isinstance(event, ExceptionEvent):
                     print(event.traceback_str)
                 else:
                     print(event)
                 await node.shutdown()
-                print(node.readable_id, "DISCONNECTED.")
+                APP_SERV_LOGGER.warning(f"{node.readable_id}({node.id}) disconnected.")
             # event_caches.append((uid, event.to_dict()))
 
             # if cur_timestamp - last_send_timestamp_ns > time_limit_rate * 1000000000:

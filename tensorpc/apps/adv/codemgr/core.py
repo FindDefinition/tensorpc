@@ -29,6 +29,10 @@ class BaseParseResult:
     lineno: int = -1
     loc: Optional[ImplCodeSpec] = None
 
+    def get_node_checked(self) -> ADVNodeModel:
+        assert self.node is not None, "node is None in parse result."
+        return self.node
+
     @staticmethod
     def get_node_meta_kwargs(node: ADVNodeModel) -> list[str]:
         # most of nodes in a flow needs to serialize their position and id.

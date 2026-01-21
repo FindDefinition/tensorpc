@@ -118,6 +118,8 @@ class ADVProjectParser:
             marker = markers[marker_idx]
             if isinstance(marker, SingleADVMarker):
                 if marker.marker_name == adv_markers.mark_global_script.__name__:
+                    # TODO handle ref global script.
+                    is_ref_node = marker.kwargs.get("ref_node_id") is not None
                     assert marker_idx < len(markers) - 1, "Global script marker must be paired."
                     next_marker = markers[marker_idx + 1]
                     assert isinstance(next_marker, SingleADVMarker), "Global script marker must be paired."
@@ -302,12 +304,17 @@ class ADVProjectParser:
         for desc in flow_desc.global_script_descs:
             position = desc.marker.kwargs["position"]
             node_id = desc.marker.kwargs["node_id"]
+            ref_node_id = desc.marker.kwargs.get("ref_node_id", None)
+            ref_import_path = desc.marker.kwargs.get("ref_import_path", None)
+            # TODO parse flow node from import path?
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
                 nType=ADVNodeType.GLOBAL_SCRIPT.value,
                 name=desc.marker.kwargs["name"],
-                impl=InlineCode("\n".join(desc.code_lines))
+                impl=InlineCode("\n".join(desc.code_lines)) if ref_node_id is None else None,
+                ref_node_id=ref_node_id,
+                ref_import_path=ref_import_path,
             )
             node_id_to_node[node_id] = adv_node
         for desc in flow_desc.out_indicator_descs:

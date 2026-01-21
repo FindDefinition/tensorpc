@@ -1732,6 +1732,8 @@ class Component(Generic[T_base_props, T_child]):
         metas = reload_mgr.query_type_method_meta(type(self),
                                                   no_code=True,
                                                   include_base=True)
+        if not metas:
+            return None 
         # copy here to avoid different obj bind same meta.
         metas = [x.copy() for x in metas]
         res = FlowSpecialMethods(metas)
@@ -2675,18 +2677,19 @@ class Component(Generic[T_base_props, T_child]):
             reload_mgr = container_comp.flow_app_comp_core.reload_mgr
 
         special_methods = self.get_special_methods(reload_mgr)
-        if special_methods.did_mount is not None:
+        if special_methods is not None and special_methods.did_mount is not None:
             # run callback in container comp.
             await container_comp.run_callback(
                 special_methods.did_mount.get_binded_fn(),
                 sync_status_first=False,
                 change_status=False,
                 capture_draft=True)
-        with capture_draft_update() as ctx:
-            await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
-                                                    Event(FrontendEventType.AfterMount.value, None)) 
-        if ctx._ops:
-            await self._run_draft_update(ctx._ops)
+        if not self._flow_event_emitter.empty():
+            with capture_draft_update() as ctx:
+                await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
+                                                        Event(FrontendEventType.AfterMount.value, None)) 
+            if ctx._ops:
+                await self._run_draft_update(ctx._ops)
 
         # run effects
         for k, effects in self.effects._flow_effects.items():
@@ -2704,15 +2707,16 @@ class Component(Generic[T_base_props, T_child]):
         if reload_mgr is None:
             reload_mgr = container_comp.flow_app_comp_core.reload_mgr
         special_methods = self.get_special_methods(reload_mgr)
-        if special_methods.will_unmount is not None:
+        if special_methods is not None and special_methods.will_unmount is not None:
             # run callback in container comp because self component is unmounted,
             # so app queue are already removed.
             await container_comp.run_callback(
                 special_methods.will_unmount.get_binded_fn(),
                 sync_status_first=False,
                 change_status=False)
-        await self._flow_event_emitter.emit_async(FrontendEventType.BeforeUnmount.value,
-                                                  Event(FrontendEventType.BeforeUnmount.value, None)) 
+        if not self._flow_event_emitter.empty():
+            await self._flow_event_emitter.emit_async(FrontendEventType.BeforeUnmount.value,
+                                                    Event(FrontendEventType.BeforeUnmount.value, None)) 
         for k, unmount_effects in self.effects._flow_unmounted_effects.items(
         ):
             for _, unmount_effect in unmount_effects:
@@ -3167,10 +3171,25 @@ class ContainerBase(Component[T_container_props, T_child]):
     async def set_new_layout_locally(self, layout: Union[dict[str, Component],
                                                          T_child_structure],
                                     update_child_complex: bool = True):
-        detached_uid_to_comp = self._prepare_detach_child()
+        detach_childs: Optional[list[str]] = None
+        attach_childs: Optional[list[str]] = None
         if isinstance(layout, dict):
+            detach_childs = []
+            attach_childs = []
+            for k, v in self._child_comps.items():
+                if k in layout and v is layout[k]:
+                    continue
+                else:
+                    detach_childs.append(k)
+            for k, v in layout.items():
+                if k in self._child_comps and v is self._child_comps[k]:
+                    continue
+                else:
+                    attach_childs.append(k)
+            detached_uid_to_comp = self._prepare_detach_child(detach_childs)
             self._child_comps = layout
         else:
+            detached_uid_to_comp = self._prepare_detach_child()
             assert dataclasses.is_dataclass(layout)
             assert type(layout) == type(
                 self._child_structure
@@ -3181,7 +3200,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             children_dict = self._find_comps_in_dataclass(layout)
             for comp, local_id in children_dict:
                 self._child_comps[local_id] = comp
-        attached = self._attach_child(self.flow_app_comp_core)
+        attached = self._attach_child(self.flow_app_comp_core, attach_childs)
         new_detached_uid_to_comp = detached_uid_to_comp.copy()
         for k, v in detached_uid_to_comp.items():
             if v._flow_reference_count > 0:

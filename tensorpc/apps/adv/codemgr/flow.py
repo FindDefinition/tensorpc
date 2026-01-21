@@ -1,4 +1,5 @@
 import ast
+import enum
 import inspect
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Self, TypeGuard, TypeVar, Union
@@ -7,7 +8,7 @@ import rich
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.fragment import FragmentParseResult, FragmentParser, parse_alias_map
 from tensorpc.apps.adv.codemgr.symbols import SymbolParseResult, SymbolParser
-from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
+from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME, TENSORPC_ADV_ROOT_FLOW_ID
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.logger import ADV_LOGGER
@@ -31,8 +32,6 @@ _NTYPE_TO_ID_PREFIX = {
 
 }
 
-_ROOT_FLOW_ID = ""
-
 ADV_MAIN_FLOW_NAME = "__adv_flow_main__"
 
 @dataclasses.dataclass
@@ -41,6 +40,66 @@ class CodeBlock:
     column_offset: int  
 
 T = TypeVar("T")
+
+class NodeChangeFlag(enum.IntFlag):
+    NAME = enum.auto()
+    HANDLES = enum.auto()
+    INLINE_FLOW = enum.auto()
+    ALIAS_MAP = enum.auto()
+    GLOBAL_SCRIPT = enum.auto()
+    NEW = enum.auto() # indicate is new node
+
+@dataclasses.dataclass
+class ADVNodeChange:
+    name: str # only used for debug verbose.
+    flags: NodeChangeFlag
+    parse_res: BaseParseResult
+
+    @staticmethod 
+    def empty(name: str, parse_res: BaseParseResult, is_new: bool):
+        flags = NodeChangeFlag(0)
+        if is_new:
+            flags |= NodeChangeFlag.NEW
+        return ADVNodeChange(name=name, flags=flags, parse_res=parse_res)
+
+@dataclasses.dataclass
+class ADVProjectChange:
+    node_changes: dict[str, ADVNodeChange] = dataclasses.field(default_factory=dict)
+    new_flow_edges: dict[str, list[ADVEdgeModel]] = dataclasses.field(default_factory=dict)
+    flow_code_changes: dict[str, str] = dataclasses.field(default_factory=dict)
+    changed_node_ids_in_cur_flow: list[str] = dataclasses.field(default_factory=list)
+    new_node_gid_to_path: Optional[dict[str, list[str]]] = None 
+    new_node_gid_to_frontend_path: Optional[dict[str, list[str]]] = None
+
+    node_gid_to_path_update: Optional[dict[str, list[str]]] = None 
+    node_gid_to_frontend_path_update: Optional[dict[str, list[str]]] = None 
+
+    deleted_node_pairs: Optional[list[tuple[str, str]]] = None
+
+    def get_short_repr(self):
+        node_changes: dict[str, NodeChangeFlag] = {}
+        for node_gid, change in self.node_changes.items():
+            if change.name != "":
+                new_name = f"{node_gid}({change.name})"
+            else:
+                new_name = f"{node_gid}"
+            node_changes[new_name] = change.flags
+        flow_id_to_new_edge_ids: dict[str, list[str]] = {}
+        for flow_gid, edges in self.new_flow_edges.items():
+            if flow_gid == "":
+                flow_gid = "__ROOT__"
+            flow_id_to_new_edge_ids[flow_gid] = [e.id for e in edges]
+        changed_flow_paths = list(self.flow_code_changes.keys())
+        res = {
+            "node_changes": node_changes,
+            "new_flow_edges": flow_id_to_new_edge_ids,
+            "flow_code_changes": changed_flow_paths,
+            "changed_node_ids_in_cur_flow": self.changed_node_ids_in_cur_flow,
+        }
+        if self.deleted_node_pairs is not None:
+            res["deleted"] = self.deleted_node_pairs
+        return res 
+
 
 @dataclasses.dataclass
 class ExtNodeDesc:
@@ -99,7 +158,10 @@ class GlobalScriptParseResult(BaseParseResult):
 
     def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]):
         assert self.node is not None 
-        kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
+        kwargs_parts = self.get_node_meta_kwargs(self.node)
+        if self.node.ref_import_path is not None:
+            kwargs_parts.append(f'ref_import_path={repr(self.node.ref_import_path)}')
+        kwarg_str = ", ".join(kwargs_parts)
         mark_stmt = f"ADV.{adv_markers.mark_global_script.__name__}(name=\"{self.node.name}\", {kwarg_str})"
         mark_end_stmt = f"ADV.{adv_markers.mark_global_script_end.__name__}()"
         lines = self.code.splitlines()
@@ -128,6 +190,7 @@ class FlowParseResult(FragmentParseResult):
     misc_nodes: dict[ADVNodeType, list[ADVNodeModel]] = dataclasses.field(default_factory=dict)
     ext_node_descs: list[NodePrepResult] = dataclasses.field(default_factory=list)
     generated_code_lines: list[str] = dataclasses.field(default_factory=list)
+    generated_code: str = ""
     has_subflow: bool = False
     
     def _is_folder(self):
@@ -374,7 +437,7 @@ class FlowParseResult(FragmentParseResult):
 class ModifyParseCache:
     visited: set[str]
     cur_parse_stack: set[str]
-    old_parse_res: dict[str, tuple[FragmentParseResult, dict[str, BaseParseResult]]]
+    old_parse_res: dict[str, tuple[FlowParseResult, dict[str, BaseParseResult]]]
 
 @dataclasses_plain.dataclass
 class FlowCache:
@@ -383,21 +446,34 @@ class FlowCache:
     parent_node: Optional[ADVNodeModel]
     node_name_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
     node_id_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
+    edge_id_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
+    child_flow_gids: set[str] = dataclasses_plain.field(default_factory=set)
+    dep_flow_gids: set[str] = dataclasses_plain.field(default_factory=set)
+    all_child_flow_gids: set[str] = dataclasses_plain.field(default_factory=set)
+
+    topological_sorted_index: int = -1
+
+@dataclasses_plain.dataclass
+class NodeConnCache:
+    node: ADVNodeModel 
+    flow_node_gid: str
+    ref_gids_external: list[str] = dataclasses_plain.field(default_factory=list)
+    ref_node_ids_local: list[str] = dataclasses_plain.field(default_factory=list)
+    ref_gids_local: list[str] = dataclasses_plain.field(default_factory=list)
+
+class ADVProjectFSCache:
+    def __init__(self):
+        self._folders: set[Path] = set()
+        self._path_to_code: dict[Path, str] = {}
 
 class ADVProjectBackendManager:
-    def __init__(self, root_flow_getter: Callable[[], ADVFlowModel], root_flow_draft: ADVFlowModel):
+    def __init__(self, root_flow_getter: Callable[[], ADVProject], root_flow_draft: ADVFlowModel):
         self._root_flow_getter = root_flow_getter
-        
-        self._node_gid_to_node: dict[str, ADVNodeModel] = {
-        }
+        self._node_gid_to_cache: dict[str, NodeConnCache] = {}
         self._flow_node_gid_to_cache: dict[str, FlowCache] = {
-            _ROOT_FLOW_ID: FlowCache(root_flow_getter(), FlowParser(), None)
+            TENSORPC_ADV_ROOT_FLOW_ID: FlowCache(root_flow_getter().flow, FlowParser(), None)
         }
-        self._node_gid_to_flow_node_gid: dict[str, str] = {}
-
-
-        self._node_gid_to_ref_gids: dict[str, list[str]] = {}
-
+        self._path_to_flow_node_gid: dict[Path, str] = {}
         self._root_flow_draft = root_flow_draft
 
     def get_subflow_parser(self, node_with_subflow: ADVNodeModel) -> "FlowParser":
@@ -405,40 +481,112 @@ class ADVProjectBackendManager:
         node_gid = node_with_subflow.get_global_uid()
         return self._flow_node_gid_to_cache[node_gid].parser
 
-    def _update_refs(self):
-        self._node_gid_to_node.clear()
-        for gid, node in self._node_gid_to_node.items():
-            if node.ref_node_id is not None:
-                ref_gids = self._node_gid_to_ref_gids.get(node.get_ref_global_uid(), [])
-                ref_gids.append(gid)
-                self._node_gid_to_ref_gids[node.get_global_uid()] = ref_gids
+    def _reflesh_dependency(self, node_gid_to_cache: dict[str, NodeConnCache], flow_node_gid_to_cache: dict[str, FlowCache]):
+        for gid, cache in node_gid_to_cache.items():
+            cache.ref_gids_external.clear()
+            cache.ref_node_ids_local.clear()
+            cache.ref_gids_local.clear()
+        for gid, cache in node_gid_to_cache.items():
+            if cache.node.ref_node_id is not None:
+                ref_cache = node_gid_to_cache[cache.node.get_ref_global_uid()]
+                if cache.node.is_local_ref_node():
+                    ref_cache.ref_node_ids_local.append(cache.node.id)
+                    ref_cache.ref_gids_local.append(gid)
+                else:
+                    ref_cache.ref_gids_external.append(gid)
+        for flow_gid, cache in flow_node_gid_to_cache.items():
+            cache.child_flow_gids.clear()
+            cache.dep_flow_gids.clear()
+            cache.all_child_flow_gids.clear()
+            cache.topological_sorted_index = -1
+        for flow_gid, cache in flow_node_gid_to_cache.items():
+            for node in cache.flow.nodes.values():
+                if node.ref_node_id is not None:
+                    ref_node_cache = node_gid_to_cache[node.get_ref_global_uid()]
+                    dep_flow_gid = ref_node_cache.flow_node_gid
+                    if dep_flow_gid != flow_gid: # remove local ref
+                        dep_flow_cache = flow_node_gid_to_cache[dep_flow_gid]
+                        dep_flow_cache.child_flow_gids.add(flow_gid)
+                        cache.dep_flow_gids.add(dep_flow_gid)
+                elif node.flow is not None:
+                    dep_flow_cache = flow_node_gid_to_cache[node.get_global_uid()]
+                    dep_flow_cache.child_flow_gids.add(flow_gid)
+                    cache.dep_flow_gids.add(node.get_global_uid())
+        # topological sort (dfs) flow caches, generate and assign sorted_index.
+        sorted_flows: list[str] = []
+        visited: set[str] = set()
+        cycle_visited: set[str] = set()
+        def _dfs_flow(flow_gid: str):
+            if flow_gid in visited:
+                return 
+            if flow_gid in cycle_visited:
+                raise RuntimeError(f"Cycle detected in flow dependencies at flow {flow_gid}|{cycle_visited}.")
+            cycle_visited.add(flow_gid)
+            flow_cache = flow_node_gid_to_cache[flow_gid]
+            for child_flow_gid in flow_cache.child_flow_gids:
+                _dfs_flow(child_flow_gid)
+            visited.add(flow_gid)
+            sorted_flows.append(flow_gid)
+        for flow_gid, fcache in flow_node_gid_to_cache.items():
+            _dfs_flow(flow_gid)
+        sorted_flows.reverse()
+        for index, flow_gid in enumerate(sorted_flows):
+            flow_node_gid_to_cache[flow_gid].topological_sorted_index = index
+
+        # calc all_child_flow_gids. when we create ref nodes, we can't create cycles.
+        visited = set()
+        def _dfs_all_child(flow_gid: str) -> set[str]:
+            if flow_gid in visited:
+                return flow_node_gid_to_cache[flow_gid].all_child_flow_gids
+            visited.add(flow_gid)
+            flow_cache = flow_node_gid_to_cache[flow_gid]
+            all_children = set(flow_cache.child_flow_gids)
+            for child_flow_gid in flow_cache.child_flow_gids:
+                all_children.update(_dfs_all_child(child_flow_gid))
+            flow_cache.all_child_flow_gids = all_children
+            return all_children
+        for flow_gid in flow_node_gid_to_cache.keys():
+            _dfs_all_child(flow_gid)
+
+
+    def _update_path_to_fcache(self):
+        self._path_to_flow_node_gid.clear()
+        for flow_gid, fcache in self._flow_node_gid_to_cache.items():
+            parse_res = fcache.parser.get_flow_parse_result_checked()
+            path = parse_res.get_code_relative_path()
+            if path in self._path_to_flow_node_gid:
+                raise RuntimeError(f"Flow path conflict: {path} used by both flow nodes {flow_gid} and {self._path_to_flow_node_gid[path]}.")
+            self._path_to_flow_node_gid[path] = flow_gid
 
     def sync_project_model(self):
-        self._node_gid_to_node.clear()
+        # self._node_gid_to_node.clear()
         self._flow_node_gid_to_cache.clear()
-        self._node_gid_to_flow_node_gid.clear()
-        root_flow = self._root_flow_getter()
-        self._flow_node_gid_to_cache[_ROOT_FLOW_ID] = FlowCache(
+        # self._node_gid_to_flow_node_gid.clear()
+        root_flow = self._root_flow_getter().flow
+        self._flow_node_gid_to_cache[TENSORPC_ADV_ROOT_FLOW_ID] = FlowCache(
             root_flow, 
             FlowParser(), 
             None
         )
         def _traverse_node(node: ADVNodeModel):
             node_gid = node.get_global_uid()
-            self._node_gid_to_node[node_gid] = node
+            # self._node_gid_to_node[node_gid] = node
             if node.flow is not None:
                 fcache = FlowCache(node.flow, FlowParser(), node)
                 self._flow_node_gid_to_cache[node.get_global_uid()] = fcache
                 # TODO check: name of symbol group/fragment/class must be unique in flow  
                 for child_node in node.flow.nodes.values():
-                    self._node_gid_to_flow_node_gid[child_node.get_global_uid()] = node_gid
+                    self._node_gid_to_cache[child_node.get_global_uid()] = NodeConnCache(child_node, node_gid)
+                    # self._node_gid_to_flow_node_gid[child_node.get_global_uid()] = node_gid
                     fcache.node_name_pool(child_node.name)
                     fcache.node_id_pool(child_node.id)
                     _traverse_node(child_node)
         
         for node in root_flow.nodes.values():
-            self._node_gid_to_flow_node_gid[node.get_global_uid()] = _ROOT_FLOW_ID
+            self._node_gid_to_cache[node.get_global_uid()] = NodeConnCache(node, TENSORPC_ADV_ROOT_FLOW_ID)
+            # self._node_gid_to_flow_node_gid[node.get_global_uid()] = TENSORPC_ADV_ROOT_FLOW_ID
             _traverse_node(node)
+        self._reflesh_dependency(self._node_gid_to_cache, self._flow_node_gid_to_cache)
 
 
     def parse_all(self):
@@ -463,11 +611,21 @@ class ADVProjectBackendManager:
         fcache = self._flow_node_gid_to_cache[flow_gid]
         parser = fcache.parser
         flow_parse_res = parser.get_flow_parse_result_checked()
-        parse_res = parser._node_id_to_parse_result[self._node_gid_to_node[node_gid].id]
+        parse_res = parser._node_id_to_parse_result[self._node_gid_to_cache[node_gid].node.id]
         flow_code = "\n".join(flow_parse_res.to_code_lines(parser._node_id_to_parse_result).lines)
         loc = parse_res.get_global_loc()
         code_range = (loc.lineno_offset, loc.column, loc.end_lineno_offset, loc.end_column)
         return flow_code, str(flow_parse_res.get_code_relative_path()), code_range 
+
+    def _get_handles_from_parse_res(self, parse_res: BaseParseResult) -> Optional[list[ADVNodeHandle]]:
+        if isinstance(parse_res, SymbolParseResult):
+            return [bh.handle for bh in parse_res.symbols]
+        elif isinstance(parse_res, FragmentParseResult):
+            return [bh.handle for bh in parse_res.input_handles + parse_res.output_handles]
+        elif isinstance(parse_res, OutIndicatorParseResult):
+            return [parse_res.handle.handle]
+        else:
+            return None
 
     def init_all_nodes(self):
         # init all names and node handles in model
@@ -477,55 +635,58 @@ class ADVProjectBackendManager:
             for node_id, node in fcache.flow.nodes.items():
                 parse_res = parser._node_id_to_parse_result.get(node_id, None)
                 if parse_res is not None:
-                    if isinstance(parse_res, SymbolParseResult):
-                        node.name = parse_res.symbol_cls_name
-                        node.handles = [bh.handle for bh in parse_res.symbols]
-                    elif isinstance(parse_res, FragmentParseResult):
-                        node.handles = [bh.handle for bh in parse_res.input_handles + parse_res.output_handles]
-                    elif isinstance(parse_res, OutIndicatorParseResult):
-                        node.handles = [parse_res.handle.handle]
+                    fe_handles = self._get_handles_from_parse_res(parse_res)
+                    if fe_handles is not None:
+                        node.handles = fe_handles
                 else:
                     # TODO 
                     ADV_LOGGER.warning(f"Node {node_id} in flow {flow_gid} has no parse result.")
             fcache.flow.edges = {e.id: e for e in parser._flow_parse_result.edges}
 
     def _get_flow_gid_from_node_gid(self, node_gid: str) -> str:
-        return self._node_gid_to_flow_node_gid[node_gid]
+        return self._node_gid_to_cache[node_gid].flow_node_gid
 
     def _is_node_subflow(self, node_gid: str):
         # TODO cache result.
-        node = self._node_gid_to_node[node_gid]
+        node = self._node_gid_to_cache[node_gid].node
         if node.ref_node_id is None:
             return node.flow is not None
-        node_def = self._node_gid_to_node[node.get_ref_global_uid()]
+        node_def = self._node_gid_to_cache[node.get_ref_global_uid()].node
         return node_def.flow is not None
 
     def _reparse_changed_node(self, node_gid: str):
         # pair = ADVProject.get_flow_node_by_fe_path(root_flow, node.ref_fe_path)
         # assert pair is not None 
-        flow_node_gid = self._node_gid_to_flow_node_gid[node_gid]
+        flow_node_gid = self._node_gid_to_cache[node_gid].flow_node_gid
         return self._reparse_changed_node_internal(flow_node_gid, [node_gid])
 
     def _reparse_flow(self, flow_gid: str):
         return self._reparse_changed_node_internal(flow_gid, [])
 
-    def _reparse_changed_node_internal(self, flow_gid: str, node_gids: list[str]):
+    def _reparse_changed_node_internal(self, flow_gid: str, node_gids: list[str]) -> ADVProjectChange:
+        return self._reparse_changed_nodes_internal([(flow_gid, node_gids)], {}) 
+
+    def _reparse_changed_nodes_internal(self, pairs: list[tuple[str, list[str]]], deleted_node_gid_map: dict[str, ADVNodeModel]) -> ADVProjectChange:
+        # sort pairs 
+        pairs = pairs.copy()
         # all modify operations should only change handles and edges
         cache = ModifyParseCache(visited=set(), old_parse_res={}, cur_parse_stack=set())
-        cur_layer: list[tuple[str, list[str]]] = [(flow_gid, node_gids)]
+        cur_layer: list[tuple[str, list[str]]] = pairs
         layered_parse_visited: set[str] = set()
-        changed_nodes_res: dict[str, BaseParseResult] = {}
-        changed_edges_res: dict[str, list[ADVEdgeModel]] = {}
-
+        node_changes: dict[str, ADVNodeChange] = {}
+        new_flow_edges: dict[str, list[ADVEdgeModel]] = {}
+        flow_code_changes: dict[str, str] = {}
+        changed_node_in_cur: set[str] = set()
         while cur_layer:
+            # sort cur layer
+            cur_layer.sort(key=lambda x: self._flow_node_gid_to_cache[x[0]].topological_sorted_index)
+
             next_layer_nodes: set[str] = set()
             # clear all flow parse results in current layer
             # keep old parse 
             cur_flow_gids: list[str] = []
             for flow_gid, _ in cur_layer:
-                assert flow_gid not in layered_parse_visited
-                layered_parse_visited.add(flow_gid)
-
+                # assert flow_gid not in layered_parse_visited
                 cur_flow_gids.append(flow_gid)
                 flow_parser = self._flow_node_gid_to_cache[flow_gid].parser
                 if flow_parser._flow_parse_result is not None:
@@ -533,102 +694,213 @@ class ADVProjectBackendManager:
                 flow_parser.clear_parse_result()
 
             for flow_gid, changed_node_gids in cur_layer:
+                if flow_gid in layered_parse_visited:
+                    continue
+                layered_parse_visited.add(flow_gid)
+                ADV_LOGGER.warning("reparse flow %s due to changed nodes %s", flow_gid if flow_gid else "__ROOT__", changed_node_gids)
+
+                # TODO validate changed_node_gids
                 fcache = self._flow_node_gid_to_cache[flow_gid]
                 flow = fcache.flow 
                 flow_parser = fcache.parser
                 parent_flow_node = fcache.parent_node
                 prev_flow_parse_res = None
-                prev_node_id_to_parse_res = None
+                prev_nid_to_parse_res: dict[str, BaseParseResult] = {}
                 if flow_gid in cache.old_parse_res:
-                    prev_flow_parse_res, prev_node_id_to_parse_res = cache.old_parse_res[flow_gid]
+                    prev_flow_parse_res, prev_nid_to_parse_res = cache.old_parse_res[flow_gid]
                 flow_parse_res = flow_parser._parse_flow_recursive(parent_flow_node, flow_gid, flow, self, cache.visited) 
+                flow_code_changed: bool = True
+                if prev_flow_parse_res is not None:
+                    flow_code_changed = prev_flow_parse_res.generated_code != flow_parse_res.generated_code
+                if flow_code_changed:
+                    flow_code_changes[str(flow_parse_res.get_code_relative_path())] = flow_parse_res.generated_code
                 node_id_to_parse_res = flow_parser._node_id_to_parse_result
+
+                symbol_group_gid_may_change: set[str] = set()
+                frag_id_may_change: set[str] = set()
+                remain_change_ids: set[str] = set()
+
+                # 1. process global script nodes, extract symbol groups may change
                 for node_gid in changed_node_gids:
-                    node = self._node_gid_to_node[node_gid]
-                    # if is ref node, only need to check main inlineflow.
-                    if node.ref_node_id is None:
-                        if node.nType == ADVNodeType.FRAGMENT:
-                            # subflow change of node isn't handled here currently.
-                            if not self._is_node_subflow(node_gid):
-                                if prev_node_id_to_parse_res is not None:
-                                    prev_node_parse_res = prev_node_id_to_parse_res[node.id]
-                                    node_parse_res = node_id_to_parse_res[node.id]
-
-                                    assert isinstance(node_parse_res, FragmentParseResult)
-                                    assert isinstance(prev_node_parse_res, FragmentParseResult)
-                                    # rich.print(prev_node_parse_res.input_handles)
-                                    # rich.print(node_parse_res.input_handles)
-
-                                    is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
-                                else:
-                                    is_node_io_changed = True
-                                if is_node_io_changed:
-                                    changed_nodes_res[node_gid] = node_id_to_parse_res[node.id]
-                                    next_layer_nodes.update(self._node_gid_to_ref_gids.get(node_gid, []))
-                        elif node.nType == ADVNodeType.SYMBOLS:
-                            is_sym_name_changed: bool = False
-                            if prev_node_id_to_parse_res is not None:
-                                prev_node_parse_res = prev_node_id_to_parse_res[node.id]
-                                node_parse_res = node_id_to_parse_res[node.id]
-                                assert isinstance(node_parse_res, SymbolParseResult)
-                                assert isinstance(prev_node_parse_res, SymbolParseResult)
-                                is_sym_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
-                                is_sym_name_changed = node_parse_res.symbol_cls_name != prev_node_parse_res.symbol_cls_name
-                            else:
-                                is_sym_changed = True
-                            if is_sym_changed:
-                                # symbolgroup change may change node defs.
-                                # check all node defs in current flow, if io changed, reparse all ref fragment nodes
-                                changed_nodes_res[node_gid] = node_id_to_parse_res[node.id]
-
-                                for node_id, node_parse_res in node_id_to_parse_res.items():
-                                    cur_node = flow.nodes[node_id]
-                                    is_node_io_changed = True
-
-                                    if prev_node_id_to_parse_res is not None:
-                                        prev_node_parse_res = prev_node_id_to_parse_res[node_id]
-                                        # don't care ref node because symbol change don't affect ref node in current flow.
-                                        if cur_node.nType == ADVNodeType.FRAGMENT and cur_node.ref_node_id is None and cur_node.flow is None:
-                                            assert isinstance(node_parse_res, FragmentParseResult)
-                                            assert isinstance(prev_node_parse_res, FragmentParseResult)
-                                            is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
-                                    if is_node_io_changed:
-                                        changed_nodes_res[cur_node.get_global_uid()] = node_parse_res
-                                        next_layer_nodes.update(self._node_gid_to_ref_gids.get(cur_node.get_global_uid(), []))
-                                # always reparse ref symbol nodes
-                                next_layer_nodes.update(self._node_gid_to_ref_gids.get(node_gid, []))
-                            elif is_sym_name_changed:
-                                changed_nodes_res[node_gid] = node_id_to_parse_res[node.id]
-
-                        elif node.nType == ADVNodeType.GLOBAL_SCRIPT:
-                            # trigger all symbol group and fragment parse.
+                    if node_gid in deleted_node_gid_map:
+                        # deleted gs/sym node always trigger symbol group change check
+                        node = deleted_node_gid_map[node_gid]
+                        if node.nType == ADVNodeType.GLOBAL_SCRIPT:
                             for node_id, node_parse_res in node_id_to_parse_res.items():
                                 cur_node = flow.nodes[node_id]
-                                is_node_io_changed = True
-                                if prev_node_id_to_parse_res is not None:
-                                    prev_node_parse_res = prev_node_id_to_parse_res[node_id]
-                                    # don't care ref node because symbol change don't affect ref node in current flow.
-                                    if cur_node.nType == ADVNodeType.FRAGMENT and cur_node.ref_node_id is None and cur_node.flow is None:
-                                        assert isinstance(node_parse_res, FragmentParseResult)
-                                        assert isinstance(prev_node_parse_res, FragmentParseResult)
-                                        is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
-                                    elif cur_node.nType == ADVNodeType.SYMBOLS and cur_node.ref_node_id is None:
-                                        assert isinstance(node_parse_res, SymbolParseResult)
-                                        assert isinstance(prev_node_parse_res, SymbolParseResult)
-                                        is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
-                                if is_node_io_changed:
-                                    changed_nodes_res[cur_node.get_global_uid()] = node_parse_res
-                                    next_layer_nodes.update(self._node_gid_to_ref_gids.get(cur_node.get_global_uid(), []))
-                            # always reparse ref global script nodes
-                            next_layer_nodes.update(self._node_gid_to_ref_gids.get(node_gid, []))
-                        elif node.nType == ADVNodeType.OUT_INDICATOR:
-                            # out indicator can't be ref, only used in inline flow.
-                            continue
+                                if cur_node.nType == ADVNodeType.SYMBOLS and cur_node.ref_node_id is None:
+                                    symbol_group_gid_may_change.add(cur_node.get_global_uid())
+                        elif node.nType == ADVNodeType.SYMBOLS:
+                            symbol_group_gid_may_change.add(node_gid)
+                        continue
+
+                    node_cache = self._node_gid_to_cache[node_gid]
+                    node = node_cache.node
+                    node_parse_res = node_id_to_parse_res[node.id]
+
+                    if node.nType == ADVNodeType.GLOBAL_SCRIPT:
+                        is_new_node = node.id not in prev_nid_to_parse_res
+                        change = ADVNodeChange.empty(name=node.name, is_new=is_new_node, parse_res=node_parse_res)
+                        if node.ref_node_id is None:
+                            if node.id in prev_nid_to_parse_res:
+                                prev_node_parse_res = prev_nid_to_parse_res[node.id]
+                                assert isinstance(node_parse_res, GlobalScriptParseResult)
+                                assert isinstance(prev_node_parse_res, GlobalScriptParseResult)
+                                is_name_changed = node.name != prev_node_parse_res.get_node_checked().name
+                                is_content_changed = node_parse_res.code != prev_node_parse_res.code
+                            else:
+                                is_name_changed = True
+                                is_content_changed = True
+                        else:
+                            is_name_changed = False 
+                            if node_gid in node_changes:
+                                ext_change = node_changes[node_gid]
+                                is_content_changed = bool(ext_change.flags & NodeChangeFlag.GLOBAL_SCRIPT)
+                            else:
+                                # new gs node (def/ref) always trigger content changed
+                                is_content_changed = True
+                        if is_content_changed:
+                            for node_id, node_parse_res in node_id_to_parse_res.items():
+                                cur_node = flow.nodes[node_id]
+                                if cur_node.nType == ADVNodeType.SYMBOLS and cur_node.ref_node_id is None:
+                                    symbol_group_gid_may_change.add(cur_node.get_global_uid())
+                        if node.ref_node_id is None:
+                            if is_content_changed:
+                                # update all ref nodes for global script node
+                                next_layer_nodes.update(node_cache.ref_gids_external)
+                            if is_name_changed:
+                                change.flags |= NodeChangeFlag.NAME
+                            # TODO currently we don't use impl in frontend, so we don't need to update it.
+                            if is_content_changed:
+                                change.flags |= NodeChangeFlag.GLOBAL_SCRIPT
+                            if change.flags != NodeChangeFlag(0):
+                                node_changes[node_gid] = change
+
+                    elif node.nType == ADVNodeType.SYMBOLS:
+                        symbol_group_gid_may_change.add(node_gid)
+                    elif node.nType == ADVNodeType.FRAGMENT:
+                        frag_id_may_change.add(node.id)
+                    else:
+                        remain_change_ids.add(node.id)
+
+                # 2. process all symbol group nodes
+                for sym_node_gid in symbol_group_gid_may_change:
+                    if sym_node_gid in deleted_node_gid_map:
+                        # deleted sym node always trigger all frag node change check
+                        for node_id in node_id_to_parse_res.keys():
+                            cur_node = flow.nodes[node_id]
+                            if cur_node.nType == ADVNodeType.FRAGMENT and cur_node.ref_node_id is None and cur_node.flow is None:
+                                frag_id_may_change.add(node_id)
+                        continue
+                    else:
+                        node_cache = self._node_gid_to_cache[sym_node_gid]
+                        sym_node = node_cache.node
+                        sym_node_id = sym_node.id
+                    sym_node = flow.nodes[sym_node_id]
+                    sym_node_gid = sym_node.get_global_uid()
+                    node_cache = self._node_gid_to_cache[sym_node_gid]
+                    node_parse_res = node_id_to_parse_res[sym_node_id]
+                    is_new_node = sym_node.id not in prev_nid_to_parse_res
+                    change = ADVNodeChange.empty(name=sym_node.name, is_new=is_new_node, parse_res=node_parse_res)
+                    if sym_node.ref_node_id is None:
+                        if sym_node.id in prev_nid_to_parse_res:
+                            prev_node_parse_res = prev_nid_to_parse_res[sym_node.id]
+                            assert isinstance(node_parse_res, SymbolParseResult)
+                            assert isinstance(prev_node_parse_res, SymbolParseResult)
+                            is_sym_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
+                            is_sym_name_changed = node_parse_res.symbol_cls_name != prev_node_parse_res.symbol_cls_name
+                        else:
+                            is_sym_changed = True
+                            is_sym_name_changed: bool = False
+                    else:
+                        assert sym_node_gid in node_changes
+                        ext_change = node_changes[sym_node_gid]
+                        is_sym_changed = bool(ext_change.flags & NodeChangeFlag.HANDLES)
+                        is_sym_name_changed = False # ref node name change is ignored.
+                    if is_sym_changed:
+                        change.flags |= NodeChangeFlag.HANDLES
+                        for node_id in node_id_to_parse_res.keys():
+                            cur_node = flow.nodes[node_id]
+                            if cur_node.nType == ADVNodeType.FRAGMENT and cur_node.ref_node_id is None and cur_node.flow is None:
+                                frag_id_may_change.add(node_id)
+                    if sym_node.ref_node_id is None:
+                        if is_sym_changed or is_sym_name_changed:
+                            next_layer_nodes.update(node_cache.ref_gids_external)
+                        if is_sym_name_changed:
+                            change.flags |= NodeChangeFlag.NAME
+                        if change.flags != NodeChangeFlag(0):
+                            node_changes[sym_node_gid] = change
+
+                # 3. prepare frag nodes
+                frag_id_may_change_next: set[str] = set(frag_id_may_change)
+                for frag_node_id in frag_id_may_change:
+                    frag_node = flow.nodes[frag_node_id]
+                    frag_node_cache = self._node_gid_to_cache[frag_node.get_global_uid()]
+                    # always check local ref frag nodes to simplify logic
+                    frag_id_may_change_next.update(frag_node_cache.ref_node_ids_local)
+                # 4. process fragment nodes
+                for node_id in frag_id_may_change_next:
+                    node_parse_res = node_id_to_parse_res[node_id]
+                    cur_node = flow.nodes[node_id]
+                    node_gid = cur_node.get_global_uid()
+                    node_cache = self._node_gid_to_cache[node_gid]
+                    is_new_node = node_id not in prev_nid_to_parse_res
+
+                    change = ADVNodeChange.empty(name=cur_node.name, is_new=is_new_node, parse_res=node_parse_res)
+                    is_ref_node = cur_node.ref_node_id is not None
+                    if node_id in prev_nid_to_parse_res:
+                        prev_node_parse_res = prev_nid_to_parse_res[node_id]
+                        assert isinstance(node_parse_res, FragmentParseResult)
+                        assert isinstance(prev_node_parse_res, FragmentParseResult)
+                        prev_node = prev_node_parse_res.get_node_checked()
+                        is_name_changed = node_parse_res.func_name != prev_node_parse_res.func_name
+                        is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
+                        is_alias_map_changed = cur_node.alias_map != prev_node.alias_map
+                        is_inline_flow_changed = cur_node.inlinesf_name != prev_node.inlinesf_name
+                    else:
+                        is_name_changed = not is_ref_node
+                        is_node_io_changed = True
+                        is_alias_map_changed = is_ref_node
+                        is_inline_flow_changed = cur_node.inlinesf_name is not None
+                    # local changes without ref
+                    if is_node_io_changed:
+                        change.flags |= NodeChangeFlag.HANDLES
+                    if is_alias_map_changed:
+                        change.flags |= NodeChangeFlag.ALIAS_MAP
+                    if is_inline_flow_changed:
+                        change.flags |= NodeChangeFlag.INLINE_FLOW
+
+                    if not is_ref_node and cur_node.flow is None and is_node_io_changed:
+                        next_layer_nodes.update(node_cache.ref_gids_external)
+                    if not is_ref_node and is_name_changed:
+                        change.flags |= NodeChangeFlag.NAME
+                        next_layer_nodes.update(node_cache.ref_gids_external)
+                    if change.flags != NodeChangeFlag(0):
+                        node_changes[node_gid] = change
+                # 5. process remain nodes
+                for node_id in remain_change_ids:
+                    node_parse_res = node_id_to_parse_res[node_id]
+                    node = flow.nodes[node_id]
+                    node_gid = node.get_global_uid()
+                    is_new_node = node_id not in prev_nid_to_parse_res
+                    change = ADVNodeChange.empty(name=node.name, is_new=is_new_node, parse_res=node_parse_res)
+                    if node.nType == ADVNodeType.OUT_INDICATOR:
+                        is_oic_alias_changed: bool = True
+                        if node_id in prev_nid_to_parse_res:
+                            prev_node_parse_res = prev_nid_to_parse_res[node.id]
+                            assert isinstance(node_parse_res, OutIndicatorParseResult)
+                            assert isinstance(prev_node_parse_res, OutIndicatorParseResult)
+                            is_oic_alias_changed = node.name != prev_node_parse_res.get_node_checked().name
+                        # out indicator can't be ref, only used in inline flow.
+                        if is_oic_alias_changed:
+                            change.flags |= NodeChangeFlag.NAME
+                    if change.flags != NodeChangeFlag(0):
+                        node_changes[node_gid] = change
+
                 # TODO check edge change
-                changed_edges_res[flow_gid] = flow_parse_res.edges
+                new_flow_edges[flow_gid] = flow_parse_res.edges
 
                 # if flow main inline flow io is changed by any reparse, reparse all ref fragment+inline nodes
-
                 is_inlineflow_changed = True 
                 if prev_flow_parse_res is not None:
                     assert isinstance(prev_flow_parse_res, FlowParseResult)
@@ -636,27 +908,31 @@ class ADVProjectBackendManager:
                 if is_inlineflow_changed:
                     # TODO currently root flow can't be used as a fragment node.
                     if parent_flow_node is not None:
-                        next_layer_nodes.update(self._node_gid_to_ref_gids.get(parent_flow_node.get_global_uid(), []))
+                        parent_cache = self._node_gid_to_cache[parent_flow_node.get_global_uid()]
+                        next_layer_nodes.update(parent_cache.ref_gids_external)
+                if flow_gid == pairs[0][0]:
+                    changed_node_in_cur = set([c.parse_res.get_node_checked().id for c in node_changes.values()])
+
             next_layer: dict[str, list[str]] = {}
             for node_gid in next_layer_nodes:
-                node = self._node_gid_to_node[node_gid]
-                flow_node_gid = self._node_gid_to_flow_node_gid[node_gid]
-                # flow, parent_flow_node = self._flow_node_gid_to_flow[node_gid]
-                fcache = self._flow_node_gid_to_cache[flow_node_gid]
-                if fcache.parent_node is None:
-                    flow_gid = _ROOT_FLOW_ID
-                else:
-                    flow_gid = fcache.parent_node.get_global_uid()
-                if flow_gid not in next_layer:
-                    next_layer[flow_gid] = []
-                next_layer[flow_gid].append(node_gid)
+                node_cache = self._node_gid_to_cache[node_gid]
+                next_flow_node_gid = node_cache.flow_node_gid
+                if next_flow_node_gid in layered_parse_visited:
+                    continue 
+                if next_flow_node_gid not in next_layer:
+                    next_layer[next_flow_node_gid] = []
+                next_layer[next_flow_node_gid].append(node_gid)
             cur_layer = list(next_layer.items())
-        return changed_nodes_res, changed_edges_res
 
-    def modify_flow_code(self, flow_node_gid: str, new_code: str) -> tuple[dict[str, BaseParseResult], dict[str, list[ADVEdgeModel]]]:
-        old_code_lines = self._flow_node_gid_to_cache[flow_node_gid].parser.get_flow_parse_result_checked().generated_code_lines
-        old_code = "\n".join(old_code_lines)
-        node = self._node_gid_to_node[node_gid]
+        return ADVProjectChange(
+            node_changes=node_changes,
+            new_flow_edges=new_flow_edges,
+            flow_code_changes=flow_code_changes,
+            changed_node_ids_in_cur_flow=list(changed_node_in_cur),
+        )
+
+    def modify_code_impl(self, node_gid: str, new_code: str) -> ADVProjectChange:
+        node = self._node_gid_to_cache[node_gid].node
         assert node.impl is not None 
         prev_code = node.impl.code
         prev_code_clean = clean_source_code(prev_code.splitlines())
@@ -664,24 +940,12 @@ class ADVProjectBackendManager:
         node.impl.code = new_code
         if prev_code_clean == new_code_clean:
             # TODO only need to modify code in frontend/backend (file store).
-            return {}, {}
-        return self._reparse_changed_node(node_gid)
-
-    def modify_code_impl(self, node_gid: str, new_code: str) -> tuple[dict[str, BaseParseResult], dict[str, list[ADVEdgeModel]]]:
-        node = self._node_gid_to_node[node_gid]
-        assert node.impl is not None 
-        prev_code = node.impl.code
-        prev_code_clean = clean_source_code(prev_code.splitlines())
-        new_code_clean = clean_source_code(new_code.splitlines())
-        node.impl.code = new_code
-        if prev_code_clean == new_code_clean:
-            # TODO only need to modify code in frontend/backend (file store).
-            return {}, {}
+            return ADVProjectChange()
         return self._reparse_changed_node(node_gid)
 
     def modify_alias_map(self, node_gid: str, new_alias_map: str):
         # new_alias_map is local change, 
-        node = self._node_gid_to_node[node_gid]
+        node = self._node_gid_to_cache[node_gid].node
         assert node.ref_node_id is not None or node.flow is not None, "Only ref node or subflow node can have alias map."
         node.alias_map = new_alias_map
         flow_gid = self._get_flow_gid_from_node_gid(node_gid)
@@ -689,18 +953,19 @@ class ADVProjectBackendManager:
 
     def move_node(self, node_gid: str, new_x: float, new_y: float):
         # change position may change auto-generated edge, so inline flow must be reparsed.
-        node = self._node_gid_to_node[node_gid]
+        node = self._node_gid_to_cache[node_gid].node
         node.position.x = new_x
         node.position.y = new_y
         return self._reparse_changed_node(node_gid)
 
     def modify_node_name(self, node_gid: str, new_name: str):
-        node = self._node_gid_to_node[node_gid]
+        cache = self._node_gid_to_cache[node_gid]
+        node = cache.node
         old_name = node.name
         if old_name == new_name:
-            return {}, {}
+            return ADVProjectChange()
         node.name = new_name
-        flow_gid = self._node_gid_to_flow_node_gid[node_gid]
+        flow_gid = cache.flow_node_gid
         fcache = self._flow_node_gid_to_cache[flow_gid]
         fcache.node_name_pool.pop_if_exists(old_name)
         # we use node id instead of name, 
@@ -708,32 +973,207 @@ class ADVProjectBackendManager:
         # flow itself (include scheduler) don't use name.
         return self._reparse_changed_node(node_gid)
 
-    def create_symbol_group(self, flow_node_gid: str, name: str):
-        # flow, parent_flow_node = self._flow_node_gid_to_flow[flow_node_gid]
+    def add_new_node(self, flow_node_gid: str, new_node: ADVNodeModel):
         fcache = self._flow_node_gid_to_cache[flow_node_gid]
-        node_name = fcache.node_name_pool(name)
-        node_id = fcache.node_id_pool(f"{_NTYPE_TO_ID_PREFIX}-{name}")
-        pass 
+        assert new_node.name not in fcache.node_name_pool
+        new_node.id = fcache.node_id_pool(new_node.id)
+        fcache.node_name_pool(new_node.name)
+        adv_proj = self._root_flow_getter()
+        fcache.flow.nodes[new_node.id] = new_node
 
-    def create_fragment(self, name: str, is_inline_flow: bool):
-        pass 
+        # create paths
+        if (new_node.flow is None or not new_node.flow.nodes) and new_node.ref_node_id is None:
+            if fcache.parent_node is not None:
+                new_path, new_frontend_path = fcache.parent_node.get_child_node_paths(new_node)
+            else:
+                new_path: list[str] = []
+                new_frontend_path = ["nodes", new_node.id]
+            new_node.path = new_path
+            new_node.frontend_path = new_frontend_path
+        else:
+            # flow contains nested node. we just reflesh all path dict and 
+            # send to frontend.
+            ngid_to_path, ngid_to_fpath = adv_proj.assign_path_to_all_node()
+            adv_proj.update_ref_path(ngid_to_fpath)
+            adv_proj.node_gid_to_path = ngid_to_path
+            adv_proj.node_gid_to_frontend_path = ngid_to_fpath
 
-    def create_nested_fragment(self, name: str, is_inline_flow: bool):
-        pass 
+        # update cache in mgr
+        if new_node.flow is not None:
+            self._flow_node_gid_to_cache[new_node.get_global_uid()] = FlowCache(
+                new_node.flow, 
+                FlowParser(),
+                new_node
+            )
+        self._node_gid_to_cache[new_node.get_global_uid()] = NodeConnCache(
+            new_node, flow_node_gid)
+        self._reflesh_dependency(self._node_gid_to_cache, self._flow_node_gid_to_cache)
+        # add meta update to res
+        res = self._reparse_changed_node(new_node.get_global_uid())
+        if new_node.flow is None or not new_node.flow.nodes:
+            res.node_gid_to_path_update = {
+                new_node.get_global_uid(): new_node.path
+            }
+            res.node_gid_to_frontend_path_update = {
+                new_node.get_global_uid(): new_node.frontend_path
+            }
+        else:
+            res.new_node_gid_to_path = adv_proj.node_gid_to_path
+            res.new_node_gid_to_frontend_path = adv_proj.node_gid_to_frontend_path
+        return res
 
-    def create_out_indicator(self, sym_name: str):
-        pass 
+    def _get_all_subflow_gids(self, node: ADVNodeModel) -> set[str]:
+        if node.flow is None:
+            return set()
+        node_gid = node.get_global_uid()
+        all_subflow_gids: set[str] = set([node_gid])
+        def _traverse(flow: ADVFlowModel):
+            for node in flow.nodes.values():
+                if node.flow is not None:
+                    gid = node.get_global_uid()
+                    all_subflow_gids.add(gid)
+                    _traverse(node.flow)
+        _traverse(node.flow)
+        return all_subflow_gids
 
-    def create_global_script(self, name: str):
-        pass 
+    def _get_all_ext_refs_of_flow_node(self, node: ADVNodeModel) -> dict[str, tuple[ADVNodeModel, str]]:
+        node_gid = node.get_global_uid()
+        node_cache = self._node_gid_to_cache[node_gid]
+        all_deleted_subflow_gids = self._get_all_subflow_gids(node)
 
-    def connect_edge(self):
-        pass 
+        all_gid_to_node_pairs: dict[str, tuple[ADVNodeModel, str]] = {}
+        all_gid_to_node_pairs[node_gid] = (node_cache.node, node_cache.flow_node_gid)
+
+        def _traverse(flow: ADVFlowModel):
+            for node in flow.nodes.values():
+                node_cache = self._node_gid_to_cache[node.get_global_uid()]
+                for ref_gid in node_cache.ref_gids_external:
+                    ref_node_cache = self._node_gid_to_cache[ref_gid]
+                    if ref_node_cache.flow_node_gid not in all_deleted_subflow_gids:
+                        all_gid_to_node_pairs[ref_gid] = (ref_node_cache.node, ref_node_cache.flow_node_gid)
+                if node.flow is not None:
+                    _traverse(node.flow)
+        if node.flow is not None:
+            _traverse(node.flow)
+        for ref_gid in node_cache.ref_gids_external + node_cache.ref_gids_local:
+            ref_node_cache = self._node_gid_to_cache[ref_gid]
+            all_gid_to_node_pairs[ref_gid] = (ref_node_cache.node, ref_node_cache.flow_node_gid)
+        return all_gid_to_node_pairs
 
     def delete_node(self, node_gid: str):
-        pass 
+        node_cache = self._node_gid_to_cache[node_gid]
+        deleted_path = None
+        if node_cache.node.flow is not None:
+            fcache = self._flow_node_gid_to_cache[node_gid]
+            parse_res = fcache.parser.get_flow_parse_result_checked()
+            deleted_path = parse_res.get_code_relative_path()
 
+        all_gid_to_node_pairs = self._get_all_ext_refs_of_flow_node(node_cache.node)
+        flow_gid_to_deleted_node_gids: dict[str, list[str]] = {}
+        for gid, (node, _) in all_gid_to_node_pairs.items():
+            node_cache = self._node_gid_to_cache[gid]
+            flow_gid = node_cache.flow_node_gid
+            if flow_gid not in flow_gid_to_deleted_node_gids:
+                flow_gid_to_deleted_node_gids[flow_gid] = []
+            flow_gid_to_deleted_node_gids[flow_gid].append(gid)
+        # remove nodes from cache
+        for gid in all_gid_to_node_pairs.keys():
+            self._node_gid_to_cache.pop(gid)
+        if node_gid in self._flow_node_gid_to_cache:
+            self._flow_node_gid_to_cache.pop(node_gid)
+        # remove node from flow model
+        for gid, (node, flow_gid) in all_gid_to_node_pairs.items():
+            fcache = self._flow_node_gid_to_cache[flow_gid]
+            fcache.flow.nodes.pop(node.id)
+        self._reflesh_dependency(self._node_gid_to_cache, self._flow_node_gid_to_cache)
+        res = self._reparse_changed_nodes_internal(list(flow_gid_to_deleted_node_gids.items()), {k: v[0] for k, v in all_gid_to_node_pairs.items()})
+        res.deleted_node_pairs = list((v[0].id, v[1]) for k, v in all_gid_to_node_pairs.items())
+        adv_proj = self._root_flow_getter()
+        ngid_to_path, ngid_to_fpath = adv_proj.assign_path_to_all_node()
+        adv_proj.node_gid_to_path = ngid_to_path
+        adv_proj.node_gid_to_frontend_path = ngid_to_fpath
+        res.new_node_gid_to_path = adv_proj.node_gid_to_path
+        res.new_node_gid_to_frontend_path = adv_proj.node_gid_to_frontend_path
+        if node_cache.node.flow is not None:
+            pass 
+        return res
 
+    def create_draft_updates_from_change(self, draft: ADVProject, change: ADVProjectChange):
+        for node_gid, node_change in change.node_changes.items():
+            node_cache = self._node_gid_to_cache[node_gid]
+            node = node_cache.node
+            node_id_path = ADVProject.get_node_id_path_from_fe_path(node.frontend_path)
+            if node_change.flags & NodeChangeFlag.NEW:
+                handles = self._get_handles_from_parse_res(node_change.parse_res)
+                assert handles is not None 
+                node.handles = handles
+                if len(node_id_path) == 1:
+                    # root flow
+                    draft.flow.nodes[node.id] = node 
+                else:
+                    node_draft = draft.draft_get_node_by_id_path(node_id_path[:-1])
+                    node_draft.flow.nodes[node.id] = node
+            else:
+                node_draft = draft.draft_get_node_by_id_path(node_id_path)
+                if node_change.flags & NodeChangeFlag.HANDLES:
+                    assert isinstance(node_change.parse_res, (SymbolParseResult, FragmentParseResult))
+                    handles = self._get_handles_from_parse_res(node_change.parse_res)
+                    assert handles is not None 
+                    # import rich 
+                    # rich.print(handles)
+                    node_draft.handles = handles
+                elif node_change.flags & NodeChangeFlag.NAME:
+                    node_draft.name = node.name
+                elif node_change.flags & NodeChangeFlag.ALIAS_MAP:
+                    node_draft.alias_map = node.alias_map
+                elif node_change.flags & NodeChangeFlag.INLINE_FLOW:
+                    node_draft.inlinesf_name = node.inlinesf_name
+        for flow_node_gid, edges in change.new_flow_edges.items():
+            edges_dict =  {e.id: e for e in edges}
+            assert len(edges_dict) == len(edges)
+            if flow_node_gid == "":
+                draft.flow.edges = edges_dict
+            else:
+                node_cache = self._node_gid_to_cache[flow_node_gid]
+                node = node_cache.node
+                node_draft = draft.draft_get_node_by_fe_path(node.frontend_path)
+                node_draft.flow.edges = {e.id: e for e in edges}
+        if change.node_gid_to_path_update is not None:
+            draft.node_gid_to_path.update(change.node_gid_to_path_update)
+        if change.node_gid_to_frontend_path_update is not None:
+            draft.node_gid_to_frontend_path.update(change.node_gid_to_frontend_path_update)
+        if change.new_node_gid_to_path is not None:
+            draft.node_gid_to_path = change.new_node_gid_to_path
+        if change.new_node_gid_to_frontend_path is not None:
+            draft.node_gid_to_frontend_path = change.new_node_gid_to_frontend_path
+        if change.deleted_node_pairs is not None:
+            for node_id, flow_node_gid in change.deleted_node_pairs:
+                if flow_node_gid == TENSORPC_ADV_ROOT_FLOW_ID:
+                    flow_draft = draft.flow 
+                else:
+                    flow_node_cache = self._node_gid_to_cache[flow_node_gid]
+                    node_id_path = ADVProject.get_node_id_path_from_fe_path(flow_node_cache.node.frontend_path)
+                    flow_node_draft = draft.draft_get_node_by_id_path(node_id_path)
+                    flow_draft = flow_node_draft.flow
+                flow_draft.nodes.pop(node_id)
+        
+    def connect_edge(self, flow_node_gid: str, edge: ADVEdgeModel):
+        fcache = self._flow_node_gid_to_cache[flow_node_gid]
+        edge.id = fcache.edge_id_pool(edge.id)
+        edge.isAutoEdge = False
+        fcache.flow.edges[edge.id] = edge
+        return self._reparse_flow(flow_node_gid)
+
+    def collect_possible_ref_nodes(self, flow_node_gid: str) -> list[ADVNodeModel]:
+        fcache = self._flow_node_gid_to_cache[flow_node_gid]
+        res: list[ADVNodeModel] = []
+        for flow_gid, fcache in self._flow_node_gid_to_cache.items():
+            if flow_gid in fcache.all_child_flow_gids:
+                continue
+            for node in fcache.flow.nodes.values():
+                if node.ref_node_id is None and node.nType in (ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT):
+                    res.append(node)
+        return res 
 
 class GlobalScriptParser:
     def __init__(self) -> None:
@@ -802,7 +1242,7 @@ class FlowParser:
                 assert node_type in node_allow_ref, f"Only nodes of type {node_allow_ref} can be ref node, but got {node_type.name}."
 
                 assert node.ref_fe_path is not None 
-                root_flow = mgr._root_flow_getter()
+                root_flow = mgr._root_flow_getter().flow
                 node_id_path = ADVProject.get_node_id_path_from_fe_path(node.ref_fe_path)
                 pair = ADVProject.get_flow_node_by_fe_path(root_flow, node.ref_fe_path)
                 assert pair is not None 
@@ -817,10 +1257,10 @@ class FlowParser:
                     flow_parser = mgr.get_subflow_parser(node_parent)
                     flow_node_gid = node_parent.get_global_uid()
                 else:
-                    fcache = mgr._flow_node_gid_to_cache[_ROOT_FLOW_ID]
+                    fcache = mgr._flow_node_gid_to_cache[TENSORPC_ADV_ROOT_FLOW_ID]
                     flow_parser = fcache.parser
                     parent_flow = fcache.flow
-                    flow_node_gid = _ROOT_FLOW_ID
+                    flow_node_gid = TENSORPC_ADV_ROOT_FLOW_ID
                 if flow_gid == flow_node_gid:
                     is_local_ref = True 
                     parse_res = None
@@ -830,6 +1270,7 @@ class FlowParser:
                     parse_res = flow_parser._node_id_to_parse_result[node_def.id]
                     assert flow_parser._flow_parse_result is not None 
                     parent_is_folder = flow_parser._flow_parse_result._is_folder()
+                    parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(node))
                     self._node_id_to_parse_result[node.id] = parse_res
 
                 # node_def, parse_res, is_local_ref, node_parent = self._get_or_compile_real_node(parent_node, flow_gid, node, mgr, visited)
@@ -896,7 +1337,7 @@ class FlowParser:
 
             global_scripts[node_def.id] = (node_def.impl.code)
             self._node_id_to_parse_result[node_def.id] = GlobalScriptParseResult(
-                node=node_prep.node,
+                node=dataclasses.replace(node_prep.node),
                 code=node_def.impl.code,
             )
         global_script = "\n".join(global_scripts.values())
@@ -970,6 +1411,7 @@ class FlowParser:
                     parse_res = self._node_id_to_parse_result[n.ref_node_id]
                     assert isinstance(parse_res, FragmentParseResult)
                     parse_res = parse_res.copy(n.id)
+                    parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(n))
                 else:
                     assert n_def.impl is not None, f"fragment node {n_def.id} has no code."
                     if n.id in self._node_id_to_parser:
@@ -986,6 +1428,7 @@ class FlowParser:
                     )
             if alias_map is not None:
                 parse_res = parse_res.do_alias_map(alias_map)
+                parse_res = dataclasses.replace(parse_res, alias_map=n.alias_map)
             self._node_id_to_parse_result[n.id] = parse_res
 
             if subf_name is not None:
@@ -1068,9 +1511,9 @@ class FlowParser:
             backend_handle = BackendHandle(handle=out_indicator_handle, index=0)
             # output indicator won't be ref node
             self._node_id_to_parse_result[n.id] = OutIndicatorParseResult(
-                node=n,
+                node=dataclasses.replace(n),
                 succeed=True,
-                handle=backend_handle
+                handle=backend_handle,
             )
         return inlineflow_out_handles
 
@@ -1095,9 +1538,9 @@ class FlowParser:
                     inlineflow_out_handles.append((edge.source, source_handle))
                 valid_edges.append(edge)
             else:
-                ADV_LOGGER.warning(f"Edge from node {edge.source} handle {edge.sourceHandle} "
-                                   f"to node {edge.target} handle {edge.targetHandle} is invalid "
-                                   "and will be ignored.")
+                ADV_LOGGER.warning(f"Edge from {edge.source}({edge.sourceHandle}) "
+                                   f"to {edge.target}({edge.targetHandle}) is invalid "
+                                   "and will be removed.")
         return valid_edges, inlineflow_out_handles
 
     def _parse_inlineflow(self, inlineflow_descs: dict[str, list[NodePrepResult]], root_symbol_scope: dict[str, BackendHandle], 
@@ -1191,7 +1634,7 @@ class FlowParser:
             return self._flow_parse_result
         if flow_id in visited:
             raise ValueError(f"Cyclic flow reference detected at flow id {flow_id}, {visited}")
-        ADV_LOGGER.warning(f"Parsing flow {flow_id} ...")
+        ADV_LOGGER.warning(f"Parsing flow {"__ROOT__" if not flow_id else flow_id} ...")
         child_nodes = self._sort_flow_nodes(flow.nodes)
         has_subflow = False
         for node in child_nodes:
@@ -1233,7 +1676,7 @@ class FlowParser:
         # import rich 
         # rich.print(flow_id, all_input_handles, all_output_handles)
         flow_parse_res = FlowParseResult(
-            node=flow_node,
+            node=dataclasses.replace(flow_node) if flow_node is not None else flow_node,
             func_name=flow_node.name if flow_node is not None else "",
             succeed=True,
             input_handles=all_input_handles,
@@ -1248,10 +1691,13 @@ class FlowParser:
             inlineflow_results=inlineflow_res,
             ext_node_descs=ext_node_descs,
             has_subflow=has_subflow if flow_node is not None else True,
+            alias_map=flow_node.alias_map if flow_node is not None else "",
         )
         self._flow_parse_result = flow_parse_res
         code_lines = flow_parse_res.to_code_lines(self._node_id_to_parse_result)
         flow_parse_res.generated_code_lines = code_lines.lines
+        flow_parse_res.generated_code = "\n".join(code_lines.lines)
+
         return flow_parse_res
 
     def _post_order_access_nodes(self, accessor: Callable[[ADVNodeModel], None], node: ADVNodeModel, 

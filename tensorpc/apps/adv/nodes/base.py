@@ -51,6 +51,15 @@ class BaseHandle(mui.FlexBox):
 
 
 class BaseNodeWrapper(mui.FlexBox):
+    def __init__(self,
+                 node_gid: str,
+                 node_type: ADVNodeType,
+                 children: Optional[mui.LayoutType] = None):
+        self.node_gid = node_gid
+        self.node_type = node_type
+        super().__init__(children)
+
+class IONodeWrapper(BaseNodeWrapper):
 
     def __init__(self,
                  node_gid: str,
@@ -116,22 +125,19 @@ class BaseNodeWrapper(mui.FlexBox):
             "status_box": status_box,
             # "resizer": self.resizer,
         }
-        super().__init__(ui_dict)
+        super().__init__(node_gid, node_type, ui_dict)
         self.prop(
             className=
             f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
         )
         self.prop(minWidth="150px")
 
-        self._node_type = node_type
-        self._node_gid = node_gid
 
-class IndicatorWrapper(mui.FlexBox):
+class IndicatorWrapper(BaseNodeWrapper):
     def __init__(self, node_gid: str,
-                 dm: mui.DataModel[ADVRoot],
-                 handle_id: str):
+                 dm: mui.DataModel[ADVRoot]):
         get_node_fn = partial(ADVRoot.get_node_frontend_props, node_gid=node_gid)
-        handle = flowui.Handle("target", "left", handle_id)
+        handle = flowui.Handle("target", "left", f"{ADVHandlePrefix.OutIndicator}-outputs")
         handle.prop(className=f"{ComputeFlowClasses.IOHandleBase} {ComputeFlowClasses.InputHandle}")
         handle_desc = mui.Typography("").prop(
                 variant="caption",
@@ -151,7 +157,7 @@ class IndicatorWrapper(mui.FlexBox):
             icon,
 
         ]
-        super().__init__(layout)
+        super().__init__(node_gid, ADVNodeType.OUT_INDICATOR, layout)
         self.prop(
             className=
             f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"

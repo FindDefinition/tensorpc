@@ -3208,7 +3208,27 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
     def __init__(self, children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Paper, PaperProps, children)
+        super().__init__(UIType.Paper, PaperProps, children, allowed_events=list(ALL_POINTER_EVENTS))
+        self.event_click = self._create_event_slot_noarg(
+            FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot(
+            FrontendEventType.DoubleClick)
+        self.event_pointer_enter = self._create_event_slot(
+            FrontendEventType.Enter, lambda x: PointerEvent(**x))
+        self.event_pointer_leave = self._create_event_slot(
+            FrontendEventType.Leave, lambda x: PointerEvent(**x))
+        self.event_pointer_down = self._create_event_slot(
+            FrontendEventType.Down, lambda x: PointerEvent(**x))
+        self.event_pointer_up = self._create_event_slot(
+            FrontendEventType.Up, lambda x: PointerEvent(**x))
+        self.event_pointer_move = self._create_event_slot(
+            FrontendEventType.Move, lambda x: PointerEvent(**x))
+        self.event_pointer_over = self._create_event_slot(
+            FrontendEventType.Over, lambda x: PointerEvent(**x))
+        self.event_pointer_out = self._create_event_slot(
+            FrontendEventType.Out, lambda x: PointerEvent(**x))
+        self.event_pointer_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenu)
 
     @property
     def prop(self):
@@ -3220,6 +3240,11 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           is_sync=is_sync)
 
 @dataclasses.dataclass
 class FormControlProps(MUIFlexBoxProps):
