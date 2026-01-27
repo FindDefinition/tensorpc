@@ -463,6 +463,8 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                 data["constrainedRanges"] = constrained_ranges
             ev = self.create_comp_event(data)
             await self.send_and_wait(ev)
+        self._view_state = None
+        self._save_version_id: Optional[int] = None
 
     def _handle_draft_change(self,
                              draft_ev: DraftChangeEvent,
@@ -510,7 +512,7 @@ class MonacoEditor(MUIContainerBase[MonacoEditorProps, MUIComponentType]):
                                       handler: DraftChangeEventHandler,
                                       save_event_prep: Optional[Callable[[MonacoSaveEvent], None]] = None):
         # we shouldn't trigger draft change handler when we save value directly from editor.
-        with DataModel.add_disabled_handler_ctx([handler]):
+        with DataModel.disable_draft_handler_ctx([handler]):
             if save_event_prep is not None:
                 save_event_prep(ev)
             insert_assign_draft_op(draft, ev.value)

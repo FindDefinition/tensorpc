@@ -1,3 +1,6 @@
+import asyncio
+import contextlib
+import enum
 from functools import partial
 import time
 import traceback
@@ -6,17 +9,20 @@ from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     TypeVar, Union, cast)
 import rich
 from typing_extensions import Self
-from tensorpc.apps.cflow.logger import CFLOW_LOGGER
+from tensorpc.dock.loggers import APP_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined
-from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta, DraftObject, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta, DraftClass, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_noexcept
-from tensorpc.core.datamodel.events import DraftChangeEvent, DraftEventType
+from tensorpc.core.datamodel.events import DraftChangeEvent, DraftChangeEventHandler, DraftEventType
+from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
+from tensorpc.dock.core.component import EventSlotEmitter
 from tensorpc.dock.core.datamodel import DataModel
 from tensorpc.dock.jsonlike import Undefined
 from tensorpc.dock.components.flowui import FlowInternals, XYPosition, NodeBase, EdgeBase, Node, Edge, Flow, EventSelection, NodeData
 from tensorpc.core.annolib import undefined
-
+from tensorpc.dock.core.datamodel import DataModel
+from tensorpc.dock.components import mui 
 
 @dataclasses.dataclass
 class BaseNodeModel(NodeBase):
@@ -55,12 +61,19 @@ def _default_to_model_edge(edge: EdgeBase):
     return BaseEdgeModel(edge.id, edge.source, edge.target,
         edge.sourceHandle, edge.targetHandle)
 
+class FlowBinderEventType(enum.IntEnum):
+    POSITION_CHANGE = enum.auto()
+    EDGE_DELETE = enum.auto()
+    EDGE_NEW = enum.auto()
+    NODE_DELETE = enum.auto()
+
 class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
     def __init__(self, flow_comp: Flow, model_getter: Callable[[], Any], draft: Any, 
             to_ui_node: Callable[[T_flow_model, str], Node], to_ui_edge: Optional[Callable[[T_edge_model], Edge]] = None,
             to_model_edge: Optional[Callable[[Edge], T_edge_model]] = None,
             flow_uid_getter: Optional[Callable[[], str]] = None,
-            debug_id: str = "flow") -> None:
+            debug_id: str = "flow",
+            lock: Optional[asyncio.Lock] = None) -> None:
         """
         Args:
             flow_comp (Flow): flow component instance.
@@ -73,7 +86,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
                 if not provided, your edge model must be BaseEdgeModel, no subclass.
         """
         
-        assert isinstance(draft, DraftObject), f"draft must be DraftObject, but got {type(draft)}"
+        assert isinstance(draft, DraftClass), f"draft must be DraftClass, but got {type(draft)}"
         draft_type = get_draft_anno_type(draft)
         assert draft_type is not None and draft_type.is_dataclass_type()
         assert issubclass(draft_type.origin_type, BaseFlowModel)
@@ -93,10 +106,33 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         self._flow_comp = flow_comp
         self._to_model_edge = to_model_edge
         self._flow_uid_getter = flow_uid_getter
+        self._flow_change_handler: Optional[DraftChangeEventHandler] = None
 
         self._is_binded = False
 
         self._debug_id = debug_id
+
+        self._event_emitter = AsyncIOEventEmitter()
+        self._lock = lock
+
+        self.event_position_change: EventSlotEmitter[dict[str, XYPosition]] = EventSlotEmitter(FlowBinderEventType.POSITION_CHANGE, self._event_emitter)
+        self.event_edge_delete: EventSlotEmitter[list[str]] = EventSlotEmitter(FlowBinderEventType.EDGE_DELETE, self._event_emitter)
+        self.event_edge_new: EventSlotEmitter[list[str]] = EventSlotEmitter(FlowBinderEventType.EDGE_NEW, self._event_emitter)
+        self.event_node_delete: EventSlotEmitter[list[str]] = EventSlotEmitter(FlowBinderEventType.NODE_DELETE, self._event_emitter)
+
+    @contextlib.asynccontextmanager
+    async def acquire_lock(self):
+        if self._lock is not None:
+            async with self._lock:
+                yield
+        else:
+            yield
+
+    @contextlib.asynccontextmanager
+    async def _disable_draft_handler_ctx(self):
+        assert self._flow_change_handler is not None 
+        with DataModel.disable_draft_handler_ctx([self._flow_change_handler]):
+            yield
 
     def _get_cur_model_may_nested(self):
         root_model = self._model_getter()
@@ -167,43 +203,82 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         await self._sync_ui_nodes_to_model()
         await self._sync_ui_edges_to_model()
 
-    def _handle_node_delete(self, data: dict):
+    async def _handle_node_delete(self, data: dict):
         if not self._is_flow_user_uid_same(data.get("flowUserUid")):
             # if not same, the flow is changed, return
             return
-        # assume this handler is called after default handler
-        cur_model = self._get_cur_model_may_nested()
-        if cur_model is not None:
-            cur_ui_node_ids = set([n.id for n in self._flow_comp.nodes])
-            # remove all deleted nodes
-            for n_id in cur_model.nodes.keys():
-                if n_id not in cur_ui_node_ids:
-                    self._draft.nodes.pop(n_id)
+        dm = DataModel.get_datamodel_from_draft(self._draft)
 
-    def _handle_edge_delete(self, data: dict):
-        if not self._is_flow_user_uid_same(data.get("flowUserUid")):
-            # if not same, the flow is changed, return
-            return
         # assume this handler is called after default handler
-        cur_model = self._get_cur_model_may_nested()
-        if cur_model is not None:
-            cur_ui_node_ids = set([n.id for n in self._flow_comp.edges])
-            # remove all deleted nodes
-            for n_id in cur_model.edges.keys():
-                if n_id not in cur_ui_node_ids:
-                    self._draft.edges.pop(n_id)
+        async with self.acquire_lock():
+            cur_model = self._get_cur_model_may_nested()
+            if cur_model is not None:
+                cur_ui_node_ids = set([n.id for n in self._flow_comp.nodes])
+                # remove all deleted nodes
+                deleted_node_ids: list[str] = []
+                async with self._disable_draft_handler_ctx():
+                    async with dm.draft_update():
 
-    def _handle_edge_connection(self, data: dict[str, Any]):
+                        for n_id in cur_model.nodes.keys():
+                            if n_id not in cur_ui_node_ids:
+                                self._draft.nodes.pop(n_id)
+                                deleted_node_ids.append(n_id)
+                if deleted_node_ids:
+                    APP_LOGGER.debug("Flow %s nodes deleted: %s", self._debug_id, str(deleted_node_ids))
+                    await self._event_emitter.emit_async(FlowBinderEventType.NODE_DELETE, 
+                        mui.Event(FlowBinderEventType.NODE_DELETE, deleted_node_ids))
+
+    async def _handle_edge_delete(self, data: dict):
+        if not self._is_flow_user_uid_same(data.get("flowUserUid")):
+            # if not same, the flow is changed, return
+            return
+        dm = DataModel.get_datamodel_from_draft(self._draft)
+
+        # assume this handler is called after default handler
+        async with self.acquire_lock():
+            cur_model = self._get_cur_model_may_nested()
+            if cur_model is not None:
+                cur_ui_node_ids = set([n.id for n in self._flow_comp.edges])
+                # remove all deleted nodes
+                removed_edge_ids: list[str] = []
+                async with self._disable_draft_handler_ctx():
+
+                    async with dm.draft_update():
+
+                        for n_id in cur_model.edges.keys():
+                            if n_id not in cur_ui_node_ids:
+                                removed_edge_ids.append(n_id)
+                                self._draft.edges.pop(n_id)
+                if removed_edge_ids:
+                    APP_LOGGER.debug("Flow %s edges deleted: %s", self._debug_id, str(removed_edge_ids))
+                    await self._event_emitter.emit_async(FlowBinderEventType.EDGE_DELETE, 
+                        mui.Event(FlowBinderEventType.EDGE_DELETE, removed_edge_ids))
+
+    async def _handle_edge_connection(self, data: dict[str, Any]):
         if not self._is_flow_user_uid_same(data.get("flowUserUid")):
             # if not same, the flow is changed, return
             return
         # assume this handler is called after default handler
-        cur_model = self._get_cur_model_may_nested()
-        if cur_model is not None:
-            for ui_edge in self._flow_comp.edges:
-                e_id = ui_edge.id
-                if e_id not in cur_model.edges:
-                    self._draft.edges[e_id] = self._to_model_edge(ui_edge)
+        dm = DataModel.get_datamodel_from_draft(self._draft)
+
+        async with self.acquire_lock():
+            cur_model = self._get_cur_model_may_nested()
+            if cur_model is not None:
+                new_edge_ids: list[str] = []
+                async with self._disable_draft_handler_ctx():
+
+                    async with dm.draft_update():
+                        for ui_edge in self._flow_comp.edges:
+                            ui_edge_key = ui_edge.get_connection_key()
+                            cur_key_to_edge = {v.get_connection_key(): v for v in cur_model.edges.values()}
+                            if ui_edge_key not in cur_key_to_edge:
+                                new_edge = self._to_model_edge(ui_edge)
+                                new_edge_ids.append(new_edge.id)
+                                self._draft.edges[new_edge.id] = new_edge
+                if new_edge_ids:
+                    APP_LOGGER.debug("Flow %s edges new: %s", self._debug_id, str(new_edge_ids))
+                    await self._event_emitter.emit_async(FlowBinderEventType.EDGE_NEW, 
+                        mui.Event(FlowBinderEventType.EDGE_NEW, new_edge_ids))
 
     async def _handle_vis_change(self, change: dict):
         if not self._is_flow_user_uid_same(change.get("flowUserUid")):
@@ -213,16 +288,31 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         # WARNING: width/height change may due to UI or manual resize.
         # WARNING: when you switch flow before this event is finished, the width/height may
         # set to wrong nodes, so you should set global-unique name for all nodes include nested flow nodes.
-        if "nodes" in change:
-            cur_model = self._get_cur_model_may_nested()
-            if cur_model is not None:
-                for ui_node in self._flow_comp.nodes:
-                    if ui_node.id in cur_model.nodes:
-                        if not isinstance(ui_node.width, Undefined):
-                            self._draft.nodes[ui_node.id].width = ui_node.width
-                        if not isinstance(ui_node.height, Undefined):
-                            self._draft.nodes[ui_node.id].height = ui_node.height
-                        self._draft.nodes[ui_node.id].position = ui_node.position
+        # print("!!!", change)
+        async with self.acquire_lock():
+            if "nodes" in change:
+                cur_model = self._get_cur_model_may_nested()
+                if cur_model is not None:
+                    dm = DataModel.get_datamodel_from_draft(self._draft)
+                    async with self._disable_draft_handler_ctx():
+
+                        async with dm.draft_update():
+                            pos_changes: dict[str, XYPosition] = {}
+                            assert len(self._flow_comp.nodes) == len(cur_model.nodes)
+                            for ui_node in self._flow_comp.nodes:
+                                assert ui_node.id in cur_model.nodes
+                                # if ui_node.id in cur_model.nodes:
+                                cur_model_node: BaseNodeModel = cur_model.nodes[ui_node.id]
+                                if not isinstance(ui_node.width, Undefined):
+                                    self._draft.nodes[ui_node.id].width = ui_node.width
+                                if not isinstance(ui_node.height, Undefined):
+                                    self._draft.nodes[ui_node.id].height = ui_node.height
+                                self._draft.nodes[ui_node.id].position = ui_node.position
+                                if ui_node.position.x != cur_model_node.position.x or ui_node.position.y != cur_model_node.position.y:
+                                    pos_changes[ui_node.id] = ui_node.position 
+                    if pos_changes:
+                        APP_LOGGER.debug("Flow %s nodes position changed: %s", self._debug_id, str(pos_changes.keys()))
+                        await self._event_emitter.emit_async(FlowBinderEventType.POSITION_CHANGE, mui.Event(FlowBinderEventType.POSITION_CHANGE, pos_changes))
 
     async def _handle_node_logic_change(self, data: dict):
         if not self._is_flow_user_uid_same(data.get("flowUserUid")):
@@ -308,7 +398,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         self._flow_comp.event_vis_change.on(self._handle_vis_change)
         self._flow_comp.event_node_logic_change.on(self._handle_node_logic_change)
         # bind draft change handlers
-        dm_comp.install_draft_change_handler({
+        self._flow_change_handler, _ = dm_comp.install_draft_change_handler({
             "nodes": self._draft.nodes,
             "edges": self._draft.edges
         }, self._handle_draft_change)

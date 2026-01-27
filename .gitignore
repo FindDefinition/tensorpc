@@ -132,3 +132,5 @@ core
 !core/
 
 __version__.py
+
+tensorpc/apps/adv/managed

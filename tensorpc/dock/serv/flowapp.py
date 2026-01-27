@@ -31,6 +31,7 @@ from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_P
 from tensorpc.dock.core.uitypes import RTCTrackInfo
 from tensorpc.dock.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
+from tensorpc.dock.loggers import APP_SERV_LOGGER
 from tensorpc.dock.serv.common import handle_file_resource
 from tensorpc.dock.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.dock import appctx
@@ -564,3 +565,44 @@ class FlowApp:
 
         except:
             traceback.print_exc()
+
+    def fs_write_file(self, fspath: str, content: bytes):
+        with open(fspath, "wb") as f:
+            f.write(content)
+
+    def fs_read_file(self, fspath: str) -> Optional[bytes]:
+        try:
+            with open(fspath, "rb") as f:
+                return f.read()
+        except Exception as e:
+            APP_SERV_LOGGER.error(f"Failed to read file {fspath}: {e}")
+            return None 
+
+    def fs_get_file_stats(self, fspath: str):
+        try:
+            stats = os.stat(fspath)
+            is_dir = os.path.isdir(fspath)
+            return {
+                "type": "dir" if is_dir else "file",
+                "size": stats.st_size,
+                "mtime": stats.st_mtime,
+                "ctime": stats.st_ctime,
+            }
+        except Exception as e:
+            APP_SERV_LOGGER.error(f"Failed to read file stat {fspath}: {e}")
+            return None 
+
+
+    def fs_list_files(self, fspath: str) -> list[tuple[str, bool]]:
+        if os.path.isdir(fspath):
+            items = os.listdir(fspath)
+            res = []
+            for item in items:
+                full_path = os.path.join(fspath, item)
+                is_dir = os.path.isdir(full_path)
+                res.append((item, is_dir))
+            return res
+        else:
+            return []
+
+

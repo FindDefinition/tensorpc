@@ -40,7 +40,7 @@ class HashableRegistry(Generic[T]):
         else:
             return wrapper(func)
 
-    def register_no_key(self, func: T):
+    def register_no_key(self, func: T) -> T:
 
         def wrapper(func: T) -> T:
             key_ = func.__name__

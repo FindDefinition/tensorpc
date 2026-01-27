@@ -45,7 +45,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.datamodel.draft import DraftASTNode, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, apply_draft_update_ops_to_json, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, get_draft_ast_node, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftASTNode, DraftBase, DraftClass, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, apply_draft_update_ops_to_json, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.dock import marker
 from tensorpc.dock.components.mui.event import KeyboardEvent, PointerEvent, KeyboardHoldEvent
@@ -3124,7 +3124,7 @@ class Typography(MUIComponentBase[TypographyProps]):
 
 
 @dataclasses.dataclass
-class MarkdownProps(ContainerBaseProps):
+class MarkdownProps(MUIFlexBoxProps):
     katex: Union[bool, Undefined] = undefined
     codeHighlight: Union[bool, Undefined] = undefined
     emoji: Union[bool, Undefined] = undefined

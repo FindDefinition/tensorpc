@@ -143,7 +143,6 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             node_obj.get_compute_func(), cnode_cfg.is_dynamic_cls)
         handle_name_to_inp_handle: dict[str, IOHandle] = {}
         handle_name_to_out_handle: dict[str, IOHandle] = {}
-        print("???", inp_handles, out_handles)
 
         input_args = mui.Fragment([*inp_handles])
         output_args = mui.Fragment([*out_handles])

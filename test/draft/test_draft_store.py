@@ -9,7 +9,7 @@ from deepdiff.diff import DeepDiff
 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftFieldMeta, DraftObject, apply_draft_path_ops, apply_draft_update_ops,
+    DraftFieldMeta, DraftClass, apply_draft_path_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)

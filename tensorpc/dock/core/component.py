@@ -53,7 +53,7 @@ from tensorpc.core.datamodel.asdict import (DataClassWithUndefined,
                                             asdict_no_deepcopy,
                                             asdict_no_deepcopy_with_field)
 from tensorpc.core.datamodel.draft import (DraftASTType, DraftBase,
-                                           DraftObject, DraftUpdateOp,
+                                           DraftClass, DraftUpdateOp,
                                            capture_draft_update, create_draft,
                                            get_draft_jmespath,
                                            get_draft_pflpath,
@@ -75,7 +75,7 @@ from tensorpc.dock.core.uitypes import ALL_KEY_CODES
 from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
 from tensorpc.dock.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
-from tensorpc.utils.rich_logging import get_logger
+from tensorpc.dock.loggers import APP_LOGGER
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.constants import TENSORPC_DEV_USE_PFL_PATH
 
@@ -88,7 +88,7 @@ from .appcore import (Event, EventDataType, NumberType, RemoteCompEvent,
 
 if TYPE_CHECKING:
     from .datamodel import DataModel
-LOGGER = get_logger("tensorpc.ui", log_time_format="%X|")
+LOGGER = APP_LOGGER
 
 
 ALL_APP_EVENTS = HashableRegistry()

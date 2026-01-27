@@ -2457,6 +2457,42 @@ class Flow:
                          node.password,
                          init_commands=node.init_commands)
 
+    async def fs_read_stat_listdir(self,
+                               graph_id: str,
+                               node_id: str,
+                               type: str,
+                               fspath: str,
+                               use_grpc: bool = True):
+        if type == "read":
+            app_key = serv_names.APP_FS_READ_FILE
+        elif type == "stat":
+            app_key = serv_names.APP_FS_GET_FILE_STATS
+        elif type == "list":
+            app_key = serv_names.APP_FS_LIST_FILES
+        else:
+            raise ValueError(f"unknown fs read type {type}")
+
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+
+        if use_grpc:
+            grpc_port = node.grpc_port
+            durl, _ = get_url_port(driver.url)
+            if driver.enable_port_forward:
+                app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+            else:
+                app_url = get_grpc_url(durl, grpc_port)
+            return await tensorpc.simple_chunk_call_async(
+                app_url, app_key, fspath)
+        else:
+            sess = prim.get_http_client_session()
+            http_port = node.http_port
+            durl, _ = get_url_port(driver.url)
+            if driver.enable_port_forward:
+                app_url = get_http_url("localhost", node.fwd_http_port)
+            else:
+                app_url = get_http_url(durl, http_port)
+            return await http_remote_call(sess, app_url, app_key, fspath)
+
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def _on_exit(self):
         pass

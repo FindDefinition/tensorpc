@@ -1,4 +1,5 @@
 import ast
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, TypeGuard, TypeVar, Union
 
@@ -8,7 +9,8 @@ from tensorpc.apps.adv.logger import ADV_LOGGER
 import dataclasses as dataclasses_plain
 
 from tensorpc.apps.adv.codemgr import markers as adv_markers
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVFlowModel, ADVNodeModel, ADVNodeType, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVFlowModel, ADVNodeModel, ADVNodeType, ADVProject, ADVRoot, InlineCode
+from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.funcid import ast_constant_expr_to_value
 from tensorpc.dock.components.flowui import XYPosition
 from tensorpc.utils.uniquename import UniqueNamePool
@@ -40,6 +42,7 @@ class RefImportDesc:
     module: str 
     level: int
     name: str
+    asname: Optional[str]
 
 @dataclasses_plain.dataclass
 class RefNodeDesc:
@@ -66,6 +69,10 @@ class SubflowDefDesc:
     marker: SingleADVMarker
 
 @dataclasses_plain.dataclass
+class MarkdownDesc:
+    marker: SingleADVMarker
+
+@dataclasses_plain.dataclass
 class InlineFlowDefDesc:
     # we need to parse inline flow func body
     # to determine user edges and ref nodes.
@@ -75,7 +82,6 @@ class InlineFlowDefDesc:
 
 @dataclasses_plain.dataclass
 class ADVFlowCodeDesc:
-    path: list[str]
     # code_lines: list[str]
     global_script_descs: list[GlobalScriptCodeDesc]
     ref_import_descs: list[RefImportDesc]
@@ -85,19 +91,20 @@ class ADVFlowCodeDesc:
     symbol_group_descs: list[SymbolGroupDesc]
     fragment_def_descs: list[FragmentDefDesc]
     inline_flow_def_descs: list[InlineFlowDefDesc]
+    markdown_descs: list[MarkdownDesc]
     user_edge_nodes: list[SingleADVMarker] = dataclasses_plain.field(default_factory=list)
 
 
 class ADVProjectParser:
-    def __init__(self, path_code_accessor: Callable[[list[str]], str]):
+    def __init__(self, path_code_accessor: Callable[[list[str], Path], str]):
         self._path_code_accessor = path_code_accessor
 
-    def _parse_flow_path_to_desc(self, path: list[str]):
-        code = self._path_code_accessor(path)
-        flow_desc = self._parse_flow_code_to_desc(path, code)
-        return flow_desc
+    # def _parse_flow_path_to_desc(self, path: list[str]):
+    #     code = self._path_code_accessor(path)
+    #     flow_desc = self._parse_flow_code_to_desc(code)
+    #     return flow_desc
 
-    def _parse_flow_code_to_desc(self, path: list[str], code: str):
+    def _parse_flow_code_to_desc(self, code: str):
         lines = code.splitlines()
         tree = ast.parse(code)
         markers = self._parse_markers(tree)
@@ -112,6 +119,7 @@ class ADVProjectParser:
         inline_flow_def_descs: list[InlineFlowDefDesc] = []
         user_edge_nodes: list[SingleADVMarker] = []
         subflow_descs: list[SubflowDefDesc] = []
+        markdown_descs: list[MarkdownDesc] = []
         # import rich 
         # rich.print(markers)
         while marker_idx < len(markers):
@@ -119,7 +127,6 @@ class ADVProjectParser:
             if isinstance(marker, SingleADVMarker):
                 if marker.marker_name == adv_markers.mark_global_script.__name__:
                     # TODO handle ref global script.
-                    is_ref_node = marker.kwargs.get("ref_node_id") is not None
                     assert marker_idx < len(markers) - 1, "Global script marker must be paired."
                     next_marker = markers[marker_idx + 1]
                     assert isinstance(next_marker, SingleADVMarker), "Global script marker must be paired."
@@ -139,11 +146,11 @@ class ADVProjectParser:
                         for alias in import_stmt.names:
                             # we don't use asname here.
                             name = alias.name
-                            assert alias.asname is None, "Ref node import cannot use 'as' alias."
                             ref_desc = RefImportDesc(
                                 module=module if module is not None else "",
                                 level=level,
                                 name=name,
+                                asname=alias.asname,
                             )
                             ref_import_descs.append(ref_desc)
                     end_found = False 
@@ -163,8 +170,8 @@ class ADVProjectParser:
                                     ref_node_descs.append(RefNodeDesc(next_marker))
                                 marker_idx += 1
                         else:
-                            raise ValueError("Ref node region only allow mark_ref_node_dep_end or mark_ref_node.")
-                    assert end_found, "Ref node dep marker must be ended with ref_node_dep_end marker."
+                            raise ValueError("Ref node region only allow ADV.mark_ref_node_dep_end or ADV.mark_ref_node.")
+                    assert end_found, "Ref node dep marker must be ended with ADV.ref_node_dep_end marker."
                 elif marker.marker_name == adv_markers.mark_out_indicator.__name__:
                     out_indicator_descs.append(OutIndicatorDesc(marker))
                     marker_idx += 1
@@ -179,6 +186,9 @@ class ADVProjectParser:
                 elif marker.marker_name == adv_markers.mark_user_edge.__name__:
                     user_edge_nodes.append(marker)
                     marker_idx += 1
+                elif marker.marker_name == adv_markers.mark_markdown_node.__name__:
+                    markdown_descs.append(MarkdownDesc(marker))
+                    marker_idx += 1
                 else:
                     raise ValueError(f"Unknown single ADV marker {marker.marker_name}.")
             else:
@@ -192,7 +202,6 @@ class ADVProjectParser:
                         marker=marker,
                         code_lines=code_lines,
                     ))
-
                 elif marker.marker_name == adv_markers.mark_fragment_def.__name__ or marker.marker_name == adv_markers.mark_inlineflow.__name__:
                     assert isinstance(marker.block_node, (ast.FunctionDef, ast.AsyncFunctionDef))
                     return_anno = marker.block_node.returns
@@ -219,7 +228,6 @@ class ADVProjectParser:
                     raise ValueError(f"Unknown blocked ADV marker {marker.marker_name}.")
                 marker_idx += 1
         desc = ADVFlowCodeDesc(
-            path=path,
             # code_lines=lines,
             user_edge_nodes=user_edge_nodes,
             global_script_descs=global_script_descs,
@@ -230,6 +238,7 @@ class ADVProjectParser:
             fragment_def_descs=fragment_def_descs,
             inline_flow_def_descs=inline_flow_def_descs,
             subflow_descs=subflow_descs,
+            markdown_descs=markdown_descs,
         )
         return desc
 
@@ -292,12 +301,16 @@ class ADVProjectParser:
             res[key] = value
         return res  
 
-    def _parse_desc_to_flow_model(self, path: list[str], visited: set[str]):
-        code = self._path_code_accessor(path)
-        flow_desc = self._parse_flow_code_to_desc(path, code)
-        # import rich 
-        # rich.print(flow_desc)
-
+    def _parse_desc_to_flow_model(self, path_with_node_name: list[str], fspath: Path, visited: set[Path], 
+            parsed_flows: dict[Path, ADVFlowModel],
+            ext_flows: Optional[dict[Path, ADVFlowModel]] = None):
+        if fspath in visited:
+            raise ValueError(f"Cyclic flow import detected for flow at path {fspath}.")
+        if ext_flows is not None and fspath in ext_flows:
+            return ext_flows[fspath]
+        visited.add(fspath)
+        code = self._path_code_accessor(path_with_node_name, fspath)
+        flow_desc = self._parse_flow_code_to_desc(code)
         node_id_to_node: dict[str, ADVNodeModel] = {}
         # we won't serialize edge id to code, so edge id is generated in each parse.
         edge_id_to_edge: dict[str, ADVEdgeModel] = {}
@@ -320,11 +333,12 @@ class ADVProjectParser:
         for desc in flow_desc.out_indicator_descs:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
+            alias = desc.marker.kwargs.get("alias", "")
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
                 nType=ADVNodeType.OUT_INDICATOR.value,
-                name="",
+                name=alias,
             )
             node_id_to_node[node_id] = adv_node
         for desc in flow_desc.symbol_group_descs:
@@ -340,11 +354,12 @@ class ADVProjectParser:
             node_id_to_node[node_id] = adv_node
         edge_id_pool = UniqueNamePool()
         for marker in flow_desc.user_edge_nodes:
+            edge_id = marker.kwargs["id"]
             source = marker.kwargs["source"]
             source_handle = marker.kwargs["source_handle"]
             target = marker.kwargs["target"]
             target_handle = marker.kwargs["target_handle"]
-            edge_id = edge_id_pool(f"E-{source}({source_handle})->{target}({target_handle})")
+            edge_id = edge_id_pool(edge_id)
             edge_model = ADVEdgeModel(
                 id=edge_id,
                 source=source,
@@ -354,6 +369,24 @@ class ADVProjectParser:
                 isAutoEdge=False,
             )
             edge_id_to_edge[edge_id] = edge_model
+        for desc in flow_desc.markdown_descs:
+            marker = desc.marker
+            node_id = marker.kwargs["node_id"]
+            position = marker.kwargs["position"]
+            width = marker.kwargs["width"]
+            height = marker.kwargs["height"]
+            content = marker.kwargs["content"]
+            adv_node = ADVNodeModel(
+                id=node_id,
+                position=XYPosition(x=position[0], y=position[1]),
+                nType=ADVNodeType.MARKDOWN.value,
+                name="",
+                impl=InlineCode(content),
+                width=width,
+                height=height,
+            )
+            node_id_to_node[node_id] = adv_node
+
         name_to_frag: dict[str, ADVNodeModel] = {}
         for desc in flow_desc.fragment_def_descs:
             node_id = desc.marker.kwargs["node_id"]
@@ -361,12 +394,14 @@ class ADVProjectParser:
             
             alias_map = desc.marker.kwargs.get("alias_map", "")
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
+            # TODO better way to handle indent here.
+            code = "\n".join([line[4:] for line in desc.code_lines])
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
                 nType=ADVNodeType.FRAGMENT.value,
                 name=desc.name,
-                impl=InlineCode("\n".join(desc.code_lines)),
+                impl=InlineCode(code),
                 alias_map=alias_map,
                 inlinesf_name=inlineflow_name,
             )
@@ -379,8 +414,13 @@ class ADVProjectParser:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
-            ref_import_path = path + [name]
-            subflow = self._parse_desc_to_flow_model(ref_import_path, visited)
+            is_folder = desc.marker.kwargs.get("is_folder", False)
+            new_import_path = path_with_node_name + [name]
+            relative_path = ADVProject.get_code_relative_path_static(
+                path=new_import_path,
+                is_folder=is_folder,
+            )
+            subflow = self._parse_desc_to_flow_model(new_import_path, relative_path, visited, parsed_flows, ext_flows)
             adv_node = ADVNodeModel(
                 flow=subflow,
                 id=node_id, 
@@ -394,7 +434,7 @@ class ADVProjectParser:
         ref_node_desc_dict: dict[str, ADVNodeModel] = {}
         ref_node_name_to_imports: dict[str, RefImportDesc] = {}
         for import_desc in flow_desc.ref_import_descs:
-            ref_node_name_to_imports[import_desc.name] = import_desc
+            ref_node_name_to_imports[import_desc.name if import_desc.asname is None else import_desc.asname] = import_desc
         for desc in flow_desc.ref_node_descs:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
@@ -403,7 +443,11 @@ class ADVProjectParser:
             alias_map = desc.marker.kwargs.get("alias_map", "")
 
             ref_node_name_node = desc.marker.marker_node.args[0]
+            ref_node_ntype_node = desc.marker.marker_node.args[1]
+
             assert isinstance(ref_node_name_node, ast.Name)
+            ref_node_ntype = ast_constant_expr_to_value(ref_node_ntype_node)
+            assert isinstance(ref_node_ntype, int)
             ref_node_name = ref_node_name_node.id
             import_desc = ref_node_name_to_imports[ref_node_name]
             # build import path of ref node
@@ -411,20 +455,26 @@ class ADVProjectParser:
             # so no need to deal with level.
             ref_import_path = import_desc.module.split(".")
             is_folder = False
+            ref_alias = "" if import_desc.asname is None else import_desc.asname
             if ref_import_path[-1] == TENSORPC_ADV_FOLDER_FLOW_NAME:
                 is_folder = True  
                 ref_import_path = ref_import_path[:-1]
+            is_inlineflow = ref_import_path[-1] == import_desc.name
+            if is_inlineflow:
+                assert len(ref_import_path) > 0
+                ref_import_path = ref_import_path[:-1]
+
             # TODO parse flow node from import path?
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
-                nType=ADVNodeType.FRAGMENT.value,
+                nType=ref_node_ntype,
                 ref_node_id=ref_node_id,
                 inlinesf_name=inlineflow_name,
                 alias_map=alias_map,
                 ref_import_path=ref_import_path,
+                name=ref_alias,
             )
-
             ref_node_desc_dict[node_id] = adv_node
         for inline_flow_desc in flow_desc.inline_flow_def_descs:
             # we only need to extract ref node infos here.
@@ -442,6 +492,7 @@ class ADVProjectParser:
                     arg_values: list[Any] = [ast_constant_expr_to_value(arg) for arg in adv_ref_meta_expr.args]
                     real_meta = RefNodeMeta(*arg_values)
                     if real_meta.id not in ref_node_desc_dict:
+                        # local ref.
                         adv_node = ADVNodeModel(
                             id=real_meta.id, 
                             position=XYPosition(x=real_meta.position[0], y=real_meta.position[1]),
@@ -449,7 +500,7 @@ class ADVProjectParser:
                             ref_node_id=real_meta.ref_node_id,
                             inlinesf_name=inline_flow_desc.name,
                             alias_map=real_meta.alias_map,
-                            ref_import_path=path,
+                            ref_import_path=path_with_node_name,
                         )
                         ref_node_desc_dict[real_meta.id] = adv_node
         
@@ -461,7 +512,42 @@ class ADVProjectParser:
             nodes=node_id_to_node,
             edges=edge_id_to_edge,
         )
+        parsed_flows[fspath] = flow_model
         return flow_model
 
-# def parse_adv_project(import_path_accessor: Callable[[list[str]], str]) -> ADVProject:
-#     pass 
+def _adv_accessor(path_parts: list[str], fspath: Path, root_folder: Path) -> str:
+    with open(root_folder / fspath, "r", encoding="utf-8") as f:
+        code = f.read()
+    return code
+
+def parse_adv_project_root_flow(root_folder: Path) -> ADVFlowModel:
+    accessor = partial(_adv_accessor, root_folder=root_folder)
+    proj_parser = ADVProjectParser(path_code_accessor=accessor)
+    root_flow = proj_parser._parse_desc_to_flow_model(
+        [], Path(f"{TENSORPC_ADV_FOLDER_FLOW_NAME}.py"), set(), {}
+    )
+    return root_flow 
+
+def create_adv_model(path_to_key_prefix: dict[Path, tuple[str, str]]) -> ADVRoot:
+    proj_dict: dict[str, ADVProject] = {}
+    for path, (key, prefix) in path_to_key_prefix.items():
+        flow = parse_adv_project_root_flow(path)
+        adv_proj = ADVProject(
+            flow=flow,
+            path=str(path),
+            import_prefix=prefix,
+        )
+        proj_dict[key] = adv_proj
+
+    return ADVRoot(
+        cur_adv_project=next(iter(proj_dict.keys())),
+        adv_projects=proj_dict,
+    )
+
+def _main():
+    test_folder = PACKAGE_ROOT / "apps" / "adv" / "managed"
+    root_flow = parse_adv_project_root_flow(test_folder) 
+
+
+if __name__ == "__main__":
+    _main()

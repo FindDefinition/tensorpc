@@ -330,7 +330,7 @@ def _tensorpc_draft_dispatch(
     else:
         new_anno_state.can_assign = can_assign
     if dataclasses.is_dataclass(new_obj):
-        return DraftObject(new_obj, userdata, node, new_anno_state)
+        return DraftClass(new_obj, userdata, node, new_anno_state)
     elif isinstance(new_obj, Sequence) and not isinstance(new_obj, str):
         return DraftSequence(new_obj, userdata, node, new_anno_state)
     elif isinstance(new_obj, Mapping):
@@ -381,7 +381,7 @@ def _tensorpc_draft_anno_dispatch(
     if anno_type.annometa is not None:
         path_metas = path_metas + [anno_type.annometa]
     if dataclasses.is_dataclass(anno_type.origin_type):
-        return DraftObject(None, userdata, node, new_anno_state)
+        return DraftClass(None, userdata, node, new_anno_state)
     elif anno_type.is_sequence_type():
         return DraftSequence(new_obj, userdata, node, new_anno_state)
     elif anno_type.is_mapping_type():
@@ -554,7 +554,7 @@ class DraftBase:
         assert other is None, "only allow compare with None for all draft object"
         return self._tensorpc_draft_binary_op(other, "!=")
 
-class DraftObject(DraftBase):
+class DraftClass(DraftBase):
     __known_attrs__ = {
         *DraftBase.__known_attrs__, "_tensorpc_draft_attr_obj_fields_dict"
     }
@@ -581,7 +581,7 @@ class DraftObject(DraftBase):
 
         else:
             assert dataclasses.is_dataclass(
-                obj), f"DraftObject only support dataclass, got {type(obj)}"
+                obj), f"DraftClass only support dataclass, got {type(obj)}"
             fields = dataclasses.fields(self._tensorpc_draft_attr_real_obj)
             type_hints = resolve_type_hints(type(
                 self._tensorpc_draft_attr_real_obj))
@@ -633,7 +633,7 @@ class DraftObject(DraftBase):
                                                  anno_type)
 
     def __setattr__(self, name: str, value: Any):
-        if name in DraftObject.__known_attrs__:
+        if name in DraftClass.__known_attrs__:
             super().__setattr__(name, value)
             return
         if name not in self._tensorpc_draft_attr_obj_fields_dict:
@@ -1461,7 +1461,7 @@ def cast_any_draft_to_dataclass(draft: Any, target_type: type[T]) -> T:
     new_anno_type = parse_type_may_optional_undefined(target_type)
     new_state = dataclasses.replace(draft._tensorpc_draft_attr_anno_state,
                                     anno_type=new_anno_type)
-    new_draft = DraftObject(draft._tensorpc_draft_attr_real_obj,
+    new_draft = DraftClass(draft._tensorpc_draft_attr_real_obj,
                             draft._tensorpc_draft_attr_userdata,
                             draft._tensorpc_draft_attr_cur_node, new_state)
     return cast(T, new_draft)
@@ -1593,7 +1593,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
             draft_expr = _rebuild_draft_expr_recursive(target_node, root_draft, model)
             path_items = evaluate_draft_ast(node.children[1], model)
             for path_item in path_items:
-                if isinstance(draft_expr, DraftObject):
+                if isinstance(draft_expr, DraftClass):
                     assert isinstance(path_item, str)
                     draft_expr = getattr(draft_expr, path_item)
                 elif isinstance(draft_expr, (DraftSequence, DraftDict)):

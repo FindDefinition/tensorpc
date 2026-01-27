@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from pathlib import Path
 import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, Self, Union, cast
+from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
 from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
@@ -24,6 +25,7 @@ class ADVNodeType(enum.IntEnum):
     # user need to connect node output handle to this node
     # to indicate outputs of this flow.
     OUT_INDICATOR = 4
+    MARKDOWN = 5
 
 
 
@@ -63,24 +65,36 @@ class ADVHandlePrefix:
 class ADVConstHandles:
     OutIndicator = "oic-outputs"
 
+
+class ADVHandleFlags(enum.IntFlag):
+    IS_INPUT = enum.auto()
+    IS_SYM_HANDLE = enum.auto()
+    ERROR_IS_MISSING = enum.auto()
+
+class ADVNodeFlags(enum.IntFlag):
+    IS_METHOD = enum.auto()
+    IS_INIT_METHOD = enum.auto()
+    IS_CLASS_METHOD = enum.auto()
+    IS_AUTO_FIELD = enum.auto()
+
 @dataclasses.dataclass(kw_only=True)
 class ADVNodeHandle:
     id: str
     # display name
     name: str
     type: str
-    is_input: bool
-    symbol_name: str = ""
+    # symbol_name: indicate which symbol this handle bind to in symbol groups
+    symbol_name: str = "" 
     default: Optional[str] = None
-    flags: int = 0
+    # ADVHandleFlags
+    flags: int = 0 
     source_node_id: Optional[str] = None
     source_handle_id: Optional[str] = None
-    is_sym_handle: bool = False
     sym_depth: int = -1
     # used when output of fragment node is dict.
-    dict_key: Optional[str] = None
-
-    
+    dict_key: Union[Undefined, str] = undefined
+    # used by output indicator
+    out_var_name: Union[Undefined, str] = undefined
 
 
 @dataclasses.dataclass
@@ -91,6 +105,10 @@ class ADVNodeModel(BaseNodeModel):
     flow: Optional["ADVFlowModel"] = None
     # set after parse
     name: str = ""
+    error: Union[Undefined, str] = undefined
+    # ADVNodeFlags
+    flags: int = 0 
+
     handles: list[ADVNodeHandle] = dataclasses.field(default_factory=list)
 
     # tmp field, set when load adv project
@@ -116,11 +134,27 @@ class ADVNodeModel(BaseNodeModel):
     # base classes
     # decorators
 
+    def is_base_props_equal_to(self, other: Self) -> bool:
+        return (self.nType == other.nType and 
+                self.alias_map == other.alias_map and 
+                self.name == other.name and 
+                self.inlinesf_name == other.inlinesf_name)
+
+    def is_impl_equal_to(self, other: Self) -> bool:
+        if self.impl is None and other.impl is None:
+            return True
+        if self.impl is None or other.impl is None:
+            return False
+        return self.impl.code == other.impl.code
+
+    def get_out_indicator_alias(self):
+        assert self.nType == ADVNodeType.OUT_INDICATOR
+        return self.name
+
     @staticmethod
     def get_global_uid_ext(path: list[str], id: str):
         # TODO should we use node id list instead of names + [last_id]？
         return UniqueTreeIdForTree.from_parts(path + [id]).uid_encoded
-
 
     def get_global_uid(self):
         # TODO should we use node id list instead of names + [last_id]？
@@ -197,6 +231,20 @@ class ADVProject:
     # node id to path in dataclass model
     node_gid_to_frontend_path: dict[str, list[str]] = dataclasses.field(
         default_factory=dict)
+
+    @staticmethod
+    def get_code_relative_path_static(path: list[str], is_folder: bool):
+        # if this node don't have nested flow, it use single file.
+        # otherwise a folder with __init__.py
+        if not path:
+            # ROOT flow, always folder, __init__.py
+            return Path(f"{TENSORPC_ADV_FOLDER_FLOW_NAME}.py")
+        import_path = path.copy()
+        if is_folder:
+            import_path.append(f"{TENSORPC_ADV_FOLDER_FLOW_NAME}.py")
+        else:
+            import_path[-1] += ".py"
+        return Path(*import_path)
 
     def get_uid_from_path(self, prefix_parts: Optional[list[str]] = None):
         if prefix_parts is None:
@@ -314,7 +362,7 @@ class ADVProject:
         assert len(node_id_path) > 0
         res = self.flow.nodes[node_id_path[0]]
         for node_id in node_id_path[1:]:
-            res = res.flow[node_id]
+            res = res.flow.nodes[node_id]
         return res
 
     def draft_get_node_impl_editor(self,
@@ -451,14 +499,19 @@ class ADVRoot:
                 return res
             handle = node.handles[handle_idx]
             # print(node.id, handle.id, handle_idx, handle.name)
-            is_input = handle.is_input
-            if handle.dict_key is not None:
+            is_input = (handle.flags & ADVHandleFlags.IS_INPUT) != 0
+            is_sym_handle = (handle.flags & ADVHandleFlags.IS_SYM_HANDLE) != 0
+            is_error_missing = (handle.flags & ADVHandleFlags.ERROR_IS_MISSING) != 0
+            if handle.dict_key:
                 # we need to show original key if dict output.
                 # otherwise users won't know the real key
                 # when they use this function in non-adv code.
                 name = handle.name + "(" + handle.dict_key + ")"
             else:
                 name = handle.name
+            if is_sym_handle:
+                name += ": "
+                name += handle.type
             # if real_node_is_ref:
             #     print(node_id, real_node.id, handle)
             res = {
@@ -467,21 +520,26 @@ class ADVRoot:
                 "type_anno": handle.type,
                 "type": "target" if is_input else "source",
                 "hpos": "left" if is_input else "right",
-                "textAlign": "start" if (is_input or handle.is_sym_handle) else "end",
+                "textAlign": "start" if (is_input or is_sym_handle) else "end",
                 "is_input": is_input,
             }
+            if is_error_missing:
+                res["outline"] = "3px solid red"
             if is_input:
                 res["hborder"] = "1px solid #4caf50"
         return res
 
     @mui.DataModel.mark_pfl_query_func
     def get_node_frontend_props(self, node_gid: str) -> dict[str, Any]:
-        real_node, real_node_is_ref = self.get_real_node_by_gid(node_gid)
+        node, real_node, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
         res: dict[str, Any] = {}
-        if real_node is not None:
+        if real_node is not None and node is not None:
+            header = real_node.name
             if real_node.nType == ADVNodeType.CLASS:
                 icon_type = mui.IconType.DataObject
             elif real_node.nType == ADVNodeType.FRAGMENT:
+                # ref node name is alias
+                header = node.name
                 if real_node.flow is not None:
                     icon_type = mui.IconType.Reactflow
                 else:
@@ -490,7 +548,7 @@ class ADVRoot:
                 icon_type = mui.IconType.Info
             res = {
                 "id": real_node.id,
-                "header": real_node.name,
+                "header": header,
                 "iconType": icon_type,
                 "isRef": real_node_is_ref,
                 "bottomMsg": "hello world!",
@@ -506,15 +564,16 @@ class ADVRoot:
                     res["header"] = "..."
                 else:
                     first_handle = real_node.handles[0]
-                    sym_name = first_handle.symbol_name
-                    if sym_name == "":
+                    out_var_name = first_handle.out_var_name
+                    if not out_var_name:
                         res["header"] = "..."
-                    
-                    elif real_node.name.strip() != "":
-                        res["header"] = sym_name + "->" + real_node.name.strip()
                     else:
-                        res["header"] = sym_name
-
+                        if real_node.name.strip() != "":
+                            res["header"] = out_var_name + "->" + real_node.name.strip()
+                        else:
+                            res["header"] = out_var_name
+            if real_node.nType == ADVNodeType.MARKDOWN and real_node.impl is not None:
+                res["code"] = real_node.impl.code
             # if is_input:
             #     res["hborder"] = "1px solid #4caf50"
         return res

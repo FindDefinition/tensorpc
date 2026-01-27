@@ -106,6 +106,7 @@ _TYPE_SUPPORT_BINARY_OP = {
 _TYPE_SUPPORT_UNARY_OP = {
     PFLExprType.NUMBER,
     PFLExprType.BOOL,
+    PFLExprType.STRING
 }
 
 _TYPE_SUPPORT_COMPARE_OP = {
@@ -1531,7 +1532,7 @@ class PFLExprInfo:
         assert left_support and right_support, f"not support binary op for {self} vs {other_st}, {msg}"
     
     def check_support_unary_op(self, msg: str = ""):
-        assert self.support_binary_op(), f"not support unary op for {self}, {msg}"
+        assert self.type in _TYPE_SUPPORT_UNARY_OP, f"not support unary op for {self}, {msg}"
 
     def is_all_child_same(self):
         if len(self.childs) > 0:
@@ -1578,7 +1579,7 @@ class PFLExprInfo:
         return dataclasses.replace(self)
 
     def support_aug_assign(self):
-        return self.type in _TYPE_SUPPORT_BINARY_OP
+        return self.type == PFLExprType.STRING or self.type in _TYPE_SUPPORT_BINARY_OP
 
     def is_convertable(self, tgt: "PFLExprInfo"):
         assert self.type != PFLExprType.UNKNOWN, "source type is UNKNOWN"

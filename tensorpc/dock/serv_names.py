@@ -73,6 +73,27 @@ class _ServiceNames:
         from tensorpc.dock.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
                                        FlowApp.run_single_event.__name__)
+    @property
+    def APP_FS_READ_FILE(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.fs_read_file.__name__)
+
+    @property
+    def APP_FS_WRITE_FILE(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.fs_write_file.__name__)
+    @property
+    def APP_FS_GET_FILE_STATS(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.fs_get_file_stats.__name__)
+    @property
+    def APP_FS_LIST_FILES(self):
+        from tensorpc.dock.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.fs_list_files.__name__)
 
     @property
     def APP_SIMPLE_RPC(self):

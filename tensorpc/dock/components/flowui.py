@@ -26,7 +26,7 @@ from typing_extensions import Literal, TypeAlias, override
 import dataclasses as dataclasses_plain
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.datamodel.draft import DraftObject, get_draft_anno_type
+from tensorpc.core.datamodel.draft import DraftClass, get_draft_anno_type
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.dock.core.appcore import Event
@@ -175,6 +175,9 @@ class EdgeBase:
     sourceHandle: Optional[str] = None
     targetHandle: Optional[str] = None
 
+    def get_connection_key(self):
+        return (self.source, self.sourceHandle, self.target, self.targetHandle)
+
 T_node = TypeVar("T_node", bound=NodeBase)
 T_edge = TypeVar("T_edge", bound=EdgeBase)
 
@@ -269,6 +272,9 @@ class Edge(EdgeBase):
     # only available when type is svgstep
     # if undefined, it becomes a smoothstep edge
     data: Union[Undefined, Any] = undefined
+    deletable: Union[Undefined, bool] = undefined
+    selectable: Union[Undefined, bool] = undefined
+    reconnectable: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass
@@ -1226,17 +1232,25 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                     assert n.data.component._flow_uid is not None
                     cur_id_to_comp[n.data.component._flow_uid.
                                    uid_encoded] = n.data.component
-            for node_raw in value["nodes"]:
+            
+            new_nodes = value["nodes"].copy()
+            # copy nodes
+            for i, node_raw in enumerate(new_nodes):
+                new_nodes[i] = node_raw.copy()
+                if "data" in node_raw:
+                    new_nodes[i]["data"] = node_raw["data"].copy()
+
+            for node_raw in new_nodes:
                 if "data" in node_raw:
                     data = node_raw["data"]
                     if "component" in data:
                         msg = (f"flow {self._flow_uid_encoded} component "
                             f"{data['component']} not exists. ev: {value} "
-                            f"nodeIds: {[n.id for n in self.nodes]}|{[n['id'] for n in value['nodes']]} "
+                            f"nodeIds: {[n.id for n in self.nodes]}|{[n['id'] for n in new_nodes]} "
                             f"{value.get('flowUserUid')} {flow_user_id}")
                         assert data["component"] in cur_id_to_comp, msg
                         data["component"] = cur_id_to_comp[data["component"]]
-            self.childs_complex.nodes = _NodesHelper(value["nodes"]).nodes
+            self.childs_complex.nodes = _NodesHelper(new_nodes).nodes
         if "edges" in value:
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()

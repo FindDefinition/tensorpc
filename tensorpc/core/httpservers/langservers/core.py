@@ -22,10 +22,16 @@ import ssl
 from tensorpc.core.asynctools import cancel_task
 from ..logger import LOGGER
 
+def _patch_uri(uri: str, prefix: str):
+    assert uri.startswith("file://")
+    return "file://" + prefix + uri[len("file://"):]
+
 class AsyncJsonRpcStreamReader:
 
-    def __init__(self, reader: asyncio.StreamReader):
+    def __init__(self, reader: asyncio.StreamReader, need_prefix_dict: dict[str, str], prefix: Optional[str] = None):
         self._rfile = reader
+        self._prefix = prefix
+        self._need_prefix_dict = need_prefix_dict
 
     async def listen(self, message_consumer):
         """Blocking call to listen for messages on the rfile.
@@ -40,10 +46,28 @@ class AsyncJsonRpcStreamReader:
             if line == b"" or content_length is None:
                 break
             request_str = await self._rfile.readexactly(content_length)
+            data = json.loads(request_str.decode('utf-8'))
+
             try:
-                await message_consumer(json.loads(request_str.decode('utf-8')))
+                if self._prefix is not None:
+                    if "params" in data:
+                        params = data["params"]
+                        if "uri" in params and params['uri'] in self._need_prefix_dict:
+                            params["uri"] = self._need_prefix_dict[params['uri']]
+                    if "result" in data and isinstance(data["result"], list):
+                        for item in data["result"]:
+                            # if isinstance(item, dict) and "uri" in item and item["uri"] in self._need_prefix_dict:
+                            #     item["uri"] = self._need_prefix_dict[item["uri"]]
+                            if isinstance(item, dict) and "uri" in item:
+                                item["uri"] = _patch_uri(item["uri"], self._prefix)
+                # print("[JSONRPC OUT]", data)
+
+                await message_consumer(data)
             except ValueError:
                 LOGGER.exception("Failed to parse JSON message %s", request_str)
+                continue
+            except:
+                LOGGER.exception("Failed to process JSON message %s", data)
                 continue
 
     @staticmethod
@@ -77,7 +101,6 @@ class AsyncJsonRpcStreamWriter:
             if self._wfile.is_closing():
                 return
             try:
-                # print("JSONRPC OUT", message)
                 body = json.dumps(message, **self._json_dumps_args)
 
                 # Ensure we get the byte length, not the character length
@@ -95,8 +118,19 @@ class AsyncJsonRpcStreamWriter:
 
 
 class LanguageServerHandler:
+    def __init__(self):
+        self._prefix: Optional[str] = None 
+
+    def set_prefix(self, prefix: Optional[str]):
+        self._prefix = prefix
 
     async def handle_ls_open(self, request):
+        # graph_id = os.getenv("TENSORPC_FLOW_GRAPH_ID")
+        # node_id = os.getenv("TENSORPC_FLOW_NODE_ID")
+        prefix = self._prefix 
+        # if graph_id is not None and node_id is not None:
+        #     prefix = self._get_lsp_prefix(graph_id, node_id)
+        # prefix = None
         ls_type = request.match_info.get('type')
         LOGGER.warning("New %s language server request", ls_type)
         assert ls_type in ["pyright"]
@@ -117,8 +151,9 @@ class LanguageServerHandler:
             assert aproc.stdout is not None
             assert aproc.stdin is not None
             # Create a writer that formats json messages with the correct LSP headers
+            need_prefix_dict: dict[str, str] = {}
             writer = AsyncJsonRpcStreamWriter(aproc.stdin)
-            reader = AsyncJsonRpcStreamReader(aproc.stdout)
+            reader = AsyncJsonRpcStreamReader(aproc.stdout, need_prefix_dict, prefix=prefix)
 
             async def cosumer(msg):
                 await ws.send_json(msg)
@@ -127,8 +162,21 @@ class LanguageServerHandler:
             # consume this in another thread
             async for ws_msg in ws:
                 if ws_msg.type == aiohttp.WSMsgType.TEXT:
-                    # print("[JSONRPC IN]", ws_msg.json())
-                    await writer.write(ws_msg.json())
+                    ws_data = json.loads(ws_msg.data)
+                    # print("[JSONRPC IN]", ws_data)
+
+                    if prefix is not None:
+                        # we patch path in frontend to support multiple-app-one-page,
+                        # so we may need to remove prefix before sending to language server
+                        if "params" in ws_data:
+                            params = ws_data["params"]
+                            for k, v in params.items():
+                                if isinstance(v, dict) and "uri" in v and prefix in v["uri"]:
+                                    path_remove_prefix = v["uri"].replace(prefix, "")
+                                    need_prefix_dict[path_remove_prefix] = v["uri"]
+                                    v["uri"] = path_remove_prefix
+
+                    await writer.write(ws_data)
                 elif ws_msg.type == aiohttp.WSMsgType.ERROR:
                     LOGGER.error(ws_msg)
                 else:

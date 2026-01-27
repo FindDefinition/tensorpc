@@ -28,6 +28,7 @@ from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.utils import df_logging
 import contextvars
+from tensorpc.core.httpservers.langservers.core import LanguageServerHandler
 
 LOGGER = df_logging.get_logger()
 
@@ -105,7 +106,8 @@ class _ExposedServerProps(object):
     """
 
     def __init__(self, exec_lock, service_units, shutdown_event, local_url,
-                 is_sync: bool, server_meta: ServerMeta, dist_meta: Optional[ServerDistributedMeta] = None):
+                 is_sync: bool, server_meta: ServerMeta, lsp_handler: LanguageServerHandler, 
+                 dist_meta: Optional[ServerDistributedMeta] = None):
         self.exec_lock = exec_lock
         self.service_units = service_units
         self.shutdown_event = shutdown_event
@@ -116,6 +118,7 @@ class _ExposedServerProps(object):
         self.http_client_session: Optional[aiohttp.ClientSession] = None
         self._async_shutdown_event: Optional[asyncio.Event] = None
         self._executor: Optional[Executor] = None
+        self.lsp_handler = lsp_handler
 
     @property
     def async_shutdown_event(self):
@@ -205,11 +208,13 @@ class ServiceCore(object):
         self._exit_funcs = {}
         self.server_meta = server_meta
         self.dist_meta = dist_meta
+        self._lsp_handler = LanguageServerHandler()
         self._exposed_props = _ExposedServerProps(self._exec_lock,
                                                   self.service_units,
                                                   self.shutdown_event,
                                                   self.local_url, is_sync,
                                                   server_meta,
+                                                  self._lsp_handler,
                                                   dist_meta)
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync,

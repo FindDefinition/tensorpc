@@ -107,6 +107,8 @@ class MasterMeta:
         return set_tensorpc_server_process_title(BuiltinServiceProcType.DOCK_APP, 
             *args)
 
+    def _get_lsp_prefix(self):
+        return f"/__devflow_{self.graph_id}%40{self.node_id}"
 
 class AppLocalMeta:
 

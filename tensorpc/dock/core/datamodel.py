@@ -613,6 +613,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         need_freeze: bool = False,
         post_ev_creator: Optional[Callable[[], AppEvent]] = None,
         update_backend_after_send: bool = False,
+        disable_handlers: Optional[list[DraftChangeEventHandler]] = None,
     ):
         """Do draft update immediately after this context.
         We won't perform real update during draft operation because we need to keep state same between
@@ -633,8 +634,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         cur_ctx = get_draft_update_context_noexcept()
         if cur_ctx is not None and cur_ctx._prevent_inner_draft:
             raise RuntimeError("Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler.")
-        with capture_draft_update() as ctx:
-            yield draft
+        disable_handler_ctx = contextlib.nullcontext() if disable_handlers is None else DataModel.disable_draft_handler_ctx(disable_handlers)
+        with disable_handler_ctx:
+            with capture_draft_update() as ctx:
+                yield draft
         await self._update_with_jmes_ops(ctx._ops, is_json_only, need_freeze, post_ev_creator, 
             update_backend_after_send)
 
@@ -709,7 +712,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     @staticmethod
     @contextlib.contextmanager
-    def add_disabled_handler_ctx(handlers: list[DraftChangeEventHandler]):
+    def disable_draft_handler_ctx(handlers: list[DraftChangeEventHandler]):
         """Disable specific draft change event handler for current draft update context.
         Usually used when you use a uncontrolled component (e.g. Monaco Editor). When you
         bind a data model draft change for editor, you will set editor value manually 

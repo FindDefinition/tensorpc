@@ -316,8 +316,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
             await server_core.run_event_async(ServiceEventType.Init)
 
         ws_service = AiohttpWebsocketHandler(server_core)
-        ls_service = LanguageServerHandler()
-        # print("???????", client_max_size)
+        ls_service = server_core._lsp_handler
         app = web.Application(client_max_size=client_max_size)
         # logging.basicConfig(level=logging.DEBUG)
         # TODO should we create a global client session for all http call in server?

@@ -118,7 +118,7 @@ class Undefined:
         # for python 3.11
         return 0
 
-    def __bool__(self):
+    def __bool__(self) -> Literal[False]:
         return False
 
 # DON'T MODIFY THIS VALUE!!!

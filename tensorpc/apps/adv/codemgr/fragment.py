@@ -2,10 +2,11 @@ import ast
 import inspect
 from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
+from tensorpc.apps.adv.logger import ADV_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
 import dataclasses as dataclasses_plain
 from tensorpc.core.funcid import clean_source_code
@@ -57,7 +58,6 @@ class FragmentParseResult(BaseParseResult):
             if h.handle.symbol_name in alias_map:
                 new_alias = alias_map[h.handle.symbol_name]
                 new_h.handle.name = new_alias
-                new_h.handle.symbol_name = new_alias
             new_output_handles.append(new_h)
         return dataclasses.replace(
             self,
@@ -118,10 +118,10 @@ class FragmentParseResult(BaseParseResult):
         if len(self.output_handles) != len(other_res.output_handles):
             return True
         for h1, h2 in zip(self.input_handles, other_res.input_handles):
-            if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
+            if h1.symbol_name != h2.symbol_name or h1.name != h2.name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
                 return True
         for h1, h2 in zip(self.output_handles, other_res.output_handles):
-            if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
+            if h1.symbol_name != h2.symbol_name or h1.name != h2.name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
                 return True
                 
         return False
@@ -154,9 +154,14 @@ def mark_stable_symbols(*args: Any):
     # so we can use this function to create dummy references to symbols
     pass 
 
-def mark_outputs(desc: Union[str, tuple[str, ...], dict[str, str]], /) -> FragmentOutputDesc:
+def mark_outputs(desc: Optional[Union[str, tuple[str, ...], dict[str, str]]] = None, /) -> FragmentOutputDesc:
     # we actually don't run this function, we will parse ast
     # and extract the info from function call node.
+    if desc is None:
+        return FragmentOutputDesc(
+            type="none",
+            mapping={},
+        )
     out_desc = FragmentOutputDesc("single", {})
     if isinstance(desc, str):
         symbol_name, alias = _parse_single_desc(desc)
@@ -291,7 +296,9 @@ class _FragmentApiFinderV2(ast.NodeVisitor):
         self.generic_visit(node)
 
 def _parse_mark_outputs_ast(node: ast.Call) -> FragmentOutputDesc:
-    assert len(node.args) == 1, "mark_outputs() must have exactly one argument"
+    assert len(node.args) == 0 or len(node.args) == 1, "mark_outputs() must have 0 or 1 argument"
+    if len(node.args) == 0:
+        return mark_outputs()
     arg = node.args[0]
     if isinstance(arg, ast.Constant):
         assert isinstance(arg.value, str), "mark_outputs() argument must be a string if not tuple/dict"
@@ -401,21 +408,27 @@ class FragmentParser(BaseParser):
         self._prev_ast = tree
         return tree
 
+    def _create_error_handle(self, sym_name: str, is_input: bool):
+        flags = ADVHandleFlags.ERROR_IS_MISSING
+        if is_input:
+            flags |= ADVHandleFlags.IS_INPUT
+        handle = ADVNodeHandle(
+            id=f"{ADVHandlePrefix.Output}-{sym_name}",
+            name=sym_name,
+            type="Any",
+            default=None,
+            flags=int(flags),
+        )
+        backend_handle = BackendHandle(
+            handle=handle,
+            index=0,
+        )
+        return backend_handle 
+
     def parse_fragment(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle],
             ):
         node_id = node.id
-        # tree = self._cached_parse_ast(code)
-        # chain_finder = _ChainAttrFinder(global_scope)
-        # chain_finder.visit(tree)
-        # chain_map = chain_finder.map_res
-
-        # api_finder = _FragmentApiFinder(chain_map)
-        # api_finder.visit(tree)
-        # api_map = api_finder.map_res
-        # # TODO check number of api calls, should be exactly one.
-
-        # first_node = next(iter(api_map.keys()))
-        # output_desc = _parse_mark_outputs_ast(first_node)
+        # TODO check input symbol, currently we only support output handle error check.
         prep_cache = self._cached_parse_output_desc(code)
         tree = prep_cache.tree
         output_desc = prep_cache.output_desc
@@ -423,26 +436,27 @@ class FragmentParser(BaseParser):
         symbol_extractor = _ExtractSymbolFromFragment()
         symbol_extractor.parse_block(tree.body, local_scope)
         name_to_sym = symbol_extractor._assigned_symbols
-
+        
         output_handles: list[BackendHandle] = []
+        succeed = True
         for dict_key, (sym_name, alias) in output_desc.mapping.items():
-            # TODO better error here.
-            assert sym_name in cur_scope, \
-                f"Output symbol {sym_name} not found in global scope"
-            sym_handle = cur_scope[sym_name].copy()
-            sym_handle.handle.source_node_id = node_id
-            sym_handle.handle.source_handle_id = sym_handle.handle.id
-            name = alias
-            sym_handle.handle.name = name
-            sym_handle.handle.symbol_name = alias
-            if output_desc.type == "dict":
-                sym_handle.handle.dict_key = dict_key
+            if sym_name not in cur_scope:
+                ADV_LOGGER.error(f"Output symbol {sym_name} not found in global sym scope")
+                sym_handle = self._create_error_handle(sym_name, is_input=False)
+                succeed = False
+            else: 
+                sym_handle = cur_scope[sym_name].copy()
+                sym_handle.handle.source_node_id = node_id
+                sym_handle.handle.source_handle_id = sym_handle.handle.id
+                sym_handle.handle.name = alias
+                if output_desc.type == "dict":
+                    sym_handle.handle.dict_key = dict_key
             output_handles.append(sym_handle)
         input_handles: list[BackendHandle] = []
         for sym_name, sym_handle in name_to_sym.items():
             sym_handle.target_node_handle_id.add((node_id, sym_handle.handle.id))
             sym_handle = sym_handle.copy(prefix=ADVHandlePrefix.Input)
-            sym_handle.handle.is_input = True
+            sym_handle.handle.flags |= int(ADVHandleFlags.IS_INPUT)
             input_handles.append(sym_handle)
         # make order of input handles stable.
         input_handles.sort(key=lambda h: (h.handle.default is not None, h.index))
@@ -458,7 +472,7 @@ class FragmentParser(BaseParser):
             # we perform inplace op during update.
             # so we clone node here to keep old node info.
             node=dataclasses.replace(node), 
-            succeed=True,
+            succeed=succeed,
             func_name=node.name,
             input_handles=input_handles,
             output_handles=output_handles,

@@ -6,7 +6,7 @@ from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseNodeCodeMeta, Base
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.logger import ADV_LOGGER
-from tensorpc.apps.adv.model import ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.model import ADVHandleFlags, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
 import hashlib
 from tensorpc.core.annolib import dataclass_flatten_fields_generator, unparse_type_expr
 from tensorpc.apps.adv.codemgr.markers import mark_symbol_group
@@ -70,32 +70,6 @@ class SymbolParseResult(BaseParseResult):
             if h1.symbol_name != h2.symbol_name or h1.handle.type != h2.handle.type or h1.handle.default != h2.handle.default:
                 return True                
         return False
-
-_default_typing_imports = [
-    "Literal",
-    "Union",
-    "Optional",
-    "Any",
-    "Callable",
-    "Generator",
-    "Iterable",
-    "Iterator",
-    "Type",
-    "AsyncGenerator",
-    "Awaitable",
-    "Coroutine",
-    "AsyncIterable",
-    "AsyncIterator",
-]
-_default_typing_ext_imports = [
-    "Self",
-]
-
-_default_collections_imports = [
-    "Sequence",
-    "Mapping",
-]
-
 
 
 def _get_type_str(type_obj, out_list: list[str]):
@@ -170,13 +144,12 @@ class SymbolParser(BaseParser):
                 id=handle_id,
                 name=symbol_name,
                 type=type_str,
-                is_input=False,
                 symbol_name=symbol_name,
                 default=default_str,
                 source_node_id=node_id,
                 source_handle_id=handle_id,
-                is_sym_handle=True,
                 sym_depth=depth - 1,
+                flags=int(ADVHandleFlags.IS_SYM_HANDLE),
             )
             symbol_handles.append(BackendHandle(
                 handle=handle,

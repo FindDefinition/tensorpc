@@ -1,6 +1,6 @@
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components.mui.editor import MonacoRange
-from tensorpc.apps.adv.model import ADVNodeHandle, ADVNodeModel
+from tensorpc.apps.adv.model import ADVHandleFlags, ADVNodeHandle, ADVNodeModel
 from typing import Any, Optional, Self, Union
 import abc 
 
@@ -74,6 +74,10 @@ class BackendHandle:
     type_dep_qnames: list[str] = dataclasses.field(default_factory=list)
 
     @property 
+    def name(self) -> str:
+        return self.handle.name
+
+    @property 
     def symbol_name(self) -> str:
         return self.handle.symbol_name
 
@@ -90,14 +94,18 @@ class BackendHandle:
         if prefix is not None:
             new_id_no_prefix = "-".join(new_id.split("-", 1)[1:])
             new_id = f"{prefix}-{new_id_no_prefix}"
+        new_handle = dataclasses.replace(
+            self.handle,
+            id=new_id,
+            source_node_id=node_id,
+        )
+        if is_sym_handle:
+            new_handle.flags |= int(ADVHandleFlags.IS_SYM_HANDLE)
+        else:
+            new_handle.flags &= ~int(ADVHandleFlags.IS_SYM_HANDLE)
         return dataclasses.replace(
             self,
-            handle=dataclasses.replace(
-                self.handle,
-                id=new_id,
-                source_node_id=node_id,
-                is_sym_handle=is_sym_handle,
-            ),
+            handle=new_handle,
             index=self.index + offset,
             target_node_handle_id=[],
         )

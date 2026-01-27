@@ -49,7 +49,7 @@ import watchdog.events
 from typing_extensions import ParamSpec
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
-from tensorpc.core import dataclass_dispatch
+from tensorpc.core import dataclass_dispatch, prim
 
 from tensorpc import compat, simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
@@ -369,6 +369,10 @@ class App:
         in app init. layout reload won't change this setting
         """
         self._flowapp_enable_lsp = enable
+        if enable:
+            prim.get_server_exposed_props().lsp_handler.set_prefix(MasterMeta()._get_lsp_prefix())
+        else:
+            prim.get_server_exposed_props().lsp_handler.set_prefix(None)
 
     def get_language_server_settings(self):
         """must be setted before app init (in layout function), only valid

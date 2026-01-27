@@ -33,7 +33,8 @@ class BaseHandle(mui.FlexBox):
                 flex=1,
                 marginLeft="8px",
                 marginRight="8px",
-                className=ComputeFlowClasses.CodeTypography)
+                className=ComputeFlowClasses.CodeTypography,
+                enableTooltipWhenOverflow=True)
         handle_desc.bind_pfl_query(dm,
             value=(get_handle_fn, "name"),
             textAlign=(get_handle_fn, "textAlign"),
@@ -47,6 +48,9 @@ class BaseHandle(mui.FlexBox):
         self.prop(
             className=
             f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"
+        )
+        self.bind_pfl_query(dm,
+            outline=(get_handle_fn, "outline"),
         )
 
 
@@ -161,4 +165,26 @@ class IndicatorWrapper(BaseNodeWrapper):
         self.prop(
             className=
             f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"
+        )
+
+class MarkdownNodeWrapper(BaseNodeWrapper):
+    def __init__(self, node_gid: str, dm: mui.DataModel[ADVRoot], init_width=200, init_height=200):
+        get_node_fn = partial(ADVRoot.get_node_frontend_props, node_gid=node_gid)
+        md = mui.Markdown().bind_pfl_query(dm, value=(get_node_fn, "code"))
+        md.prop(emoji=True, katex=True, codeHighlight=True)
+        super().__init__(
+            node_gid, ADVNodeType.MARKDOWN, [
+                md,
+                flowui.NodeResizer().prop(minWidth=init_width, minHeight=init_height),
+            ])
+
+        self.prop(
+            # className=
+            # f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}",
+            padding="3px",
+            width="100%",
+            height="100%",
+            minWidth=init_width,
+            minHeight=init_height,
+            display="block",
         )

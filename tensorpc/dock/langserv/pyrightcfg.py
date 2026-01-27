@@ -8,6 +8,7 @@ from tensorpc.core.datamodel.asdict import DataClassWithUndefined
 class PyrightConfig:
     disableLanguageServices: Union[bool, Undefined] = undefined
     disableOrganizeImports: Union[bool, Undefined] = undefined
+    disableTaggedHints: Union[bool, Undefined] = undefined
     openFilesOnly: Union[bool, Undefined] = undefined
     useLibraryCodeForTypes: Union[bool, Undefined] = undefined
 
@@ -31,6 +32,7 @@ class PythonAnalysisConfig:
     venvPath: Union[str, Undefined] = undefined
     include: Union[List[str], Undefined] = undefined
     exclude: Union[List[str], Undefined] = undefined
+    ignore: Union[List[str], Undefined] = undefined
 
 
 @dataclasses.dataclass
