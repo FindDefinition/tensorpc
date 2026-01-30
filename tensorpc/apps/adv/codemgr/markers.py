@@ -63,6 +63,10 @@ def mark_subflow_def(name: str, node_id: str, position: tuple[float, float], inl
     return 
 
 @MARKERS_REGISTRY.register_no_key
+def mark_class_node(name: str, node_id: str, position: tuple[float, float], inlineflow_name: Optional[str] = None, is_folder: bool = False) -> Any:
+    return None 
+
+@MARKERS_REGISTRY.register_no_key
 def mark_inlineflow() -> Callable[[T], T]:
     # we actually don't use this metadata, we read ast directly.
     def wrapper(fn_wrapped: T) -> T:
@@ -87,9 +91,16 @@ def mark_symbol_group(node_id: str, position: tuple[float, float], ref_node_id: 
     return wrapper
 
 @MARKERS_REGISTRY.register_no_key
-def mark_fragment_def(node_id: str, position: tuple[float, float], 
+def mark_fragment_def(node_id: str, position: tuple[float, float],  # flags: int, 
         alias_map: Optional[str] = None,
         inlineflow_name: Optional[str] = None) -> Callable[[T], T]:
+    # we actually don't use this metadata, we read ast directly.
+    def wrapper(fn_wrapped: T) -> T:
+        return fn_wrapped   
+    return wrapper
+
+@MARKERS_REGISTRY.register_no_key
+def mark_class_def() -> Callable[[T], T]:
     # we actually don't use this metadata, we read ast directly.
     def wrapper(fn_wrapped: T) -> T:
         return fn_wrapped   
@@ -103,6 +114,3 @@ def mark_user_edge(id: str, source: str, source_handle: str, target: str, target
 def mark_markdown_node(id: str, position: tuple[float, float], width: float, height: float, content: str):
     return None 
 
-# @MARKERS_REGISTRY.register_no_key
-# def mark_class_node(id: str, position: tuple[float, float], width: float, height: float, content: str):
-#     return None 

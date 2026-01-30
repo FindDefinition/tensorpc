@@ -1,7 +1,7 @@
 import enum
 from pathlib import Path
 import rich
-from tensorpc.apps.adv.codemgr.flow import ADV_MAIN_FLOW_NAME, ADVProjectBackendManager, ADVProjectChange
+from tensorpc.apps.adv.codemgr.flow import ADVProjectBackendManager, ADVProjectChange
 from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser, create_adv_model
 from tensorpc.apps.adv.constants import TENSORPC_ADV_MD_MIN_SIZE
 from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IONodeWrapper, IndicatorWrapper, MarkdownNodeWrapper
@@ -16,7 +16,7 @@ from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Callable, Coroutine, Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 from tensorpc.core.datamodel.draft import (get_draft_pflpath)
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
@@ -356,8 +356,8 @@ class App:
             if pair is None:
                 return 
             node = pair[1]
-            if node.ref_fe_path is not None:
-                path = node.ref_fe_path
+            if node.ref is not None and node.ref.fe_path is not None:
+                path = node.ref.fe_path
             else:
                 path = node.frontend_path
             draft = self.dm.get_draft().draft_get_cur_adv_project()
@@ -558,8 +558,7 @@ class {event.cfg.name}:
             position=flowui.XYPosition(position[0], position[1]),
             nType=cache.node.nType,
             name=cache.node.name,
-            ref_node_id=node_id,
-            ref_import_path=import_path,
+            ref=ADVNodeRefInfo(node_id, import_path),
         )
         change = self._manager.add_new_node(cur_flow_gid, node)
         rich.print(node)

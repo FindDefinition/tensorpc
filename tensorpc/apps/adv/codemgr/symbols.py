@@ -40,11 +40,11 @@ class SymbolParseResult(BaseParseResult):
             local_symbols=new_local_symbols,
         )
 
-    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]):
+    def to_code_lines(self):
         assert self.node is not None 
         kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
         decorator = f"ADV.{mark_symbol_group.__name__}({kwarg_str})"
-        if self.node.ref_node_id is not None:
+        if self.node.ref is not None:
             # only generate line
             return ImplCodeSpec([
                 f"{decorator}({self.symbol_cls_name})",
@@ -146,11 +146,10 @@ class SymbolParser(BaseParser):
                 type=type_str,
                 symbol_name=symbol_name,
                 default=default_str,
-                source_node_id=node_id,
-                source_handle_id=handle_id,
                 sym_depth=depth - 1,
                 flags=int(ADVHandleFlags.IS_SYM_HANDLE),
             )
+            handle.set_source_info_inplace(node_id, handle_id)
             symbol_handles.append(BackendHandle(
                 handle=handle,
                 index=cnt,

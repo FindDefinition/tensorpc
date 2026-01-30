@@ -6,6 +6,7 @@ import dataclasses
 from tensorpc.core import pfl
 from tensorpc.core.moduleid import get_module_id_of_type, get_qualname_of_type
 import tensorpc.core.pfl.backends.js as stl 
+from tensorpc.core.annolib import Undefined, undefined
 import numpy as np 
 @dataclasses.dataclass
 class Model:
@@ -73,15 +74,17 @@ class Foo2:
     val: int = 5
 
     def method(self, a: float, b: float):
-        c = stl.Math.pow(a, b)
-        x = None
+        # c = stl.Math.pow(a, b)
+        # x = None
+        e: typing.Union[int, Undefined] = undefined
         if a > 10:
             d = 5 
+            e = 4
         else:
             d = 3
-        for j in range(10):
-            d += 1
-        return add(d, 3 + self.val), c + typing.cast(int, x)
+        # for j in range(10):
+        #     d += 1
+        # return add(d, 3 + self.val), c + typing.cast(int, x)
 
 if __name__ == "__main__":
     # pflast, run_scope = parse_expr_to_df_ast("Math().sin(2)")
@@ -103,6 +106,7 @@ if __name__ == "__main__":
     # breakpoint()
     lib2 = pfl.parse_func_to_pfl_library(aa, parse_cfg=pfl.PFLParseConfig(allow_kw=True))
     print(pfl.unparse_pfl_ast(lib2.get_compiled_unit_specs(aa)[0]))
+    rich.print(pfl.ast_dump(lib2.get_compiled_unit_specs(aa)[0]))
 
     # for k, v in all_compiled.items():
     #     print(k, v.ret_st)

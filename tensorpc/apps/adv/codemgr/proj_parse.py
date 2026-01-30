@@ -9,7 +9,7 @@ from tensorpc.apps.adv.logger import ADV_LOGGER
 import dataclasses as dataclasses_plain
 
 from tensorpc.apps.adv.codemgr import markers as adv_markers
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVFlowModel, ADVNodeModel, ADVNodeType, ADVProject, ADVRoot, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVFlowModel, ADVNodeModel, ADVNodeRefInfo, ADVNodeType, ADVProject, ADVRoot, InlineCode
 from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.funcid import ast_constant_expr_to_value
 from tensorpc.dock.components.flowui import XYPosition
@@ -319,6 +319,11 @@ class ADVProjectParser:
             node_id = desc.marker.kwargs["node_id"]
             ref_node_id = desc.marker.kwargs.get("ref_node_id", None)
             ref_import_path = desc.marker.kwargs.get("ref_import_path", None)
+            ref: Optional[ADVNodeRefInfo] = None
+            if ref_node_id is not None:
+                if ref_import_path is None:
+                    raise ValueError("ref_import_path must be provided when ref_node_id is provided.")
+                ref = ADVNodeRefInfo(ref_node_id, ref_import_path)
             # TODO parse flow node from import path?
             adv_node = ADVNodeModel(
                 id=node_id, 
@@ -326,8 +331,7 @@ class ADVProjectParser:
                 nType=ADVNodeType.GLOBAL_SCRIPT.value,
                 name=desc.marker.kwargs["name"],
                 impl=InlineCode("\n".join(desc.code_lines)) if ref_node_id is None else None,
-                ref_node_id=ref_node_id,
-                ref_import_path=ref_import_path,
+                ref=ref,
             )
             node_id_to_node[node_id] = adv_node
         for desc in flow_desc.out_indicator_descs:
@@ -432,24 +436,28 @@ class ADVProjectParser:
             node_id_to_node[node_id] = adv_node
 
         ref_node_desc_dict: dict[str, ADVNodeModel] = {}
-        ref_node_name_to_imports: dict[str, RefImportDesc] = {}
+        import_name_to_desc: dict[str, RefImportDesc] = {}
         for import_desc in flow_desc.ref_import_descs:
-            ref_node_name_to_imports[import_desc.name if import_desc.asname is None else import_desc.asname] = import_desc
+            import_name_to_desc[import_desc.name if import_desc.asname is None else import_desc.asname] = import_desc
         for desc in flow_desc.ref_node_descs:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
-            ref_node_id = desc.marker.kwargs.get("ref_node_id", None)
+            ref_node_id = desc.marker.kwargs["ref_node_id"]
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
             alias_map = desc.marker.kwargs.get("alias_map", "")
 
-            ref_node_name_node = desc.marker.marker_node.args[0]
+            ref_node_qname_node = desc.marker.marker_node.args[0]
             ref_node_ntype_node = desc.marker.marker_node.args[1]
-
-            assert isinstance(ref_node_name_node, ast.Name)
+            if isinstance(ref_node_qname_node, ast.Name):
+                import_name = ref_node_qname_node.id
+            else:
+                assert isinstance(ref_node_qname_node, ast.Attribute)
+                assert isinstance(ref_node_qname_node.value, ast.Name)
+                import_name =  ref_node_qname_node.value.id
+            assert isinstance(ref_node_qname_node, ast.Name)
             ref_node_ntype = ast_constant_expr_to_value(ref_node_ntype_node)
             assert isinstance(ref_node_ntype, int)
-            ref_node_name = ref_node_name_node.id
-            import_desc = ref_node_name_to_imports[ref_node_name]
+            import_desc = import_name_to_desc[import_name]
             # build import path of ref node
             # for non-subflow ref imports, it already contains full import path.
             # so no need to deal with level.
@@ -463,16 +471,15 @@ class ADVProjectParser:
             if is_inlineflow:
                 assert len(ref_import_path) > 0
                 ref_import_path = ref_import_path[:-1]
-
+            ref = ADVNodeRefInfo(ref_node_id, ref_import_path)
             # TODO parse flow node from import path?
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
                 nType=ref_node_ntype,
-                ref_node_id=ref_node_id,
+                ref=ref,
                 inlinesf_name=inlineflow_name,
                 alias_map=alias_map,
-                ref_import_path=ref_import_path,
                 name=ref_alias,
             )
             ref_node_desc_dict[node_id] = adv_node
@@ -493,14 +500,14 @@ class ADVProjectParser:
                     real_meta = RefNodeMeta(*arg_values)
                     if real_meta.id not in ref_node_desc_dict:
                         # local ref.
+                        ref = ADVNodeRefInfo(real_meta.ref_node_id, path_with_node_name)
                         adv_node = ADVNodeModel(
                             id=real_meta.id, 
                             position=XYPosition(x=real_meta.position[0], y=real_meta.position[1]),
                             nType=ADVNodeType.FRAGMENT.value,
-                            ref_node_id=real_meta.ref_node_id,
+                            ref=ref,
                             inlinesf_name=inline_flow_desc.name,
                             alias_map=real_meta.alias_map,
-                            ref_import_path=path_with_node_name,
                         )
                         ref_node_desc_dict[real_meta.id] = adv_node
         

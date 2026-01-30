@@ -1,7 +1,8 @@
+from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components.mui.editor import MonacoRange
-from tensorpc.apps.adv.model import ADVHandleFlags, ADVNodeHandle, ADVNodeModel
-from typing import Any, Optional, Self, Union
+from tensorpc.apps.adv.model import ADVHandleFlags, ADVNodeFlags, ADVNodeHandle, ADVNodeModel, ADVNodeType
+from typing import Any, Optional, Self, TypeVar, Union
 import abc 
 
 
@@ -46,11 +47,11 @@ class BaseParseResult:
             f'node_id="{id_str}"',
             f'position={position_tuple}',
         ]
-        if node.ref_node_id is not None:
-            res.append(f'ref_node_id="{node.ref_node_id}"')
+        if node.ref is not None:
+            res.append(f'ref_node_id="{node.ref.node_id}"')
         return res
 
-    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]) -> ImplCodeSpec:
+    def to_code_lines(self) -> ImplCodeSpec:
         raise NotImplementedError
 
     def get_global_loc(self) -> ImplCodeSpec:
@@ -86,8 +87,13 @@ class BackendHandle:
         return self.handle.id
 
     def copy(self, node_id: Optional[str] = None, offset: Optional[int] = None, is_sym_handle: bool = False, prefix: Optional[str] = None) -> Self:
-        if node_id is None:
-            node_id = self.handle.source_node_id
+        source_info = self.handle.source_info
+        if node_id is not None:
+            assert source_info is not None
+            source_info = dataclasses.replace(
+                source_info,
+                node_id=node_id,
+            )
         if offset is None:
             offset = 0
         new_id = self.handle.id
@@ -97,7 +103,7 @@ class BackendHandle:
         new_handle = dataclasses.replace(
             self.handle,
             id=new_id,
-            source_node_id=node_id,
+            source_info=source_info,
         )
         if is_sym_handle:
             new_handle.flags |= int(ADVHandleFlags.IS_SYM_HANDLE)
@@ -120,6 +126,10 @@ class BackendHandle:
             handle=new_handle,
         )
 
+    @property 
+    def is_method_self(self) -> bool:
+        return self.handle.flags & ADVHandleFlags.IS_METHOD_SELF != 0
+
 @dataclasses.dataclass 
 class BaseNodeCodeMeta:
     id: str 
@@ -137,4 +147,188 @@ class RefNodeMeta:
 
 class BaseParser:
     pass 
+
+_T = TypeVar("_T", bound=BaseParseResult)
+
+@dataclasses.dataclass
+class NodePrepResult:
+    node: ADVNodeModel
+    node_def: ADVNodeModel
+    node_def_parent: Optional[ADVNodeModel]
+
+    parse_res: Optional[BaseParseResult] = None
+    is_local_ref: bool = False
+    is_subflow_def: bool = False
+    # whether node def parent is folder
+    is_parent_folder: bool = False
+    is_ext_node: bool = False
+    is_node_def_folder: bool = False
+
+    # @property 
+    # def is_ext_node(self):
+    #     return self.ext_parse_res is not None
+
+    # @property 
+    # def is_node_def_folder(self):
+    #     return isinstance(self.parse_res, FlowParseResult) and self.parse_res.has_subflow
+    @property 
+    def id(self):
+        return self.node.id
+
+    @property 
+    def is_class_node(self):
+        return self.node.nType == ADVNodeType.CLASS
+
+    @property 
+    def is_method_def(self):
+        return self.node.is_method() and self.node.ref is None
+
+    def get_def_qualname(self) -> str:
+        node_def = self.node_def
+        node_def_parent = self.node_def_parent
+        if node_def_parent is None:
+            return node_def.name 
+        else:
+            if (node_def.flags & ADVNodeFlags.IS_METHOD) or (node_def.flags & ADVNodeFlags.IS_CLASSMETHOD):
+                return f"{node_def_parent.name}.{node_def.name}"
+            else:
+                return node_def.name
+
+    def get_parse_res_checked(self, cls_type: type[_T]) -> _T:
+        assert isinstance(self.parse_res, cls_type), f"parse_res must be {cls_type} in node {self.node.id}."
+        return self.parse_res
+
+    def get_qualname_from_import(self) -> str:
+        def_qname = self.get_def_qualname()
+        node_def = self.node_def
+        if (node_def.flags & ADVNodeFlags.IS_METHOD) or (node_def.flags & ADVNodeFlags.IS_CLASSMETHOD):
+            # methods and ctors don't support alias
+            return def_qname
+        node = self.node
+        res = node.name
+        if node.ref is not None:
+            res = self.node_def.name
+            if node.name != self.node_def.name and node.name != "":
+                # alias
+                res = node.name
+        return res
+
+    def get_name_may_alias(self):
+        node = self.node
+        res = node.name
+        node_def = self.node_def
+
+        if (node_def.flags & ADVNodeFlags.IS_METHOD) or (node_def.flags & ADVNodeFlags.IS_CLASSMETHOD):
+            # methods and ctors don't support alias
+            return res
+        if node.ref is not None:
+            res = self.node_def.name
+            if node.name != self.node_def.name and node.name != "":
+                # alias
+                res = node.name
+        return res
+
+    def get_import_stmt(self, dot_prefix: str) -> Optional[str]:
+        node_desc = self
+        node = node_desc.node
+        if node.ref is not None:
+            ref_import_path = node.ref.import_path
+            assert ref_import_path is not None 
+            if node_desc.is_node_def_folder:
+                ref_import_path = ref_import_path + [TENSORPC_ADV_FOLDER_FLOW_NAME]
+            elif node_desc.node_def.flow is not None:
+                # inline flow node or class
+                flow_node_name = node_desc.node_def.name
+                ref_import_path = ref_import_path + [flow_node_name]
+            if node_desc.node_def.flags & ADVNodeFlags.IS_METHOD:
+                assert node_desc.node_def_parent is not None 
+                cls_name = node_desc.node_def_parent.name
+                import_stmt = f"from {dot_prefix}{'.'.join(ref_import_path)} import {cls_name}"
+            else:
+                import_stmt = f"from {dot_prefix}{'.'.join(ref_import_path)} import {node_desc.node_def.name}"
+
+                if node.name != "":
+                    import_stmt += f" as {node.name}"
+            return import_stmt
+        else:
+            assert node_desc.is_subflow_def
+            # is subflow def node
+            assert node.flow is not None, "only ref node or subflow node can be external node"
+            if node.inlinesf_name is not None:
+                if node_desc.is_node_def_folder:
+                    # we only need to import it when it is used in inline flow.
+                    return f"from .{node.name}.{TENSORPC_ADV_FOLDER_FLOW_NAME} import {node.name}"
+                else:
+                    return f"from .{node.name} import {node.name}"
+        return None 
+
+    def get_func_call_expr(self, input_handles: list[BackendHandle],
+            out_node_handle_to_node: dict[tuple[str, str], tuple[ADVNodeModel, BackendHandle]]) -> str:
+        arg_name_parts: list[tuple[str, str]] = []
+        func_name = self.get_name_may_alias()
+        node_desc = self
+        # TODO handle default value
+        self_handle: Optional[BackendHandle] = None
+        if node_desc.node_def.flags & ADVNodeFlags.IS_METHOD:
+            if self.is_method_def:
+                # method def node don't have self handle.
+                if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+                    assert node_desc.node_def_parent is not None # class node
+                    func_call_str = node_desc.node_def_parent.name
+                else:
+                    func_call_str = f"self.{func_name}"
+            else:
+                self_handle = input_handles[0]
+                input_handles = input_handles[1:]
+                if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+                    assert node_desc.node_def_parent is not None # class node
+                    func_call_str = node_desc.node_def_parent.name
+                else:    
+                    if self_handle.handle.source_info is None:
+                        func_call_str = f"(ADV.MISSING).{func_name}"
+                    else:
+                        source_nid = self_handle.handle.source_info.node_id
+                        source_hid = self_handle.handle.source_info.handle_id
+                        source_handle = out_node_handle_to_node[(source_nid, source_hid)][1]
+                        func_call_str = f"{source_handle.handle.name}.{func_name}"
+        else:
+            func_call_str = node_desc.get_qualname_from_import()
+
+        use_kwarg = False
+        # always use kwarg for init fn and class node (init or dataclass)
+        if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+            use_kwarg = True 
+        if node_desc.node_def.nType == ADVNodeType.CLASS:
+            use_kwarg = True
+        for h in input_handles:
+            arg_name = h.handle.name
+            if h.handle.source_info is None:
+                arg_name_parts.append((arg_name, "ADV.MISSING"))
+            else:
+                source_nid = h.handle.source_info.node_id
+                source_hid = h.handle.source_info.handle_id
+                source_handle = out_node_handle_to_node[(source_nid, source_hid)][1]
+                arg_name_parts.append((arg_name, source_handle.handle.name))
+        if use_kwarg:
+            arg_names = ", ".join(f"{x[0]}={x[1]}" for x in arg_name_parts)
+        else:
+            arg_names = ", ".join(x[1] for x in arg_name_parts)
+        return f"{func_call_str}({arg_names})"
+
+    def get_ref_node_meta_anno_str(self):
+        node = self.node
+        node_desc = self
+        anno = ""
+        if node.ref is not None:
+            # use Annotated to attach ref node meta
+            arg_parts = [f"\"{node.id}\"", f"\"{node.ref.node_id}\"", f"({node.position.x}, {node.position.y})"]
+            if node.alias_map != "":
+                arg_parts.append(f"\"{node.alias_map}\"")
+            else:
+                arg_parts.append(f"\"\"")
+            if node_desc.is_local_ref:
+                arg_parts.append(f"True")
+            arg_str = ", ".join(arg_parts)
+            anno = f": Annotated[Any, ADV.RefNodeMeta({arg_str})]" 
+        return anno
 

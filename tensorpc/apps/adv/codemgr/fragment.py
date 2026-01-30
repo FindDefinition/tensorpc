@@ -6,10 +6,11 @@ from tensorpc.apps.adv.logger import ADV_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeFlags, ADVNodeModel, ADVNodeHandle
 import hashlib
 import dataclasses as dataclasses_plain
 from tensorpc.core.funcid import clean_source_code
+from tensorpc.dock.jsonlike import camel_to_snake
 
 @dataclasses.dataclass
 class FragmentInputDesc:
@@ -17,7 +18,7 @@ class FragmentInputDesc:
 
 @dataclasses.dataclass
 class FragmentOutputDesc:
-    type: Literal["single", "tuple", "dict", "none"]
+    type: Literal["single", "tuple", "dict", "none", "self"]
     # symbol to alias
     mapping: dict[str, tuple[str, str]]
 
@@ -29,9 +30,37 @@ class FragmentParseResult(BaseParseResult):
     func_name: str
     input_handles: list[BackendHandle]
     output_handles: list[BackendHandle]
-    out_type: Literal["single", "tuple", "dict", "none"]
+    out_type: Literal["single", "tuple", "dict", "none", "self"]
     out_type_anno: str
     alias_map: str
+
+    @staticmethod 
+    def create_self_handle(name: str, is_input: bool = True) -> BackendHandle:
+        flags = ADVHandleFlags.IS_METHOD_SELF
+        handle_id = f"{ADVHandlePrefix.Input}-self" if is_input else f"{ADVHandlePrefix.Output}-self"
+        if is_input:
+            flags |= ADVHandleFlags.IS_INPUT
+        handle = BackendHandle(
+            handle=ADVNodeHandle(
+                id=handle_id,
+                name=name,
+                type="Self",
+                flags=int(flags),
+            ),
+            index=-1,
+        )
+        return handle
+
+    def add_self_handle(self) -> Self:
+        assert self.node is not None and self.node.flags & ADVNodeFlags.IS_METHOD
+        if len(self.input_handles) > 0:
+            assert not self.input_handles[0].handle.is_method_self(), "self handle already exists"
+        self_handle = self.create_self_handle("self", is_input=True)
+        new_input_handles: list[BackendHandle] = [self_handle] + self.input_handles
+        return dataclasses.replace(
+            self,
+            input_handles=new_input_handles,
+        )
 
     def copy(self, node_id: str) -> Self:
         new_output_handles: list[BackendHandle] = []
@@ -42,8 +71,7 @@ class FragmentParseResult(BaseParseResult):
         new_input_handles: list[BackendHandle] = []
         for h in self.input_handles:
             new_h = h.copy()
-            new_h.handle.source_node_id = None
-            new_h.handle.source_handle_id = None
+            new_h.handle.source_info = None
             new_input_handles.append(new_h)
         return dataclasses.replace(
             self,
@@ -76,16 +104,16 @@ class FragmentParseResult(BaseParseResult):
             lines.append(f"    {line}")
         return lines
 
-    def to_code_lines(self, id_to_parse_res: dict[str, "BaseParseResult"]):
+    def to_code_lines(self):
         assert self.node is not None 
         kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
-        if self.node.alias_map is not None:
+        if self.node.alias_map != "":
             kwarg_str += f', alias_map="{self.node.alias_map}"'
         if self.node.inlinesf_name is not None:
             kwarg_str += f', inlineflow_name="{self.node.inlinesf_name}"'
         decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
         # for fragment ref, we use inline Annotated instead of decorator
-        if self.node.ref_node_id is not None:
+        if self.node.ref is not None:
             return ImplCodeSpec([
                 f"{decorator}({self.func_name})",
             ], -1, -1, 1, -1)
@@ -98,13 +126,23 @@ class FragmentParseResult(BaseParseResult):
             # TODO class support 
             lines = [
                 f"@{decorator}",
-                f"def {self.func_name}(",
             ]
+            if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
+                lines.append(f"@classmethod")
+            lines.append(f"def {self.func_name}(",)
+            if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
+                # add cls
+                lines.append("    cls,")
+            elif self.node.flags & (ADVNodeFlags.IS_METHOD):
+                # add self
+                lines.append("    self,")
             lines += self.get_signature_lines_from_handles(self.input_handles)
             lines.append(f") -> {self.out_type_anno}:")
             line_offset = len(lines)
             code_lines_indented = [f"    {line}" for line in code_lines]
             lines.extend(code_lines_indented)
+            if self.node.flags & ADVNodeFlags.IS_METHOD:
+                lines = [f"    {line}" for line in lines]
             end_column = len(code_lines_indented[-1]) + 1
             return ImplCodeSpec(lines, line_offset, 1, len(code_lines_indented), end_column)
 
@@ -125,6 +163,46 @@ class FragmentParseResult(BaseParseResult):
                 return True
                 
         return False
+
+    def create_init_fn_lines_if_auto_field(self):
+        assert self.node is not None 
+        assert self.node.is_auto_field_fn()
+        lines: list[str] = []
+        input_handles = self.input_handles
+        # generate init fn from auto field fn, no decorator required.
+        lines.append(f"def __init__(",)
+        lines.append("    self,")
+        for bh in input_handles:
+            var_name = bh.handle.name
+            type_str = bh.handle.type
+            default_str = ""
+            if bh.handle.default is not None:
+                default_str = f" = {bh.handle.default}"
+            lines.append(f"    {var_name}: {type_str}{default_str},")
+        lines.append("):")
+        body_lines: list[str] = []
+        for bh in input_handles:
+            var_name = bh.handle.name
+            body_lines.append(f"    self.{var_name} = {var_name}")
+        if not body_lines:
+            body_lines.append("    pass")
+        lines.extend(body_lines)
+        return lines 
+
+    def create_field_lines_if_auto_field(self):
+        assert self.node is not None 
+        assert self.node.is_auto_field_fn()
+        lines: list[str] = []
+        input_handles = self.input_handles
+
+        for bh in input_handles:
+            var_name = bh.handle.name
+            type_str = bh.handle.type
+            default_str = ""
+            if bh.handle.default is not None:
+                default_str = f" = {bh.handle.default}"
+            lines.append(f"    {var_name}: {type_str}{default_str}")
+        return lines
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:
@@ -334,7 +412,7 @@ class _ExtractSymbolFromFragment:
                     self._assigned_symbols[name] = scope[name]
                     scope.pop(name)
 
-    def parse_block(self, body: list[ast.stmt], scope: dict[str, Any]):
+    def parse_block(self, body: list[ast.stmt], scope: dict[str, Any], node_flags: int):
         for stmt in body:
             if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
                 if isinstance(stmt, ast.Assign):
@@ -344,6 +422,14 @@ class _ExtractSymbolFromFragment:
                 for target in targets:
                     if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
                         # name is overrided by local assign, ignore this symbol.
+                        if node_flags & ADVNodeFlags.IS_METHOD:
+                            # ignore self
+                            if target.id == "self":
+                                continue
+                        elif node_flags & ADVNodeFlags.IS_CLASSMETHOD:
+                            # ignore cls
+                            if target.id == "cls":
+                                continue
                         if target.id in scope:
                             scope.pop(target.id)
                 if stmt.value is not None:
@@ -366,7 +452,7 @@ class FragmentParser(BaseParser):
     def __init__(self):
         self._cache : Optional[_FragmentPrepCache] = None
     
-    def _cached_parse_output_desc(self, code: str) -> _FragmentPrepCache:
+    def _cached_parse_output_desc(self, code: str, node_flags: int) -> _FragmentPrepCache:
         lines = code.splitlines()
         assert len(lines) > 0
         code_for_compare = "\n".join(clean_source_code(lines))
@@ -397,6 +483,7 @@ class FragmentParser(BaseParser):
             end_column=len(lines[-1]) + 1,
             num_lines=len(lines),
         )
+        self._cache = cache
         return cache
 
     def _cached_parse_ast(self, code: str) -> ast.Module:
@@ -426,33 +513,67 @@ class FragmentParser(BaseParser):
         return backend_handle 
 
     def parse_fragment(self, node: ADVNodeModel, code: str, global_scope: dict[str, Any], cur_scope: dict[str, BackendHandle],
-            ):
+            parent_node: Optional[ADVNodeModel]):
         node_id = node.id
         # TODO check input symbol, currently we only support output handle error check.
-        prep_cache = self._cached_parse_output_desc(code)
+        prep_cache = self._cached_parse_output_desc(code, node.flags)
         tree = prep_cache.tree
         output_desc = prep_cache.output_desc
         local_scope = cur_scope.copy()
         symbol_extractor = _ExtractSymbolFromFragment()
-        symbol_extractor.parse_block(tree.body, local_scope)
+        symbol_extractor.parse_block(tree.body, local_scope, node.flags)
         name_to_sym = symbol_extractor._assigned_symbols
         
         output_handles: list[BackendHandle] = []
         succeed = True
-        for dict_key, (sym_name, alias) in output_desc.mapping.items():
-            if sym_name not in cur_scope:
-                ADV_LOGGER.error(f"Output symbol {sym_name} not found in global sym scope")
-                sym_handle = self._create_error_handle(sym_name, is_input=False)
-                succeed = False
-            else: 
-                sym_handle = cur_scope[sym_name].copy()
-                sym_handle.handle.source_node_id = node_id
-                sym_handle.handle.source_handle_id = sym_handle.handle.id
-                sym_handle.handle.name = alias
-                if output_desc.type == "dict":
-                    sym_handle.handle.dict_key = dict_key
-            output_handles.append(sym_handle)
+        if node.flags & ADVNodeFlags.IS_INIT_FN:
+            output_desc = FragmentOutputDesc(
+                type="none",
+                mapping={},
+            )
+        elif node.flags & ADVNodeFlags.IS_CLASSMETHOD:
+            assert parent_node is not None 
+            default_name = camel_to_snake(parent_node.name)
+            default_cls_output_desc = FragmentOutputDesc(
+                type="self",
+                mapping={
+                    "": (default_name, default_name),
+                },
+            )
+            if output_desc.type == "none":
+                output_desc = default_cls_output_desc
+                # generate a default name
+            elif output_desc.type != "single" or len(output_desc.mapping) != 1:
+                ADV_LOGGER.error(f"desc in classmethod must be single")
+                output_desc = default_cls_output_desc
+            else:
+                key, value = next(iter(output_desc.mapping.items()))
+                if key != value:
+                    ADV_LOGGER.error(f"key/value of desc mapping in classmethod must be same")
+                    output_desc = default_cls_output_desc
+
+        if node.flags & ADVNodeFlags.IS_CLASSMETHOD:
+            key, value = next(iter(output_desc.mapping.items()))
+            sym_handle = FragmentParseResult.create_self_handle(key, is_input=False)
+            sym_handle.handle.set_source_info_inplace(node_id, sym_handle.handle.id)
+            output_handles = [
+                sym_handle
+            ]
+        else:
+            for dict_key, (sym_name, alias) in output_desc.mapping.items():
+                if sym_name not in cur_scope:
+                    ADV_LOGGER.error(f"Output symbol {sym_name} not found in global sym scope")
+                    sym_handle = self._create_error_handle(sym_name, is_input=False)
+                    succeed = False
+                else: 
+                    sym_handle = cur_scope[sym_name].copy()
+                    sym_handle.handle.set_source_info_inplace(node_id, sym_handle.handle.id)
+                    sym_handle.handle.name = alias
+                    if output_desc.type == "dict":
+                        sym_handle.handle.dict_key = dict_key
+                output_handles.append(sym_handle)
         input_handles: list[BackendHandle] = []
+        # WARNING: for method def flow, we ignore self. but we add them in ref nodes (except local ref).
         for sym_name, sym_handle in name_to_sym.items():
             sym_handle.target_node_handle_id.add((node_id, sym_handle.handle.id))
             sym_handle = sym_handle.copy(prefix=ADVHandlePrefix.Input)
@@ -466,6 +587,8 @@ class FragmentParser(BaseParser):
             out_type_anno = f"tuple[{', '.join([h.handle.type for h in output_handles])}]"
         elif output_desc.type == "none":
             out_type_anno = "None"
+        elif output_desc.type == "self":
+            out_type_anno = "Self"
         else:
             out_type_anno = f"dict[str, Any]"
         return FragmentParseResult(

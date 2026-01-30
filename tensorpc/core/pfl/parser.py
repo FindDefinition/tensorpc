@@ -355,7 +355,6 @@ class MapAstNodeToConstant(ast.NodeVisitor):
         # TODO block nesetd function def support
         parts, parts_node, name_found, is_external_name = self._extract_attr_chain(
             node)
-        
         if not name_found or not is_external_name:
             return self.generic_visit(node)
 
@@ -380,7 +379,6 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 else:
                     return self.generic_visit(node)
         cur_obj_is_cls_or_fn = inspect.isclass(cur_obj) or inspect.isfunction(cur_obj) or inspect.ismodule(cur_obj)
-
         cur_is_std = cur_obj_is_cls_or_fn and (cur_obj,
                       self.backend) in STD_REGISTRY._type_backend_to_item
         if has_std_parent and not cur_is_std:
@@ -1642,6 +1640,7 @@ class PFLParser:
             first_arg = func_node.args.args[0] if func_node.args.args else None
             assert first_arg is not None
             fn_globals[first_arg.arg] = req.bound_self
+            global_nonlocal_names.add(first_arg.arg)
         # find funcdef
         transformer = MapAstNodeToConstant(
             fn_globals,

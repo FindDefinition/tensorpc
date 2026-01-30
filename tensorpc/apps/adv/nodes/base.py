@@ -72,11 +72,14 @@ class IONodeWrapper(BaseNodeWrapper):
                  children: Optional[mui.LayoutType] = None,
                  child_overflow: Optional[mui.OverflowType] = None):
         get_node_fn = partial(ADVRoot.get_node_frontend_props, node_gid=node_gid)
-        header = mui.Typography("").prop(variant="body2", flex=1)
+        header = mui.Typography("").prop(variant="body2", flex=1, 
+            enableTooltipWhenOverflow=True, paddingLeft="2px", paddingRight="2px")
         # header.bind_fields(value=node_model_draft.node.name)
 
         header.bind_pfl_query(dm, 
-            value=(get_node_fn, "header"))
+            value=(get_node_fn, "header"),
+            color=(get_node_fn, "headerColor"),
+        )
         icon = mui.Icon(mui.IconType.Add).prop(iconSize="small")
         icon_container = mui.Fragment([
             icon

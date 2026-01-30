@@ -5,7 +5,7 @@ from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import flowui
 
 from typing import Callable, Coroutine, Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeFlags, ADVNodeHandle, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 
 def _get_simple_flow(name: str, op: Literal["+", "-", "*", "/"], sym_import_path: list[str]):
     fragment = f"""
@@ -27,8 +27,7 @@ return a {op} b
             id="sym_def", 
             nType=ADVNodeType.SYMBOLS,
             position=flowui.XYPosition(0, 0), 
-            ref_node_id="sym_def",
-            ref_import_path=sym_import_path,
+            ref=ADVNodeRefInfo("sym_def", sym_import_path),
         ),
         "func": ADVNodeModel(
             id="func", 
@@ -55,6 +54,56 @@ return a {op} b
             )
         })
 
+def _get_simple_class_node(sym_import_path: list[str]):
+    fragment = f"""
+ADV.mark_outputs("c")
+return a + b + self.a
+    """
+    fragment_init = f"""
+self.a = a
+    """
+
+    return ADVFlowModel(nodes={
+        "sym_def": ADVNodeModel(
+            id="sym_def", 
+            nType=ADVNodeType.SYMBOLS,
+            position=flowui.XYPosition(0, 0), 
+            ref=ADVNodeRefInfo("sym_def", sym_import_path),
+        ),
+        "add_method": ADVNodeModel(
+            id="add_method", 
+            nType=ADVNodeType.FRAGMENT,
+            position=flowui.XYPosition(200, 0), 
+            name=f"add_method",
+            inlinesf_name="inline_flow_0",
+            impl=InlineCode(fragment),
+            flags=int(ADVNodeFlags.IS_METHOD),
+        ),
+        "o0": ADVNodeModel(
+            id="o0", 
+            nType=ADVNodeType.OUT_INDICATOR,
+            position=flowui.XYPosition(400, 0), 
+            name="",
+        ),
+        "__init__": ADVNodeModel(
+            id="__init__", 
+            nType=ADVNodeType.FRAGMENT,
+            position=flowui.XYPosition(600, 0), 
+            name=f"__init__",
+            # inlinesf_name=name,
+            impl=InlineCode(fragment_init),
+            flags=int(ADVNodeFlags.IS_METHOD | ADVNodeFlags.IS_INIT_FN),
+        ),
+        }, edges={
+            "e0": ADVEdgeModel(
+                id="e0", 
+                source="add_method",
+                sourceHandle=f"{ADVHandlePrefix.Output}-c",
+                target="o0",
+                targetHandle=f"{ADVHandlePrefix.OutIndicator}-outputs",
+                isAutoEdge=False,
+            )
+        })
 
 def get_simple_nested_model():
     global_script_0 = f"""
@@ -136,6 +185,14 @@ return c + a
                 name="mul",
                 flow=_get_simple_flow("mul", "*", ["op_lib", "sym_lib"]),
             ),
+            "ComputeClass": ADVNodeModel(
+                id="ComputeClass", 
+                nType=ADVNodeType.CLASS,
+                position=flowui.XYPosition(800, 0), 
+                name="ComputeClass",
+                flow=_get_simple_class_node(["op_lib", "sym_lib"]),
+            )
+            
         }, edges={})
     )
 
@@ -158,8 +215,7 @@ return c + a
                 position=flowui.XYPosition(200, 0), 
                 name="mul_func",
                 inlinesf_name="nested0",
-                ref_node_id="func",
-                ref_import_path=["op_lib", "mul"],
+                ref=ADVNodeRefInfo("func", ["op_lib", "mul"]),
             ),
             "oic0": ADVNodeModel(
                 id="oic0", 
@@ -243,8 +299,7 @@ return c + a
                 position=flowui.XYPosition(200, 200), 
                 name="add_func",
                 inlinesf_name="inline0",
-                ref_node_id="add",
-                ref_import_path=[],
+                ref=ADVNodeRefInfo("add", []),
                 alias_map="c->C", 
             ),
             "oic0": ADVNodeModel(
@@ -260,8 +315,10 @@ return c + a
                 position=flowui.XYPosition(800, 400), 
                 name="fn_nested",
                 # inlinesf_name="inline0",
-                ref_node_id="mul",
-                ref_import_path=["op_lib"],
+                ref=ADVNodeRefInfo(
+                    "mul", 
+                    ["op_lib"]
+                ),
                 # alias_map="c->C", 
             ),
             # "sub-ref": ADVNodeModel(
