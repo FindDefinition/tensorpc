@@ -4,6 +4,7 @@ import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, Self, Union, cast
 from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
 from tensorpc.core.annolib import Undefined, undefined
+from tensorpc.core.datamodel import typemetas
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
@@ -27,8 +28,6 @@ class ADVNodeType(enum.IntEnum):
     # to indicate outputs of this flow.
     OUT_INDICATOR = 4
     MARKDOWN = 5
-
-
 
 @dataclasses.dataclass
 class FlowSettings:
@@ -81,8 +80,12 @@ class ADVNodeFlags(enum.IntFlag):
     IS_AUTO_FIELD_FN = enum.auto()
     IS_DOCK_UI_LAYOUT_FN = enum.auto()
     IS_CLASSMETHOD = enum.auto()
+    IS_STATICMETHOD = enum.auto()
     # special flag for inherited fragments.
     IS_INHERITED_NODE = enum.auto()
+    # special flag for inline flow description node
+    # no impl.
+    IS_INLINE_FLOW_DESC = enum.auto()
     # class flags
     IS_DATACLASS = enum.auto()
 
@@ -121,6 +124,16 @@ class ADVNodeRefInfo:
     import_path: list[str]
     fe_path: Optional[list[str]] = None
 
+    def is_equal_to(self, other: Self):
+        return self.node_id == other.node_id and ".".join(self.import_path) == ".".join(other.import_path)
+
+_NAMED_NODE_TYPES = {
+    ADVNodeType.CLASS,
+    ADVNodeType.FRAGMENT,
+    ADVNodeType.SYMBOLS,
+
+}
+
 @dataclasses.dataclass
 class ADVNodeModel(BaseNodeModel):
     # core type
@@ -157,7 +170,10 @@ class ADVNodeModel(BaseNodeModel):
     # external inherits, split by comma
     ext_inherits: Union[str, Undefined] = undefined
     # inherit another class node. only support single inherit.
-    cls_inherit_ref: Union[ADVNodeRefInfo, Undefined] = undefined
+    cls_inherit_ref: Optional[ADVNodeRefInfo] = None
+
+    def is_named_node(self):
+        return self.nType in _NAMED_NODE_TYPES
 
     def is_base_props_equal_to(self, other: Self) -> bool:
         return (self.nType == other.nType and 
@@ -173,13 +189,22 @@ class ADVNodeModel(BaseNodeModel):
         return self.impl.code == other.impl.code
 
     def is_defined_in_class(self):
+        return self.is_defined_in_class_static(self.flags, self.nType)
+
+    @staticmethod
+    def is_defined_in_class_static(flags: int, nType: int):
         # init_fn, ui fn are all method (IS_METHOD set), so no need to check them.
-        is_method = bool(self.flags & int(ADVNodeFlags.IS_METHOD)) or bool(self.flags & int(ADVNodeFlags.IS_CLASSMETHOD))
-        return self.nType == ADVNodeType.FRAGMENT and is_method
+        is_method = bool(flags & int(ADVNodeFlags.IS_METHOD)) or bool(flags & int(ADVNodeFlags.IS_CLASSMETHOD))
+        return nType == ADVNodeType.FRAGMENT and is_method
+
+    def is_inline_flow_desc(self):
+        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INLINE_FLOW_DESC)) != 0
 
     def is_method(self):
-        assert self.nType == ADVNodeType.FRAGMENT
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_METHOD)) != 0
+
+    def is_class_method(self):
+        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_CLASSMETHOD)) != 0
 
     def is_init_fn(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INIT_FN)) != 0
@@ -189,6 +214,9 @@ class ADVNodeModel(BaseNodeModel):
 
     def is_dataclass_node(self):
         return self.nType == ADVNodeType.CLASS and (self.flags & int(ADVNodeFlags.IS_DATACLASS)) != 0
+
+    def is_inherited_node(self):
+        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INHERITED_NODE)) != 0
 
     def get_out_indicator_alias(self):
         assert self.nType == ADVNodeType.OUT_INDICATOR
@@ -212,7 +240,8 @@ class ADVNodeModel(BaseNodeModel):
         return UniqueTreeIdForTree.from_parts(self.cls_inherit_ref.import_path + [self.cls_inherit_ref.node_id]).uid_encoded
 
     def is_local_ref_node(self):
-        assert self.ref is not None
+        if self.ref is None:
+            return False
         return len(self.ref.import_path) == len(self.path) and all(x == y for x, y in zip(self.ref.import_path, self.path))
 
     def get_child_node_paths(self, new_node: Self) -> tuple[list[str], list[str]]:
@@ -521,23 +550,31 @@ class ADVRoot:
         return node, node_is_ref
 
     @mui.DataModel.mark_pfl_func
-    def get_real_node_pair_by_gid(self, node_gid: str) -> tuple[Optional[ADVNodeModel], Optional[ADVNodeModel], bool]:
+    def get_real_node_pair_by_gid(self, node_gid: str) -> tuple[Optional[ADVNodeModel], Optional[ADVNodeModel], Optional[ADVNodeModel], bool]:
         cur_proj = self.adv_projects[self.cur_adv_project]
         node_frontend_path = cur_proj.node_gid_to_frontend_path[node_gid]
         node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
             cur_proj.flow, node_frontend_path)
         node_is_ref = False
         real_node: Optional[ADVNodeModel] = node
+        real_node_parent: Optional[ADVNodeModel] = None
         if node is not None:
-            if node.ref is not None and node.ref.fe_path is not None:
-                real_node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
-                    cur_proj.flow, node.ref.fe_path)
+            ref = node.ref
+            if ref is not None:
+                fe_path = ref.fe_path
+                if fe_path is not None:
+                    real_node: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+                        cur_proj.flow, fe_path)
+                    if len(fe_path) >= 3:
+                        real_node_parent: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+                            cur_proj.flow, fe_path[:-3])
+
                 node_is_ref = True
-        return node, real_node, node_is_ref
+        return node, real_node, real_node_parent, node_is_ref
 
     @mui.DataModel.mark_pfl_query_nested_func
     def get_handle(self, paths: list[Any], node_gid: str) -> dict[str, Any]:
-        node, real_node, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
+        node, real_node, real_node_parent, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
         res: dict[str, Any] = {}
         if node is not None and real_node is not None:
             handle_idx: int = paths[0]
@@ -550,7 +587,6 @@ class ADVRoot:
             is_sym_handle = (handle.flags & ADVHandleFlags.IS_SYM_HANDLE) != 0
             is_error_missing = (handle.flags & ADVHandleFlags.ERROR_IS_MISSING) != 0
             is_self = (handle.flags & ADVHandleFlags.IS_METHOD_SELF) != 0
-            is_cls = (handle.flags & ADVHandleFlags.IS_CLSMETHOD_CLS) != 0
             if handle.dict_key:
                 # we need to show original key if dict output.
                 # otherwise users won't know the real key
@@ -558,7 +594,7 @@ class ADVRoot:
                 name = handle.name + "(" + handle.dict_key + ")"
             else:
                 name = handle.name
-            if is_sym_handle and not is_self and not is_cls:
+            if is_sym_handle and not is_self:
                 name += ": "
                 name += handle.type
             # if real_node_is_ref:
@@ -572,15 +608,65 @@ class ADVRoot:
                 "textAlign": "start" if (is_input or is_sym_handle) else "end",
                 "is_input": is_input,
             }
+            if is_self:
+                res["textColor"] = CodeStyles.VscodeClassColorLight
             if is_error_missing:
                 res["outline"] = "3px solid red"
             if is_input:
                 res["hborder"] = "1px solid #4caf50"
         return res
 
+    def get_tags_from_node(self, node: ADVNodeModel) -> list[dict[str, Any]] :
+        tags: list[dict[str, Any]] = []
+        flags = node.flags 
+        is_method = (flags & ADVNodeFlags.IS_METHOD) != 0
+        is_cls_method = (flags & ADVNodeFlags.IS_CLASSMETHOD) != 0
+        is_static_method = (flags & ADVNodeFlags.IS_STATICMETHOD) != 0
+        is_inherited = (flags & ADVNodeFlags.IS_INHERITED_NODE) != 0
+        if is_method:
+            tags.append({
+                "id": "M",
+                "tooltip": "Method",
+            })
+        elif is_cls_method:
+            tags.append({
+                "id": "CM",
+                "tooltip": "Class Method",
+            })
+        elif is_static_method:
+            tags.append({
+                "id": "SM",
+                "tooltip": "Static Method",
+            })
+        if is_inherited:
+            tags.append({
+                "id": "I",
+                "tooltip": "Inherited Fragment",
+            })
+        return tags
+
+    @mui.DataModel.mark_pfl_query_nested_func
+    def get_tag(self, paths: list[Any], node_gid: str) -> dict[str, Any]:
+        node, real_node, real_node_parent, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
+        res: dict[str, Any] = {}
+        if node is not None and real_node is not None:
+            tag_idx: int = paths[0]
+            # determine number of tags
+            tags = self.get_tags_from_node(real_node)
+            # paths may contains invalid index. see doc of `mark_pfl_query_nested_func`.
+            if tag_idx >= len(tags):
+                return res
+            tag = tags[tag_idx]
+            res = {
+                "id": tag["id"],
+                "label": tag["id"],
+                "tooltip": tag["tooltip"],
+            }
+        return res
+
     @mui.DataModel.mark_pfl_query_func
     def get_node_frontend_props(self, node_gid: str) -> dict[str, Any]:
-        node, real_node, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
+        node, real_node, real_node_parent, real_node_is_ref = self.get_real_node_pair_by_gid(node_gid)
         res: dict[str, Any] = {}
         if real_node is not None and node is not None:
             header = real_node.name
@@ -602,19 +688,41 @@ class ADVRoot:
             elif real_node.nType == ADVNodeType.SYMBOLS:
                 header_color = CodeStyles.VscodeClassColorLight
 
+            tags = self.get_tags_from_node(real_node)
+            is_inline_flow_desc = node.flags & int(ADVNodeFlags.IS_INLINE_FLOW_DESC) != 0
+            is_inline_flow_desc_def = is_inline_flow_desc and not real_node_is_ref
+
+            if is_inline_flow_desc_def:
+                header_color = CodeStyles.VscodeKeywordColorLight
             res = {
                 "id": real_node.id,
                 "header": header,
                 "iconType": icon_type,
                 "isRef": real_node_is_ref,
                 "bottomMsg": "hello world!",
-                "handles": real_node.handles,
-                "isMainFlow": not real_node_is_ref and real_node.inlinesf_name is not None,
+                # method def don't have self, but
+                # method ref have self handle.
+                "handles": node.handles,
+                "tags": tags,
+                "hasTag": len(tags) > 0,
+
                 "headerColor": header_color,
                 # "htype": "target" if is_input else "source",
                 # "hpos": "left" if is_input else "right",
                 # "textAlign": "start" if is_input else "end",
             }
+            if is_inline_flow_desc_def:
+                inlinesf_name = node.name
+                if node.ref is None:
+                    res["headerColor"] = pfl.js.ColorUtil.getPerfettoColor(inlinesf_name).base.cssString
+            else:
+                inlinesf_name = node.inlinesf_name
+            if inlinesf_name is not None:
+                res["ifColor"] = pfl.js.ColorUtil.getPerfettoColor(inlinesf_name).base.cssString
+                res["bottomMsg"] = inlinesf_name
+                if not is_inline_flow_desc_def:
+                    res["isMainFlow"] = True
+
             # output indicator props
             if real_node.nType == ADVNodeType.OUT_INDICATOR:
                 if len(real_node.handles) == 0:
@@ -638,3 +746,9 @@ class ADVRoot:
 @dataclasses.dataclass
 class ADVNewNodeConfig:
     name: str
+
+@dataclasses.dataclass
+class ADVNodeModifyConfig:
+    name: str
+    inline_flow_name: Annotated[str, typemetas.DynamicEnum(alias="Inline Flow Name")]
+    alias_map: Annotated[str, typemetas.CommonObject(alias="Alias Map (e.g. n1->new1,n2->new2)")]

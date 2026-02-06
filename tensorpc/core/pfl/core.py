@@ -27,11 +27,6 @@ from .typedefs import (BoolOpType, BinOpType, CompareType, UnaryOpType)
 
 from .pfl_reg import STD_REGISTRY, StdRegistryItem, register_pfl_std
 
-from tensorpc.utils.rich_logging import get_logger
-if TYPE_CHECKING:
-    from .pfl_ast import PFLFunc
-
-PFL_LOGGER = get_logger("pfl")
 
 _T = TypeVar("_T")
 
@@ -324,7 +319,8 @@ class PFLParseCache:
                           self_type: Optional[AnnotatedType] = None,
                           disable_type_check: bool = False,
                           ext_preproc_res: Optional["PFLProcessedVarMeta"] = None,
-                          external_local_ids: Optional[list[int]] = None) -> "PFLExprInfo":
+                          external_local_ids: Optional[list[int]] = None,
+                          is_compiler_fn: bool = False) -> "PFLExprInfo":
         preproc_res = self._var_preproc(func)
         func = preproc_res.value
         if ext_preproc_res is not None:
@@ -337,7 +333,7 @@ class PFLParseCache:
         if disable_type_check:
             # use (...Any) -> Any sig
             sig = inspect.Signature([varparam_fn("x", Any)], return_annotation=Any)
-            return PFLExprInfo.from_signature(name, sig, raw_func=func)
+            return PFLExprInfo.from_signature(name, sig, raw_func=func, is_compiler_fn=is_compiler_fn)
         else:
             meta: Optional[PFLStdlibFuncMeta] = getattr(func, PFL_STDLIB_FUNC_META_ATTR, None)
             
@@ -357,7 +353,8 @@ class PFLParseCache:
                 delay_parse_args = True 
             res = PFLExprInfo.from_signature(name, sig, is_bound_method=is_bound_method, self_type=self_type, 
                 overload_sigs=overload_sigs, raw_func=func, compilable_meta=compilable_meta,
-                delay_parse_args=delay_parse_args)
+                delay_parse_args=delay_parse_args,
+                is_compiler_fn=is_compiler_fn)
             assert res.func_info is not None
             # generate function uid
             func_uid_base = get_module_id_of_type(func)
@@ -375,7 +372,7 @@ class PFLParseCache:
 
     def cached_parse_std_item(self, item: StdRegistryItem) -> "PFLExprInfo":
         if item.is_func:
-            res = self.cached_parse_func(item.dcls, disable_type_check=item._internal_disable_type_check)
+            res = self.cached_parse_func(item.dcls, disable_type_check=item._internal_disable_type_check, is_compiler_fn=item.is_compiler_fn)
         elif item.is_builtin:
             assert item.mapped is not None
             res = PFLExprInfo.from_annotype(
@@ -695,6 +692,7 @@ class PFLFuncInfoFlag(enum.IntEnum):
     IS_PROPERTY = 1 << 1
     IS_DCLS = 1 << 2
     IS_USER_DCLS = 1 << 3
+    IS_COMPILER_FN = 1 << 4
 
 
 @dataclasses.dataclass(eq=False)
@@ -767,6 +765,17 @@ class PFLExprFuncInfo:
             self.flag |= PFLFuncInfoFlag.IS_USER_DCLS
         else:
             self.flag &= ~PFLFuncInfoFlag.IS_USER_DCLS
+
+    @property
+    def is_compiler_fn(self) -> bool:
+        return (self.flag & PFLFuncInfoFlag.IS_COMPILER_FN) != 0    
+
+    @is_compiler_fn.setter
+    def is_compiler_fn(self, val: bool):
+        if val:
+            self.flag |= PFLFuncInfoFlag.IS_COMPILER_FN
+        else:
+            self.flag &= ~PFLFuncInfoFlag.IS_COMPILER_FN
 
     def __post_init__(self):
         for i, a in enumerate(self.args):
@@ -1153,6 +1162,14 @@ class PFLExprInfo:
     _force_meta_infer: bool = False
     _static_type_infer: Optional[Callable[..., Any]] = None
     _constexpr_data: Union[Undefined, Any] = undefined
+    _ld_st: Union[Undefined, "PFLExprInfo"] = undefined
+
+    def get_load_st(self) -> "PFLExprInfo":
+        # if we encounter if that can remove Optional/Undefined,
+        # we can use ld_st to store the refined type.
+        if not is_undefined(self._ld_st):
+            return self._ld_st
+        return self
 
     @property 
     def has_optional(self) -> bool:
@@ -1441,14 +1458,15 @@ class PFLExprInfo:
 
     @classmethod
     def from_signature(cls,
-                          name: str,
+                       name: str,
                        sig: inspect.Signature,
                        is_bound_method: bool = False,
                        self_type: Optional[AnnotatedType] = None,
                        overload_sigs: Optional[list[inspect.Signature]] = None,
                        raw_func: Optional[Callable] = None,
                        compilable_meta: Optional["PFLCompileFuncMeta"] = None,
-                       delay_parse_args: bool = False) -> Self:
+                       delay_parse_args: bool = False,
+                       is_compiler_fn: bool = False) -> Self:
         res_info = PFLExprFuncInfo.from_signature(name, sig, is_bound_method=is_bound_method, 
             self_type=self_type, overload_sigs=overload_sigs,
             delay_parse_args=delay_parse_args)
@@ -1456,6 +1474,7 @@ class PFLExprInfo:
             res_info.raw_func = raw_func
         if compilable_meta is not None:
             res_info.compilable_meta = compilable_meta
+        res_info.is_compiler_fn = is_compiler_fn
         res = cls(PFLExprType.FUNCTION, func_info=res_info)
         return res
 
@@ -1742,8 +1761,9 @@ class PFLExprInfo:
             annotype = self.annotype
             if annotype is not None:
                 annotype = dataclasses.replace(annotype, is_optional=False)
-            res = dataclasses.replace(self, annotype=annotype)
-            res.has_optional = False
+            load_st = dataclasses.replace(self, annotype=annotype)
+            load_st.has_optional = False
+            res = dataclasses.replace(self, _ld_st=load_st)
             return res
         return self
 
@@ -2055,7 +2075,7 @@ class PFLCompileConstant:
     var_meta: PFLProcessedVarMeta
     is_stdlib: bool = False 
     bound_self: Optional[Any] = None
-
+    is_compiler_fn: bool = False
 
 class PFLCompilableType(enum.IntEnum):
     FUNCTION = 0

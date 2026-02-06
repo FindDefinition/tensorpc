@@ -16,10 +16,10 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.pfl.pfl_reg import STD_REGISTRY
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (PFL_LOGGER, FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
+from .core import (FuncMatchResult, PFLCompileFuncMeta, PFLCompileReq, PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo, PFLExprType, PFLStdlibFuncMeta, PFLMetaInferResult, get_eval_cfg_in_parse_ctx, get_parse_cache_checked,
                    get_parse_context_checked, param_fn, varparam_fn)
 from .typedefs import (BoolOpType, BinOpType, CompareType, UnaryOpType)
-
+from .loggers import PFL_LOGGER
 _PFLTYPE_TO_SUPPORTED_METHODS = {
     PFLExprType.STRING: {
         "startswith":
@@ -419,9 +419,10 @@ class PFLAssign(PFLAstStmt):
     value: PFLExpr
 
     def check_and_infer_type(self):
-        assert self.value.st.is_convertable(
+        load_st = self.value.st.get_load_st()
+        assert load_st.is_convertable(
             self.target.st
-        ), f"{self.value.st} not convertable to {self.target.st}"
+        ), f"{load_st} not convertable to {self.target.st}"
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -432,13 +433,16 @@ class PFLAugAssign(PFLAstStmt):
     compilable_uid: Union[Undefined, str] = undefined
 
     def check_and_infer_type(self):
+        value_load_st = self.value.st.get_load_st()
         resolved_custom_expr = None
         if self.target.st.type == PFLExprType.DATACLASS_OBJECT:
             resolved_custom_expr = self.target
         op_func = None
         is_custom_type = False
         if resolved_custom_expr is not None:
-            dcls_type = resolved_custom_expr.st.get_origin_type_checked()
+            resolved_custom_expr_st = resolved_custom_expr.st
+
+            dcls_type = resolved_custom_expr_st.get_origin_type_checked()
             # use custom operator in left st if found
             op_name = _PFL_AUG_ASSIGN_METHOD_NAME[self.op]
             op_func = inspect.getattr_static(dcls_type, op_name, None)
@@ -449,13 +453,13 @@ class PFLAugAssign(PFLAstStmt):
             assert len(
                 finfo.args
             ) == 2, f"custom operator {op_name} must have one non-self arg, but got {len(finfo.args)}"
-            assert self.value.st.is_convertable(
+            assert value_load_st.is_convertable(
                 finfo.args[1].type
-            ), f"aug assign value {self.value.st} not convertable to {finfo.args[1].type}"
+            ), f"aug assign value {value_load_st} not convertable to {finfo.args[1].type}"
             is_custom_type = True
             custom_res_type = finfo.return_type
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"
-            if not resolved_custom_expr.st.is_stdlib:
+            if not resolved_custom_expr_st.is_stdlib:
                 assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
                 ctx = get_parse_context_checked()
                 creq = ctx.enqueue_func_compile(op_func, finfo, is_method_def=True, self_type=self.target.st)
@@ -463,9 +467,9 @@ class PFLAugAssign(PFLAstStmt):
 
         if not is_custom_type:
             assert self.target.st.support_aug_assign()
-            assert self.value.st.is_convertable(
+            assert value_load_st.is_convertable(
                 self.target.st
-            ), f"{self.value.st} not convertable to {self.target.st}"
+            ), f"{value_load_st} not convertable to {self.target.st}"
 
     def run(self, lfs: Any, rfs: Any) -> Any:
         if self.op == BinOpType.ADD:
@@ -506,9 +510,10 @@ class PFLAnnAssign(PFLAstStmt):
     def check_and_infer_type(self):
         assert isinstance(self.target, PFLName)
         if self.value is not None:
-            assert self.value.st.is_convertable(
+            load_st = self.value.st.get_load_st()
+            assert load_st.is_convertable(
                 self.target.st
-            ), f"{self.value.st} not convertable to {self.target.st}"
+            ), f"{load_st} not convertable to {self.target.st}"
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -550,7 +555,7 @@ class PFLIf(PFLAstStmt):
     # indicate new variables after this if block.
     _new: Union[dict[str, PFLExprInfo], Undefined] = undefined
     def check_and_infer_type(self):
-        test_dtype = self.test.st
+        test_dtype = self.test.st.get_load_st()
         assert test_dtype.can_cast_to_bool(
         ), f"test must be convertable to bool, but got {test_dtype}"
         if not isinstance(self.test, PFLExpr):
@@ -593,20 +598,21 @@ class PFLBoolOp(PFLExpr):
     def check_and_infer_type(self):
         allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
         value_has_unk = False
-        for v in self.values:
-            if _is_unknown_or_any(v.st):
+        value_sts = [v.st.get_load_st() for v in self.values]
+        for vst in value_sts:
+            if _is_unknown_or_any(vst):
                 value_has_unk = True
                 break
-        for v in self.values:
+        for vst in value_sts:
             if not allow_partial or not value_has_unk:
-                assert v.st.support_bool_op()
+                assert vst.support_bool_op()
         self.st = PFLExprInfo(PFLExprType.BOOL)
         # handle exprs such as `a or True`
         if self.op == BoolOpType.OR:
             # if any of the values is True, the result is True
             has_true = False 
-            for v in self.values:
-                if v.st.type == PFLExprType.BOOL and v.st._constexpr_data is True:
+            for vst in value_sts:
+                if vst.type == PFLExprType.BOOL and vst._constexpr_data is True:
                     has_true = True
                     break
             if has_true:
@@ -616,8 +622,8 @@ class PFLBoolOp(PFLExpr):
         if self.op == BoolOpType.AND:
             # if any of the values is False, the result is False
             has_false = False 
-            for v in self.values:
-                if v.st.type == PFLExprType.BOOL and v.st._constexpr_data is False:
+            for vst in value_sts:
+                if vst.type == PFLExprType.BOOL and vst._constexpr_data is False:
                     has_false = True
                     break
             if has_false:
@@ -651,9 +657,10 @@ class PFLUnaryOp(PFLExpr):
 
     def check_and_infer_type(self):
         allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
-        operand_has_unknown = _is_unknown_or_any(self.operand.st)
+        op_st = self.operand.st.get_load_st()
+        operand_has_unknown = _is_unknown_or_any(op_st)
         if not allow_partial:
-            assert not operand_has_unknown, f"unary operand type is unknown: {self.operand.st}"
+            assert not operand_has_unknown, f"unary operand type is unknown: {op_st}"
 
         # overrideable operators
         left = self.operand
@@ -665,13 +672,14 @@ class PFLUnaryOp(PFLExpr):
         op_func = None
         compiled_uid = None
         if resolved_custom_expr is not None:
-            dcls_type = resolved_custom_expr.st.get_origin_type_checked()
+            resolved_custom_expr_st = resolved_custom_expr.st
+            dcls_type = resolved_custom_expr_st.get_origin_type_checked()
             # use custom operator in left st if found
             op_name = _PFL_UNARY_TYPE_TO_METHOD_NAME[self.op]
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             assert op_func is not None, f"can't find {op_name} in custom type {get_qualname_of_type(dcls_type)}"
             op_func_st = get_parse_cache_checked().cached_parse_func(
-                op_func, self_type=self.operand.st.annotype)
+                op_func, self_type=op_st.annotype)
             finfo = op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
@@ -679,30 +687,30 @@ class PFLUnaryOp(PFLExpr):
             is_custom_type = True
             custom_res_type = finfo.return_type
             assert custom_res_type is not None, f"custom operator {op_name} must have return type"
-            if not resolved_custom_expr.st.is_stdlib:
+            if not resolved_custom_expr_st.is_stdlib:
                 assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
                 ctx = get_parse_context_checked()
-                creq = ctx.enqueue_func_compile(op_func, finfo, is_method_def=True, self_type=self.operand.st)
+                creq = ctx.enqueue_func_compile(op_func, finfo, is_method_def=True, self_type=op_st)
                 compiled_uid = creq.get_func_compile_uid()
         if not is_custom_type:
             if allow_partial and operand_has_unknown:
                 # if any operand is unknown, and no custom type, result is unknown
                 self.st = PFLExprInfo(PFLExprType.UNKNOWN)
                 return self
-            self.operand.st.check_support_unary_op("left")
+            op_st.check_support_unary_op("left")
             if self.op == UnaryOpType.NOT:
-                self.st = dataclasses.replace(self.operand.st, type=PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
-            elif (self.op == UnaryOpType.UADD or self.op == UnaryOpType.USUB) and self.operand.st.type == PFLExprType.BOOL:
-                self.st = dataclasses.replace(self.operand.st, type=PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(int))
+                self.st = dataclasses.replace(op_st, type=PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
+            elif (self.op == UnaryOpType.UADD or self.op == UnaryOpType.USUB) and op_st.type == PFLExprType.BOOL:
+                self.st = dataclasses.replace(op_st, type=PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(int))
             else:
-                self.st = dataclasses.replace(self.operand.st)
+                self.st = dataclasses.replace(op_st)
         else:
             assert custom_res_type is not None
             self.st = custom_res_type
         if compiled_uid is not None:
             self.st.compiled_uid = compiled_uid
         if self.operand.is_const:
-            self.st._constexpr_data = self.run(self.operand.st._constexpr_data)
+            self.st._constexpr_data = self.run(op_st._constexpr_data)
         if op_func is not None:
             self._update_std_func_meta(op_func)
         return self
@@ -745,15 +753,18 @@ class PFLIfExp(PFLExpr):
 
     def check_and_infer_type(self):
         allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
-        operands_has_unk = _is_unknown_or_any(self.body.st) or _is_unknown_or_any(self.orelse.st)
+        body_st = self.body.st.get_load_st()
+        orelse_st = self.orelse.st.get_load_st()
+        test_st = self.test.st.get_load_st()
+        operands_has_unk = _is_unknown_or_any(body_st) or _is_unknown_or_any(orelse_st)
         
-        if not allow_partial or not _is_unknown_or_any(self.test.st):
-            assert self.test.st.can_cast_to_bool(
-            ), f"test must be convertable to bool, but got {self.test.st}"
-        res_st = self.body.st
+        if not allow_partial or not _is_unknown_or_any(test_st):
+            assert test_st.can_cast_to_bool(
+            ), f"test must be convertable to bool, but got {test_st}"
+        res_st = body_st
         if not allow_partial or not operands_has_unk:
-            msg = f"body and orelse must be same type, but got {self.body.st} and {self.orelse.st}"
-            res_st = self.body.st._check_equal_type_with_unk_any_type_promption(self.orelse.st, msg) 
+            msg = f"body and orelse must be same type, but got {body_st} and {orelse_st}"
+            res_st = body_st._check_equal_type_with_unk_any_type_promption(orelse_st, msg) 
         if operands_has_unk:
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
         else:
@@ -787,6 +798,8 @@ class PFLBinOpBase(PFLExpr):
         # overrideable operators
         left = self.left
         right = self.right
+        left_st = left.st.get_load_st()
+        right_st = right.st.get_load_st()
         is_custom_type: bool = False
         custom_res_type = None
         resolved_custom_expr = None
@@ -800,8 +813,8 @@ class PFLBinOpBase(PFLExpr):
             op_name = _PFL_BINARY_TYPE_TO_METHOD_NAME[op]
             rop_name = _PFL_BINARY_TYPE_TO_REVERSE_METHOD_NAME[op]
 
-        if left.st.type == PFLExprType.DATACLASS_OBJECT:
-            dcls_type = left.st.get_origin_type_checked()
+        if left_st.type == PFLExprType.DATACLASS_OBJECT:
+            dcls_type = left_st.get_origin_type_checked()
             op_func = inspect.getattr_static(dcls_type, op_name, None)
             if op_func is not None:
                 resolved_custom_expr = left
@@ -815,15 +828,16 @@ class PFLBinOpBase(PFLExpr):
                     resolved_op_func = op_func
                     self.is_right = True
         if resolved_custom_expr is not None:
+            resolved_custom_expr_st = resolved_custom_expr.st
             assert resolved_op_func is not None 
             op_func_st = get_parse_cache_checked().cached_parse_func(
-                resolved_op_func, self_type=resolved_custom_expr.st.annotype)
+                resolved_op_func, self_type=resolved_custom_expr_st.annotype)
             finfo = op_func_st.get_func_info_checked()
-            if not resolved_custom_expr.st.is_stdlib:
+            if not resolved_custom_expr_st.is_stdlib:
                 assert finfo.overloads is None, "custom operator don't support overloads."
                 assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
                 ctx = get_parse_context_checked()
-                creq = ctx.enqueue_func_compile(resolved_op_func, finfo, is_method_def=True, self_type=resolved_custom_expr.st)
+                creq = ctx.enqueue_func_compile(resolved_op_func, finfo, is_method_def=True, self_type=resolved_custom_expr_st)
                 is_custom_type = True
                 custom_res_type = finfo.return_type
                 assert custom_res_type is not None, f"custom operator {op_name} must have return type"
@@ -842,9 +856,9 @@ class PFLBinOpBase(PFLExpr):
                 for i, overload in enumerate(overload_infos):
                     try:
                         if self.is_right == True:
-                            st_to_check = left.st
+                            st_to_check = left_st
                         else:
-                            st_to_check = right.st
+                            st_to_check = right_st
                         st_to_check.check_convertable(overload.args[1].type,
                                             f"custom operator {op_name} overload {overload} arg")
                         if st_to_check.is_equal_type(overload.args[1].type):
@@ -857,7 +871,7 @@ class PFLBinOpBase(PFLExpr):
                         # traceback.print_exc()
                         errors.append(str(e))
                 if not overload_scores:
-                    error_msg = f"func {op_func_st} overloads not match args {[self.left.st, self.right.st]} error:\n"
+                    error_msg = f"func {op_func_st} overloads not match args {[left_st, right_st]} error:\n"
                     for e in errors:
                         error_msg += f"  - {e}\n"
                     print(error_msg)
@@ -896,9 +910,11 @@ class PFLBinOp(PFLBinOpBase):
         is_custom_type, custom_res_type, op_func = self.resolve_custom_type(
             self.op, is_compare=False)
         allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
-        operand_has_unknown = _is_unknown_or_any(self.left.st) or _is_unknown_or_any(self.right.st)
+        left_st = self.left.st.get_load_st()
+        right_st = self.right.st.get_load_st()
+        operand_has_unknown = _is_unknown_or_any(left_st) or _is_unknown_or_any(right_st)
         if not allow_partial:
-            assert not operand_has_unknown, f"left or right type is unknown: {self.left.st}, {self.right.st}"
+            assert not operand_has_unknown, f"left or right type is unknown: {left_st}, {right_st}"
 
         if not is_custom_type:
             if allow_partial and operand_has_unknown:
@@ -908,8 +924,8 @@ class PFLBinOp(PFLBinOpBase):
                 if self.op == BinOpType.DIV:
                     self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=parse_type_may_optional_undefined(float))
                 else:
-                    promotion_type = self.left.st.check_support_binary_op_and_promotion(self.op, self.right.st)
-                    if self.left.st.type == PFLExprType.STRING:
+                    promotion_type = left_st.check_support_binary_op_and_promotion(self.op, right_st)
+                    if left_st.type == PFLExprType.STRING:
                         self.st = PFLExprInfo(PFLExprType.STRING, annotype=parse_type_may_optional_undefined(str))
                     else:
                         self.st = PFLExprInfo(PFLExprType.NUMBER, annotype=promotion_type)
@@ -917,7 +933,7 @@ class PFLBinOp(PFLBinOpBase):
             assert custom_res_type is not None
             self.st = custom_res_type
         if PFLExpr.all_constexpr(self.left, self.right):
-            self.st._constexpr_data = self.run(self.left.st._constexpr_data, self.right.st._constexpr_data)
+            self.st._constexpr_data = self.run(left_st._constexpr_data, right_st._constexpr_data)
         if op_func is not None:
             self._update_std_func_meta(op_func)
         return self
@@ -967,15 +983,17 @@ class PFLCompare(PFLBinOpBase):
 
     def check_and_infer_type(self):
         allow_partial = get_parse_context_checked().cfg.allow_partial_type_infer
-        operand_has_unknown = _is_unknown_or_any(self.left.st) or _is_unknown_or_any(self.right.st)
+        left_st = self.left.st.get_load_st()
+        right_st = self.right.st.get_load_st()
+        operand_has_unknown = _is_unknown_or_any(left_st) or _is_unknown_or_any(right_st)
         if not allow_partial:
-            assert not operand_has_unknown, f"left or right type is unknown: {self.left.st}, {self.right.st}"
+            assert not operand_has_unknown, f"left or right type is unknown: {left_st}, {right_st}"
 
         is_custom_type = False
         if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
             # contains operator don't support custom datatype
-            assert self.left.st.type != PFLExprType.DATACLASS_OBJECT
-            assert self.right.st.type != PFLExprType.DATACLASS_OBJECT
+            assert left_st.type != PFLExprType.DATACLASS_OBJECT
+            assert right_st.type != PFLExprType.DATACLASS_OBJECT
         op_func = None
         custom_type_res = None
         if not (self.op == CompareType.IS or self.op == CompareType.IS_NOT):
@@ -989,15 +1007,15 @@ class PFLCompare(PFLBinOpBase):
                 # handle string-type compares
                 if not allow_partial or not operand_has_unknown:
                     if self.op == CompareType.IN or self.op == CompareType.NOT_IN:
-                        assert self.left.st.type == PFLExprType.STRING and self.right.st.type == PFLExprType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
+                        assert left_st.type == PFLExprType.STRING and right_st.type == PFLExprType.OBJECT, f"left must be string and right must be object, but got {self.left.st.type} and {self.right.st.type}"
                     else:
-                        self.left.st.check_support_compare_op(self.op, self.right.st, "left")
+                        left_st.check_support_compare_op(self.op, right_st, "left")
             self.st = PFLExprInfo(PFLExprType.BOOL, annotype=parse_type_may_optional_undefined(bool))
         else:
             assert custom_type_res is not None 
             self.st = custom_type_res
         if PFLExpr.all_constexpr(self.left, self.right):
-            self.st._constexpr_data = self.run(self.left.st._constexpr_data, self.right.st._constexpr_data)
+            self.st._constexpr_data = self.run(left_st._constexpr_data, right_st._constexpr_data)
         if op_func is not None:
             self._update_std_func_meta(op_func)
         return self
@@ -1084,7 +1102,7 @@ class PFLCall(PFLExpr):
                 assert overload_info.return_type is not None, f"func {self.func} overload {overload_info} must have return type"
                 overloads.append((match_res, overload_info))
             if not overloads:
-                error_msg = f"func {self.func.st} overloads not match args {[a.st for a in self.args]} kws {self.keys}. match errors:\n"
+                error_msg = f"func {self.func.st} overloads not match args {[a.st.get_load_st() for a in self.args]} kws {self.keys}. match errors:\n"
                 for e in match_errors:
                     error_msg += f"  - {e}\n"
                 PFL_LOGGER.error(error_msg)
@@ -1136,7 +1154,7 @@ class PFLCall(PFLExpr):
                 # traceback.print_exc()
                 errors.append(str(e))
         if not overload_scores:
-            error_msg = f"func {self.func.st} overloads not match args {[a.st for a in self.args]} kws {self.keys}. error:\n"
+            error_msg = f"func {self.func.st} overloads not match args {[a.st.get_load_st() for a in self.args]} kws {self.keys}. error:\n"
             for e in errors:
                 error_msg += f"  - {e}\n"
             PFL_LOGGER.error(error_msg)
@@ -1150,11 +1168,11 @@ class PFLCall(PFLExpr):
             kwargs_st = {}
             if self.func.st._static_type_infer is not None:
                 for a in self.args:
-                    args_st.append(a.st)
+                    args_st.append(a.st.get_load_st())
                 if not is_undefined(self.keys):
                     assert not is_undefined(self.vals)
                     for k, v in zip(self.keys, self.vals):
-                        kwargs_st[k] = v.st
+                        kwargs_st[k] = v.st.get_load_st()
 
             if self.func.st._static_type_infer is not None:
                 ret_type = self.func.st._static_type_infer(*args_st, **kwargs_st)
@@ -1170,12 +1188,12 @@ class PFLCall(PFLExpr):
                 if is_const or constexpr_infer is not None:
                     for a in self.args:
                         assert a.is_const, "when you define static type infer, all arguments must be constexpr."
-                        args.append(a.st._constexpr_data)
+                        args.append(a.st.get_load_st()._constexpr_data)
                     if not is_undefined(self.keys):
                         assert not is_undefined(self.vals)
                         for k, v in zip(self.keys, self.vals):
                             assert v.is_const, "when you define static type infer, all arguments must be constexpr."
-                            kwargs[k] = v.st._constexpr_data
+                            kwargs[k] = v.st.get_load_st()._constexpr_data
                 if constexpr_infer is not None:
                     assert constexpr_first_arg is not None 
                     self.st._constexpr_data = constexpr_infer(constexpr_first_arg, *args, **kwargs)
@@ -1225,19 +1243,19 @@ class PFLCall(PFLExpr):
             if not is_undefined(arg_expr):
                 if arg_info.type.type == PFLExprType.GENERIC_TYPE:
                     assert not allow_partial, "typevar substitution don't support partial infer."
-                    self._check_typevar_substitution(arg_expr.st, arg_info.type, res)
+                    self._check_typevar_substitution(arg_expr.st.get_load_st(), arg_info.type, res)
         if match_res.vararg is not None:
             vararg_info = match_res.vararg[0]
             if vararg_info.type.type == PFLExprType.GENERIC_TYPE:
                 assert not allow_partial, "typevar substitution don't support partial infer."
                 for arg_expr in match_res.vararg[1]:
-                    self._check_typevar_substitution(arg_expr.st, vararg_info.type, res)
+                    self._check_typevar_substitution(arg_expr.st.get_load_st(), vararg_info.type, res)
         if match_res.var_kwarg is not None:
             kwarg_info = match_res.var_kwarg[0]
             if kwarg_info.type.type == PFLExprType.GENERIC_TYPE:
                 assert not allow_partial, "typevar substitution don't support partial infer."
                 for _, arg_expr in match_res.var_kwarg[1].items():
-                    self._check_typevar_substitution(arg_expr.st, kwarg_info.type, res)
+                    self._check_typevar_substitution(arg_expr.st.get_load_st(), kwarg_info.type, res)
         return res
 
 
@@ -1246,9 +1264,10 @@ class PFLCall(PFLExpr):
         for arg_info, arg_expr in match_res.args:
             log_prefix = f"func {func_info.name} arg {arg_info.name}"
             if not is_undefined(arg_expr):
-                if not allow_partial or (not _is_unknown_or_any(arg_expr.st)):
-                    arg_expr.st.check_convertable(arg_info.type, log_prefix)
-                    if arg_expr.st.is_equal_type(arg_info.type):
+                arg_expr_st = arg_expr.st.get_load_st()
+                if not allow_partial or (not _is_unknown_or_any(arg_expr_st)):
+                    arg_expr_st.check_convertable(arg_info.type, log_prefix)
+                    if arg_expr_st.is_equal_type(arg_info.type):
                         match_score += 2
                     else:
                         match_score += 1
@@ -1260,9 +1279,10 @@ class PFLCall(PFLExpr):
             vararg_info = match_res.vararg[0]
             log_prefix = f"func {func_info.name} vararg {vararg_info.name}"
             for arg_expr in match_res.vararg[1]:
-                if not allow_partial or (not _is_unknown_or_any(arg_expr.st)):
-                    arg_expr.st.check_convertable(vararg_info.type, log_prefix)
-                    if arg_expr.st.is_equal_type(vararg_info.type):
+                arg_expr_st = arg_expr.st.get_load_st()
+                if not allow_partial or (not _is_unknown_or_any(arg_expr_st)):
+                    arg_expr_st.check_convertable(vararg_info.type, log_prefix)
+                    if arg_expr_st.is_equal_type(vararg_info.type):
                         match_score += 2
                     else:
                         match_score += 1
@@ -1272,9 +1292,10 @@ class PFLCall(PFLExpr):
             kwarg_info = match_res.var_kwarg[0]
             log_prefix = f"func {func_info.name} varkwarg {kwarg_info.name}"
             for _, arg_expr in match_res.var_kwarg[1].items():
-                if not allow_partial or (not _is_unknown_or_any(arg_expr.st)):
-                    arg_expr.st.check_convertable(kwarg_info.type, log_prefix)
-                    if arg_expr.st.is_equal_type(kwarg_info.type):
+                arg_expr_st = arg_expr.st.get_load_st()
+                if not allow_partial or (not _is_unknown_or_any(arg_expr_st)):
+                    arg_expr_st.check_convertable(kwarg_info.type, log_prefix)
+                    if arg_expr_st.is_equal_type(kwarg_info.type):
                         match_score += 2
                     else:
                         match_score += 1
@@ -1416,45 +1437,46 @@ class PFLAttribute(PFLExpr):
     compile_info: _AttrCompileInfo = dataclasses.field(default_factory=_AttrCompileInfo)
 
     def check_and_infer_type(self):
-        if _is_unknown_or_any(self.value.st):
+        value_st = self.value.st.get_load_st()
+        if _is_unknown_or_any(value_st):
             ctx = get_parse_context_checked()
             assert ctx.cfg.allow_partial_type_infer
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
             return 
-        if self.value.st.type == PFLExprType.DATACLASS_TYPE or self.value.st.type == PFLExprType.DATACLASS_OBJECT:
-            if self.value.st.proxy_dcls is not None:
-                assert self.value.st.type == PFLExprType.DATACLASS_TYPE # when proxy cls available, it must be dataclass type
-                field_types = AnnotatedType.get_dataclass_fields_and_annotated_types_static(self.value.st.proxy_dcls)
-                dcls_type = self.value.st.proxy_dcls
+        if value_st.type == PFLExprType.DATACLASS_TYPE or value_st.type == PFLExprType.DATACLASS_OBJECT:
+            if value_st.proxy_dcls is not None:
+                assert value_st.type == PFLExprType.DATACLASS_TYPE # when proxy cls available, it must be dataclass type
+                field_types = AnnotatedType.get_dataclass_fields_and_annotated_types_static(value_st.proxy_dcls)
+                dcls_type = value_st.proxy_dcls
                 field_keys = field_types.keys()
             else:
-                assert self.value.st.annotype is not None, "dataclass must have annotype"
-                assert self.value.st.annotype.is_dataclass_type()
-                assert self.value.st.dcls_info is not None, f"dataclass {self.value.st.annotype} must have dcls_info"
+                assert value_st.annotype is not None, "dataclass must have annotype"
+                assert value_st.annotype.is_dataclass_type()
+                assert value_st.dcls_info is not None, f"dataclass {value_st.annotype} must have dcls_info"
                 # field_types = self.value.st.annotype.get_dataclass_fields_and_annotated_types(
                 # )
                 field_types = {}
-                field_keys = self.value.st.dcls_info._arg_name_to_idx.keys()
+                field_keys = value_st.dcls_info._arg_name_to_idx.keys()
 
-                dcls_type = self.value.st.annotype.origin_type
+                dcls_type = value_st.annotype.origin_type
             if self.attr in field_keys:
-                if self.value.st.proxy_dcls is not None:
+                if value_st.proxy_dcls is not None:
                     field_annotype, field = field_types[self.attr]
                     field_default = field.default
                     new_st = PFLExprInfo.from_annotype(field_annotype,
                                                     is_type=False)
                 else:
-                    assert self.value.st.dcls_info is not None 
-                    field_arg = self.value.st.dcls_info.get_parsed_field(self.attr)
+                    assert value_st.dcls_info is not None 
+                    field_arg = value_st.dcls_info.get_parsed_field(self.attr)
                     field_default = field_arg.default
                     new_st = field_arg.type.shallow_copy()
-                if self.value.st.type == PFLExprType.DATACLASS_TYPE:
+                if value_st.type == PFLExprType.DATACLASS_TYPE:
                     # access constant
                     default = field_default
                     assert default is not dataclasses.MISSING, f"access field {self.attr} by type must have default value, we treat it as constant"
                     new_st._constexpr_data = default
                 else:
-                    if not is_undefined(self.value.st._constexpr_data):
+                    if not is_undefined(value_st._constexpr_data):
                         # check partial constexpr fields, if defined,
                         # only forward these fields.
                         item = STD_REGISTRY.get_item_by_key(dcls_type)
@@ -1462,7 +1484,7 @@ class PFLAttribute(PFLExpr):
                         if item is not None and item.partial_constexpr_fields is not None:
                             should_fwd_constexpr = self.attr in item.partial_constexpr_fields
                         if should_fwd_constexpr:
-                            new_st._constexpr_data = getattr(self.value.st._constexpr_data, self.attr, undefined)
+                            new_st._constexpr_data = getattr(value_st._constexpr_data, self.attr, undefined)
                 # print(self.attr, self.value.st._constexpr_data, new_st._constexpr_data)
                 self.st = new_st
             else:
@@ -1478,13 +1500,13 @@ class PFLAttribute(PFLExpr):
                     is_prop = prep_res.is_property
                     unbound_func = prep_res.value
                     if is_prop:
-                        assert self.value.st.is_stdlib, "don't support @property in user defined dataclass"
+                        assert value_st.is_stdlib, "don't support @property in user defined dataclass"
                     is_method_def = False
-                    if self.value.st.type == PFLExprType.DATACLASS_OBJECT:
+                    if value_st.type == PFLExprType.DATACLASS_OBJECT:
                         # TODO handle classmethod
                         is_method_def = not isinstance(unbound_func, staticmethod)
-                        self_type = self.value.st.annotype
-                        self_st_type = self.value.st
+                        self_type = value_st.annotype
+                        self_st_type = value_st
                     else:
                         self_type = None
                         self_st_type = None
@@ -1492,8 +1514,8 @@ class PFLAttribute(PFLExpr):
                             dcls_type, self.attr
                         ), f"{self.attr} of {dcls_type} must be staticmethod"
                     local_ids = []
-                    if self.value.st.dcls_info is not None:
-                        local_ids = self.value.st.dcls_info._locals_ids
+                    if value_st.dcls_info is not None:
+                        local_ids = value_st.dcls_info._locals_ids
 
                     new_st = get_parse_cache_checked().cached_parse_func(
                         unbound_func, self_type=self_type,
@@ -1510,8 +1532,8 @@ class PFLAttribute(PFLExpr):
                         self.compile_info.property_st = new_st
                     else:
                         self.st = new_st
-                    self.st.is_stdlib = self.value.st.is_stdlib
-                    if not self.value.st.is_stdlib:
+                    self.st.is_stdlib = value_st.is_stdlib
+                    if not value_st.is_stdlib:
                         # template/inline function need to be compiled in Call.
                         ctx = get_parse_context_checked()
                         if not new_finfo.need_delayed_processing():
@@ -1536,17 +1558,17 @@ class PFLAttribute(PFLExpr):
                     else:
                         self._update_std_func_meta(unbound_func)
         else:
-            if self.value.st.type == PFLExprType.OBJECT or self.value.st.type == PFLExprType.ARRAY:
-                annotype = self.value.st.childs[0].annotype
+            if value_st.type == PFLExprType.OBJECT or value_st.type == PFLExprType.ARRAY:
+                annotype = value_st.childs[0].annotype
                 assert annotype is not None and annotype.raw_type is not None 
                 methods = _dftype_with_gen_to_supported_methods(
-                    annotype.raw_type)[self.value.st.type]
-            elif self.value.st.type == PFLExprType.STRING:
-                methods = _PFLTYPE_TO_SUPPORTED_METHODS[self.value.st.type]
+                    annotype.raw_type)[value_st.type]
+            elif value_st.type == PFLExprType.STRING:
+                methods = _PFLTYPE_TO_SUPPORTED_METHODS[value_st.type]
             else:
                 raise ValueError(
-                    f"attr `{self.attr}` is not supported (defined) in type {self.value.st}")
-            assert self.attr in methods, f"not supported attr {self.attr} for type {self.value.st}"
+                    f"attr `{self.attr}` is not supported (defined) in type {value_st}")
+            assert self.attr in methods, f"not supported attr {self.attr} for type {value_st}"
             new_st = PFLExprInfo.from_signature(self.attr, methods[self.attr])
             self.st = new_st
 
@@ -1608,11 +1630,11 @@ class PFLSlice(PFLExpr):
         if not ctx.cfg.allow_partial_type_infer:
             if not is_undefined(self.lo):
                 # TODO ellipsis?
-                assert self.lo.st.type == PFLExprType.NUMBER, f"{self.lo.st.type}"
+                assert self.lo.st.get_load_st().type == PFLExprType.NUMBER, f"{self.lo.st.get_load_st().type}"
             if not is_undefined(self.hi):
-                assert self.hi.st.type == PFLExprType.NUMBER, f"{self.hi.st.type}"
+                assert self.hi.st.get_load_st().type == PFLExprType.NUMBER, f"{self.hi.st.get_load_st().type}"
             if not is_undefined(self.step):
-                assert self.step.st.type == PFLExprType.NUMBER, f"{self.step.st.type}"
+                assert self.step.st.get_load_st().type == PFLExprType.NUMBER, f"{self.step.st.get_load_st().type}"
         self.st = PFLExprInfo(PFLExprType.SLICE, [])
 
     def consteval(self):
@@ -1632,51 +1654,62 @@ class PFLSubscript(PFLExpr):
 
     def check_and_infer_type(self):
         parse_cfg = get_parse_context_checked().cfg
+        value_st = self.value.st.get_load_st()
         allow_partial = parse_cfg.allow_partial_type_infer
-        if _is_unknown_or_any(self.value.st):
+        if _is_unknown_or_any(value_st):
             assert allow_partial, f"{self.value}"
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
             return
         slice_has_unk = False
         if isinstance(self.slice, PFLExpr):
-            if _is_unknown_or_any(self.slice.st):
+            if _is_unknown_or_any(self.slice.st.get_load_st()):
                 slice_has_unk = True
         else:
             for s in self.slice:
-                if _is_unknown_or_any(s.st):
+                if _is_unknown_or_any(s.st.get_load_st()):
                     slice_has_unk = True
         if slice_has_unk and not parse_cfg.allow_partial_in_slice:
             assert allow_partial, f"{self.slice}"
-        assert not self.value.st.is_optional()
-        if self.value.st.type == PFLExprType.ARRAY:
+        assert not value_st.is_optional()
+        if value_st.type == PFLExprType.ARRAY:
+            assert not isinstance(self.slice, Sequence)
+            slice_st = self.slice.st.get_load_st()
+            if not allow_partial or not slice_has_unk:
+                assert slice_st.type == PFLExprType.NUMBER or slice_st.type == PFLExprType.SLICE, f"slice must be number/slice, but got {PFLExprType(slice_st.type).name}"
+            if slice_st.type == PFLExprType.SLICE:
+                self.st = value_st
+            else:
+                self.st = value_st.childs[0]
+        elif value_st.type == PFLExprType.OBJECT:
             assert not isinstance(self.slice, Sequence)
             if not allow_partial or not slice_has_unk:
-                assert self.slice.st.type == PFLExprType.NUMBER, f"slice must be number, but got {self.slice.st.type}"
-            self.st = self.value.st.childs[0]
-        elif self.value.st.type == PFLExprType.OBJECT:
+                slice_st = self.slice.st.get_load_st()
+                assert slice_st.type == PFLExprType.STRING, f"slice must be string, but got {PFLExprType(slice_st.type).name}"
+            self.st = value_st.childs[0]
+        elif value_st.type == PFLExprType.TUPLE:
             assert not isinstance(self.slice, Sequence)
             if not allow_partial or not slice_has_unk:
-                assert self.slice.st.type == PFLExprType.STRING, f"slice must be string, but got {self.slice.st.type}"
-            self.st = self.value.st.childs[0]
-        elif self.value.st.type == PFLExprType.TUPLE:
-            assert not isinstance(self.slice, Sequence)
-            if not allow_partial or not slice_has_unk:
-                if not self.slice.is_const:
-                    assert self.value.st.is_all_child_same(), F"only support subscript tuple when all tuple element has same type, {self.value.st}"
-                    self.st = self.value.st.childs[0]
+                slice_st = self.slice.st.get_load_st()
+                assert slice_st.type == PFLExprType.NUMBER or slice_st.type == PFLExprType.SLICE, f"slice must be number/slice, but got {PFLExprType(slice_st.type).name}"
+                if slice_st.type != PFLExprType.SLICE:
+                    if not self.slice.is_const:
+                        assert value_st.is_all_child_same(), F"only support subscript tuple when all tuple element has same type, {value_st}"
+                        self.st = value_st.childs[0]
+                    else:
+                        success = self.slice.consteval()
+                        assert success, f"slice {self.slice} must be consteval"
+                        self.st = value_st.childs[self.slice.st.get_load_st().metadata_checked]
                 else:
-                    assert self.slice.st.type == PFLExprType.NUMBER, f"slice must be number, but got {self.slice.st.type}"
-                    success = self.slice.consteval()
-                    assert success, f"slice {self.slice} must be consteval"
-                    self.st = self.value.st.childs[self.slice.st.metadata_checked]
+                    self.st = value_st
             else:
                 self.st = PFLExprInfo(PFLExprType.UNKNOWN)
-        elif self.value.st.type == PFLExprType.DATACLASS_OBJECT:
+        elif value_st.type == PFLExprType.DATACLASS_OBJECT:
             if allow_partial and slice_has_unk:
                 self.st = PFLExprInfo(PFLExprType.UNKNOWN)
                 return 
             resolved_custom_expr = self.value
-            dcls_type = resolved_custom_expr.st.get_origin_type_checked()
+            resolved_custom_expr_st = resolved_custom_expr.st.get_load_st()
+            dcls_type = resolved_custom_expr_st.get_origin_type_checked()
             # use custom operator in left st if found
             setitem_op_name = "__setitem__"
             getitem_op_name = "__getitem__"
@@ -1686,21 +1719,21 @@ class PFLSubscript(PFLExpr):
             assert getitem_op_func is not None, f"can't find {getitem_op_name} in custom type {get_qualname_of_type(dcls_type)}. you must define __getitem__ to use subscript"
             ctx = get_parse_context_checked()
             getitem_op_func_st = get_parse_cache_checked().cached_parse_func(
-                getitem_op_func, self_type=self.value.st.annotype)
+                getitem_op_func, self_type=value_st.annotype)
             finfo = getitem_op_func_st.get_func_info_checked()
             assert len(
                 finfo.args
             ) == 2, f"custom operator {getitem_op_name} must have 1 non-self arg, but got {len(finfo.args)}"
             if not isinstance(self.slice, Sequence):
-                self.slice.st.check_convertable(
+                self.slice.st.get_load_st().check_convertable(
                     finfo.args[1].type,
                     f"custom operator {getitem_op_name}|{getitem_op_func_st} arg")
             assert finfo.return_type is not None, f"custom operator {getitem_op_name}|{getitem_op_func_st} must have return type"
             assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
             self.st = finfo.return_type
-            if not resolved_custom_expr.st.is_stdlib:
+            if not resolved_custom_expr_st.is_stdlib:
                 # enqueue compile
-                creq = ctx.enqueue_func_compile(getitem_op_func, finfo, is_method_def=True, self_type=self.value.st)
+                creq = ctx.enqueue_func_compile(getitem_op_func, finfo, is_method_def=True, self_type=value_st)
                 self.st.compiled_uid = creq.get_func_compile_uid()
 
             if self.is_store == True:
@@ -1708,28 +1741,28 @@ class PFLSubscript(PFLExpr):
                 setitem_op_func = inspect.getattr_static(dcls_type, setitem_op_name, None)
                 assert setitem_op_func is not None, f"can't find {setitem_op_name} in custom type {get_qualname_of_type(dcls_type)}."
                 setitem_op_func_st = get_parse_cache_checked().cached_parse_func(
-                    setitem_op_func, self_type=self.value.st.annotype)
+                    setitem_op_func, self_type=value_st.annotype)
                 finfo = setitem_op_func_st.get_func_info_checked()
                 assert not finfo.is_template() and not finfo.is_always_inline(), "custom operator don't support template or inline."
                 assert len(finfo.args) == 3, f"custom operator {setitem_op_name} must have 2 non-self args, but got {len(finfo.args)}"
-                if not resolved_custom_expr.st.is_stdlib:
+                if not resolved_custom_expr_st.is_stdlib:
                     # enqueue compile
-                    creq = ctx.enqueue_func_compile(setitem_op_func, finfo, is_method_def=True, self_type=self.value.st)
+                    creq = ctx.enqueue_func_compile(setitem_op_func, finfo, is_method_def=True, self_type=value_st)
                     self.st.additional_compiled_uid = creq.get_func_compile_uid()
 
                 if not isinstance(self.slice, Sequence):
-                    self.slice.st.check_convertable(
+                    self.slice.st.get_load_st().check_convertable(
                         finfo.args[1].type,
                         f"custom operator {setitem_op_name}|{setitem_op_func_st} arg")
             else:
                 self._update_std_func_meta(getitem_op_func)
 
         else:
-            raise ValueError(f"not support subscript for {self.value.st}")
+            raise ValueError(f"not support subscript for {value_st}")
         if isinstance(self.slice, PFLExpr):
             if PFLExpr.all_constexpr(self.value, self.slice):
-                assert not isinstance(self.value.st._constexpr_data, Undefined)
-                self.st._constexpr_data = self.value.st._constexpr_data[self.slice.st._constexpr_data]
+                assert not isinstance(value_st._constexpr_data, Undefined)
+                self.st._constexpr_data = value_st._constexpr_data[self.slice.st.get_load_st()._constexpr_data]
         return self
 
     def consteval(self):
@@ -1785,19 +1818,21 @@ class PFLArray(PFLExpr):
             return self
         # all elts must be same type
         first_elt = self.elts[0]
-        final_st = first_elt.st
+        first_elt_st = first_elt.st.get_load_st()
+        final_st = first_elt_st
         ctx = get_parse_context_checked()
         for elt in self.elts:
-            if _is_unknown_or_any(elt.st):
+            elt_st = elt.st.get_load_st()
+            if _is_unknown_or_any(elt_st):
                 assert ctx.cfg.allow_partial_type_infer
                 self.st = PFLExprInfo(PFLExprType.ARRAY,
                                   [PFLExprInfo(PFLExprType.UNKNOWN)])
                 return
             if ctx.cfg.allow_dynamic_container_literal:
-                if not first_elt.st.is_equal_type(elt.st):
+                if not first_elt_st.is_equal_type(elt_st):
                     final_st = PFLExprInfo(PFLExprType.ANY)
             else:
-                assert first_elt.st.is_equal_type(elt.st), f"all elts must be same type, but got {first_elt.st} and {elt.st}"
+                assert first_elt_st.is_equal_type(elt_st), f"all elts must be same type, but got {first_elt_st} and {elt_st}"
         self.st = PFLExprInfo(PFLExprType.ARRAY,
                               [dataclasses.replace(final_st)])
         if PFLExpr.all_constexpr(*self.elts):
@@ -1825,7 +1860,7 @@ class PFLTuple(PFLExpr):
             self.st._constexpr_data = ()
             return self
         self.st = PFLExprInfo(PFLExprType.TUPLE,
-                              [dataclasses.replace(e.st) for e in self.elts])
+                              [dataclasses.replace(e.st.get_load_st()) for e in self.elts])
         if PFLExpr.all_constexpr(*self.elts):
             self.st._constexpr_data = tuple(
                 e.st._constexpr_data for e in self.elts)
@@ -1861,50 +1896,51 @@ class PFLDict(PFLExpr):
         allow_dynamic_container_literal = cfg.allow_dynamic_container_literal
         for key, value in zip(self.keys, self.values):
             if key is not None:
-                value_st = value.st
+                value_st = value.st.get_load_st()
                 if _is_unknown_or_any(value_st):
                     value_is_unknown = True
                 break
         if value_st is None:
             for key, value in zip(self.keys, self.values):
                 if key is None:
-                    assert value.st.type == PFLExprType.OBJECT
-                    value_st = value.st.childs[0]
+                    assert value.st.get_load_st().type == PFLExprType.OBJECT
+                    value_st = value.st.get_load_st().childs[0]
                     break
         assert value_st is not None, "shouldn't happen"
         # all keys and values must be same type
         for key, value in zip(self.keys, self.values):
+            value_st_cur = value.st.get_load_st()
             if key is not None:
-                assert key.st.type == PFLExprType.STRING, "object key must be string"
+                assert key.st.get_load_st().type == PFLExprType.STRING, "object key must be string"
                 if not value_is_unknown or not allow_partial:
-                    is_eq_type = value_st.is_equal_type(value.st)
+                    is_eq_type = value_st.is_equal_type(value_st_cur)
                     if allow_dynamic_container_literal:
                         if not is_eq_type:
                             value_st = PFLExprInfo(PFLExprType.ANY)
                     else:
-                        assert value_st.is_equal_type(value.st), f"all values must be same type, but got {value_st} and {value.st}"
+                        assert value_st.is_equal_type(value_st_cur), f"all values must be same type, but got {value_st} and {value_st_cur}"
             else:
-                assert value.st.type == PFLExprType.OBJECT
+                assert value_st_cur.type == PFLExprType.OBJECT
                 if not value_is_unknown or not allow_partial:
-                    is_eq_type = value_st.is_equal_type(value.st)
+                    is_eq_type = value_st.is_equal_type(value_st_cur)
                     if allow_dynamic_container_literal:
                         if not is_eq_type:
                             value_st = PFLExprInfo(PFLExprType.ANY)
                     else:
-                        assert value_st.is_equal_type(value.st.childs[
-                            0]), f"all values must be same type, but got {value_st} and {value.st.childs[0]}"
+                        assert value_st.is_equal_type(value_st_cur.childs[
+                            0]), f"all values must be same type, but got {value_st} and {value_st_cur.childs[0]}"
         self.st = PFLExprInfo(PFLExprType.OBJECT,
                               [dataclasses.replace(value_st)])
         
         if PFLExpr.all_constexpr(*self.keys, *self.values):
             constexpr_data = {}
             for key, value in zip(self.keys, self.values):
-                v_cv = value.st._constexpr_data
+                v_cv = value.st.get_load_st()._constexpr_data
                 if key is None:
                     assert isinstance(v_cv, dict)
                     constexpr_data.update(v_cv)
                 else:
-                    k_cv = key.st._constexpr_data
+                    k_cv = key.st.get_load_st()._constexpr_data
                     constexpr_data[k_cv] = v_cv
             self.st._constexpr_data = constexpr_data
 

@@ -152,7 +152,7 @@ def compare_vector_n_tuple(value, obj, name):
 
 
 def _parse_base_type(ty: Type, current_obj, field_name: str,
-                     child_node: mui.ControlNode) -> Optional[ControlItemMeta]:
+                     child_node: Union[mui.ControlNode, mui.SimpleControlsItem]) -> Optional[ControlItemMeta]:
     getter = partial(getattr_single, obj=current_obj, name=field_name)
     comparer = partial(compare_single, obj=current_obj, name=field_name)
     if ty is bool:
@@ -286,10 +286,23 @@ def parse_to_control_nodes(origin_obj,
                            current_obj,
                            current_name: str,
                            obj_uid_to_meta: Dict[str, ControlItemMeta],
-                           ignored_field_names: Optional[Set[str]] = None):
-    res_node = mui.ControlNode(id=current_name,
-                               name=current_name.split(".")[-1],
-                               type=mui.ControlNodeType.Folder.value)
+                           ignored_field_names: Optional[Set[str]] = None,
+                           dynamic_enum_dict: Optional[dict[str, Any]] = None) -> mui.JsonLikeNode:
+    # res_node = mui.ControlNode(id=current_name,
+    #                            name=current_name.split(".")[-1],
+    #                            type=mui.ControlNodeType.Folder.value)
+    res_node_item = mui.SimpleControlsItem(type=mui.ControlNodeType.Folder.value)
+    res_node = mui.JsonLikeNode(
+        id=UniqueTreeIdForTree.from_parts(current_name.split(".")),
+        name=current_name.split(".")[-1],
+        type=mui.JsonLikeType.Object.value,
+        typeStr="",
+        userdata=res_node_item)
+
+    # res_node = mui.ControlNode(id=current_name,
+    #                            name=current_name.split(".")[-1],
+    #                            type=mui.ControlNodeType.Folder.value)
+
     if ignored_field_names is None:
         ignored_field_names = set()
     for f in dataclasses.fields(current_obj):
@@ -298,9 +311,18 @@ def parse_to_control_nodes(origin_obj,
         next_name = f.name
         if current_name:
             next_name = current_name + "." + f.name
-        child_node = mui.ControlNode(id=next_name,
-                                     name=f.name,
-                                     type=mui.ControlNodeType.Folder.value)
+        child_node_item = mui.SimpleControlsItem(type=mui.ControlNodeType.Folder.value)
+        child_node = mui.JsonLikeNode(
+            id=UniqueTreeIdForTree.from_parts(next_name.split(".")),
+            name=f.name,
+            type=mui.JsonLikeType.Object.value,
+            typeStr="",
+            userdata=child_node_item)
+
+
+        # child_node = mui.ControlNode(id=next_name,
+        #                              name=f.name,
+        #                              type=mui.ControlNodeType.Folder.value)
         # meta: Optional[ConfigMeta] = None
         # if _CONFIG_META_KEY in f.metadata:
         #     meta = f.metadata[_CONFIG_META_KEY]
@@ -337,15 +359,15 @@ def parse_to_control_nodes(origin_obj,
             if isinstance(first_anno_meta,
                           (typemetas.ColorRGB, typemetas.ColorRGBA)):
                 if isinstance(first_anno_meta, typemetas.ColorRGB):
-                    child_node.type = mui.ControlNodeType.ColorRGB.value
+                    child_node_item.type = mui.ControlNodeType.ColorRGB.value
                 else:
-                    child_node.type = mui.ControlNodeType.ColorRGBA.value
+                    child_node_item.type = mui.ControlNodeType.ColorRGBA.value
                 val = getattr(current_obj, f.name)
                 if not isinstance(val, mui.Undefined):
-                    child_node.value = val
+                    child_node_item.value = val
                 else:
                     if first_anno_meta.default is not None:
-                        child_node.value = first_anno_meta.default
+                        child_node_item.value = first_anno_meta.default
                 # child_node.value = getattr(current_obj, f.name)
                 ty_valid_color = ty is str or ty is mui.ValueType
                 if ty_origin is Union:
@@ -377,74 +399,89 @@ def parse_to_control_nodes(origin_obj,
                                        name=f.name,
                                        mapper=mapper)
                     res_node.children.append(child_node)
-                    obj_uid_to_meta[child_node.id] = ControlItemMeta(
+                    obj_uid_to_meta[next_name] = ControlItemMeta(
                         getter, setter, comparer)
                     continue
             elif isinstance(first_anno_meta,
                             (typemetas.RangedVector3, typemetas.Vector3, typemetas.RangedVector2, typemetas.Vector2)):
-                child_node.type = mui.ControlNodeType.VectorN.value
-                child_node.count = 3 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.Vector3)) else 2
+                child_node_item.type = mui.ControlNodeType.VectorN.value
+                child_node_item.count = 3 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.Vector3)) else 2
                 val = getattr(current_obj, f.name)
                 if not isinstance(val, mui.Undefined):
                     if isinstance(val, (int, float)):
                         val = (val, val, val)
                     # TODO validate val
-                    child_node.value = val
+                    child_node_item.value = val
                 else:
                     if first_anno_meta.default is not None:
-                        child_node.value = list(first_anno_meta.default)
+                        child_node_item.value = list(first_anno_meta.default)
                 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.RangedVector2)):
-                    child_node.min = first_anno_meta.lo
-                    child_node.max = first_anno_meta.hi
-                child_node.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
-                child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
+                    child_node_item.min = first_anno_meta.lo
+                    child_node_item.max = first_anno_meta.hi
+                child_node_item.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
+                if first_anno_meta.alias is not None:
+                    child_node.name = first_anno_meta.alias
 
                 setter = partial(setattr_vector_n_tuple,
                                  obj=current_obj,
                                  name=f.name,
-                                 count=child_node.count,
+                                 count=child_node_item.count,
                                  default=first_anno_meta.default)
                 comparer = partial(compare_vector_n_tuple,
                                    obj=current_obj,
                                    name=f.name)
                 res_node.children.append(child_node)
-                obj_uid_to_meta[child_node.id] = ControlItemMeta(
+                obj_uid_to_meta[next_name] = ControlItemMeta(
                     getter, setter, comparer)
                 continue
             elif (isinstance(first_anno_meta,
                              (typemetas.RangedInt, typemetas.RangedFloat))
                   and _check_union_is_valid_subset_ignore_undefined(
                       ty, ty_origin, set([int, float]))):
-                res = _parse_base_type(ty, current_obj, f.name, child_node)
+                res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None:
                     child_node.type = mui.ControlNodeType.RangeNumber.value
                     if first_anno_meta.default is not None:
-                        if isinstance(child_node.value, mui.Undefined):
-                            child_node.value = first_anno_meta.default
-                    child_node.min = first_anno_meta.lo
-                    child_node.max = first_anno_meta.hi
-                    child_node.isInteger = isinstance(first_anno_meta,
+                        if isinstance(child_node_item.value, mui.Undefined):
+                            child_node_item.value = first_anno_meta.default
+                    child_node_item.min = first_anno_meta.lo
+                    child_node_item.max = first_anno_meta.hi
+                    child_node_item.isInteger = isinstance(first_anno_meta,
                                                       typemetas.RangedInt)
-                    child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
-                    child_node.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
+                    if first_anno_meta.alias is not None:
+                        child_node.name = first_anno_meta.alias
+                    child_node_item.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
                     if first_anno_meta.step is None and ty is int:
-                        child_node.step = 1
+                        child_node_item.step = 1
                     res_node.children.append(child_node)
-                    obj_uid_to_meta[child_node.id] = res
+                    obj_uid_to_meta[next_name] = res
                     continue
             elif isinstance(first_anno_meta, (typemetas.Enum)):
-                res = _parse_base_type(ty, current_obj, f.name, child_node)
+                res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None and issubclass(ty, (enum.Enum, enum.IntEnum)):
                     if first_anno_meta.alias is not None:
-                        child_node.alias = first_anno_meta.alias
+                        child_node.name = first_anno_meta.alias
                     if first_anno_meta.excludes is not None:
-                        child_node.selects = list((x.name, x.value) for x in ty if x not in first_anno_meta.excludes)
+                        child_node_item.selects = list((x.name, x.value) for x in ty if x not in first_anno_meta.excludes)
                     res_node.children.append(child_node)
-                    obj_uid_to_meta[child_node.id] = res
+                    obj_uid_to_meta[next_name] = res
                     continue
 
+            elif isinstance(first_anno_meta, (typemetas.DynamicEnum)):
+                assert dynamic_enum_dict is not None 
+                selects = dynamic_enum_dict[next_name]
+                assert issubclass(ty, str)
+                res = _parse_base_type(ty, current_obj, f.name, child_node_item)
+                if res is not None and issubclass(ty, str):
+                    child_node_item.type = mui.ControlNodeType.Select.value
+                    if first_anno_meta.alias is not None:
+                        child_node.name = first_anno_meta.alias
+                    child_node_item.selects = selects
+                    res_node.children.append(child_node)
+                    obj_uid_to_meta[next_name] = res
+                    continue
             elif isinstance(first_anno_meta, (typemetas.CommonObject)):
-                res = _parse_base_type(ty, current_obj, f.name, child_node)
+                res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None:
                     if first_anno_meta.alias is not None:
                         child_node.alias = first_anno_meta.alias
@@ -452,14 +489,14 @@ def parse_to_control_nodes(origin_obj,
                         if isinstance(child_node.value, mui.Undefined):
                             child_node.value = first_anno_meta.default
                     res_node.children.append(child_node)
-                    obj_uid_to_meta[child_node.id] = res
+                    obj_uid_to_meta[next_name] = res
                     continue
 
         # type don't have anno meta, or invalid meta, use base types
-        res = _parse_base_type(ty, current_obj, f.name, child_node)
+        res = _parse_base_type(ty, current_obj, f.name, child_node_item)
         if res is not None:
             res_node.children.append(child_node)
-            obj_uid_to_meta[child_node.id] = res
+            obj_uid_to_meta[next_name] = res
             continue
 
     return res_node
@@ -500,11 +537,11 @@ class ConfigPanel(mui.SimpleControls):
                  config_obj: Any,
                  callback: Optional[Callable[[str, Any],
                                              mui.CORO_NONE]] = None,
-                 ignored_field_names: Optional[Set[str]] = None):
+                 dynamic_enum_dict: Optional[dict[str, Any]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
         items, self._obj_to_ctrl_meta, self.uid_to_json_like_node = self._get_controls_tree(
-            config_obj)
+            config_obj, dynamic_enum_dict)
         super().__init__(init=items,
                          callback=self.callback)
         self.__config_obj = config_obj
@@ -514,13 +551,13 @@ class ConfigPanel(mui.SimpleControls):
                                         callback,
                                         backend_only=True)
 
-    def _get_controls_tree(self, cfg: Any):
+    def _get_controls_tree(self, cfg: Any, dynamic_enum_dict: Optional[dict[str, Any]] = None):
         # parse config dataclass.
         _obj_to_ctrl_meta = {}
-        uid_to_json_like_node = {}
-        node = parse_to_control_nodes(cfg, cfg, "", _obj_to_ctrl_meta)
-        node_v2 = control_nodes_v1_to_v2(
-            node, uid_to_json_like_node)
+        node_v2 = parse_to_control_nodes(cfg, cfg, "", _obj_to_ctrl_meta, dynamic_enum_dict=dynamic_enum_dict)
+        # node_v2 = control_nodes_v1_to_v2(
+        #     node, uid_to_json_like_node)
+        uid_to_json_like_node = node_v2.get_uid_to_node()
         return node_v2.children, _obj_to_ctrl_meta, uid_to_json_like_node
 
     async def callback(self, value: Tuple[str, Any]):
@@ -547,11 +584,11 @@ class ConfigPanel(mui.SimpleControls):
                     if inspect.iscoroutine(coro):
                         await coro
 
-    async def set_config_object(self, cfg: Any):
+    async def set_config_object(self, cfg: Any, dynamic_enum_dict: Optional[dict[str, Any]] = None):
         if not isinstance(self.props.controlled, mui.Undefined) and not self.props.controlled:
             raise ValueError("you must use controlled simple control to use set_config_object")
         items, self._obj_to_ctrl_meta, self.uid_to_json_like_node = self._get_controls_tree(
-            cfg)
+            cfg, dynamic_enum_dict)
         await self.send_and_wait(self.update_event(tree=items))
 
     @property
@@ -614,12 +651,12 @@ class ConfigPanelDialog(mui.Dialog, Generic[T]):
         self._cur_cfg: Optional[T] = None
         self._cur_user_data: Any = None
 
-    async def open_config_dialog(self, config_obj: T, userdata: Any = None):
+    async def open_config_dialog(self, config_obj: T, userdata: Any = None, dynamic_enum_dict: Optional[dict[str, Any]] = None):
         assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
         config_obj = dataclasses.replace(config_obj)
         self._cur_cfg = config_obj
         self._cur_user_data = userdata
-        panel = ConfigPanel(config_obj)
+        panel = ConfigPanel(config_obj, dynamic_enum_dict=dynamic_enum_dict)
         await self.update_childs({
             self.__layout_key: panel,
         }, post_ev_creator=lambda: self.update_event(open=True)) 
@@ -639,8 +676,9 @@ class ConfigPanelDialog(mui.Dialog, Generic[T]):
             await self.remove_childs_by_keys([self.__layout_key])
 
 class ConfigPanelDialogPersist(mui.Dialog, Generic[T]):
-    def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui.CORO_NONE], children: Optional[mui.LayoutType] = None):
-        self._config = ConfigPanel(cfg)
+    def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui.CORO_NONE], children: Optional[mui.LayoutType] = None,
+            dynamic_enum_dict: dict[str, Any] | None = None):
+        self._config = ConfigPanel(cfg, dynamic_enum_dict=dynamic_enum_dict)
         super().__init__([
             mui.HBox([
                 self._config
@@ -662,13 +700,13 @@ class ConfigPanelDialogPersist(mui.Dialog, Generic[T]):
     def config(self):
         return self._cur_cfg
 
-    async def open_config_dialog(self, userdata: Any = None, inplace: bool = True):
+    async def open_config_dialog(self, userdata: Any = None, inplace: bool = True, dynamic_enum_dict: dict[str, Any] | None = None):
         config_obj = self._cur_cfg
         if not inplace:
             assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
             config_obj = dataclasses.replace(config_obj)
             self._cur_cfg = config_obj
-            await self._config.set_config_object(config_obj)
+            await self._config.set_config_object(config_obj, dynamic_enum_dict)
         self._cur_user_data = userdata
         await self.set_open(True)
 

@@ -51,14 +51,14 @@ def mark_ref_node_dep_end() -> Callable[[T], T]:
     return wrapper
 
 @MARKERS_REGISTRY.register_no_key
-def mark_ref_node(func: Any, ntype: int, node_id: str, position: tuple[float, float], 
+def mark_ref_node(func: Any, ntype: int, flags: int, node_id: str, position: tuple[float, float], 
         ref_node_id: Optional[str] = None,
         inlineflow_name: Optional[str] = None) -> Callable[[T], T]:
     # we actually don't use this metadata, we read ast directly.
     return func
 
 @MARKERS_REGISTRY.register_no_key
-def mark_subflow_def(name: str, node_id: str, position: tuple[float, float], inlineflow_name: Optional[str] = None, is_folder: bool = False) -> Any:
+def mark_subflow_node(name: str, node_id: str, position: tuple[float, float], inlineflow_name: Optional[str] = None, is_folder: bool = False) -> Any:
     # we actually don't use this metadata, we read ast directly.
     return 
 
@@ -91,7 +91,7 @@ def mark_symbol_group(node_id: str, position: tuple[float, float], ref_node_id: 
     return wrapper
 
 @MARKERS_REGISTRY.register_no_key
-def mark_fragment_def(node_id: str, position: tuple[float, float],  # flags: int, 
+def mark_fragment_def(node_id: str, position: tuple[float, float], flags: int, 
         alias_map: Optional[str] = None,
         inlineflow_name: Optional[str] = None) -> Callable[[T], T]:
     # we actually don't use this metadata, we read ast directly.
@@ -100,7 +100,14 @@ def mark_fragment_def(node_id: str, position: tuple[float, float],  # flags: int
     return wrapper
 
 @MARKERS_REGISTRY.register_no_key
-def mark_class_def() -> Callable[[T], T]:
+def mark_inlineflow_with_desc(node_id: str, position: tuple[float, float], flags: int) -> Callable[[T], T]:
+    # we actually don't use this metadata, we read ast directly.
+    def wrapper(fn_wrapped: T) -> T:
+        return fn_wrapped   
+    return wrapper
+
+@MARKERS_REGISTRY.register_no_key
+def mark_class_def(inherit_node_id: Optional[str] = None) -> Callable[[T], T]:
     # we actually don't use this metadata, we read ast directly.
     def wrapper(fn_wrapped: T) -> T:
         return fn_wrapped   

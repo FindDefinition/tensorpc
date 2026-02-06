@@ -62,6 +62,9 @@ return a + b + self.a
     fragment_init = f"""
 self.a = a
     """
+    fragment_cls_method = f"""
+return cls(a=a + 1)
+    """
 
     return ADVFlowModel(nodes={
         "sym_def": ADVNodeModel(
@@ -70,6 +73,15 @@ self.a = a
             position=flowui.XYPosition(0, 0), 
             ref=ADVNodeRefInfo("sym_def", sym_import_path),
         ),
+        "from_number": ADVNodeModel(
+            id="from_number", 
+            nType=ADVNodeType.FRAGMENT,
+            position=flowui.XYPosition(200, 200), 
+            name=f"from_number",
+            impl=InlineCode(fragment_cls_method),
+            flags=int(ADVNodeFlags.IS_CLASSMETHOD),
+        ),
+
         "add_method": ADVNodeModel(
             id="add_method", 
             nType=ADVNodeType.FRAGMENT,
@@ -85,6 +97,14 @@ self.a = a
             position=flowui.XYPosition(400, 0), 
             name="",
         ),
+        "inline_flow_0": ADVNodeModel(
+            id="inline_flow_0", 
+            nType=ADVNodeType.FRAGMENT,
+            position=flowui.XYPosition(400, 200), 
+            name="inline_flow_0",
+            flags=int(ADVNodeFlags.IS_INLINE_FLOW_DESC | ADVNodeFlags.IS_METHOD),
+        ),
+
         "__init__": ADVNodeModel(
             id="__init__", 
             nType=ADVNodeType.FRAGMENT,
@@ -277,6 +297,13 @@ return c + a
                 name="SymbolGroup0",
                 impl=InlineCode(symbolgroup0),
             ),
+            "inline0": ADVNodeModel(
+                id="inline0", 
+                nType=ADVNodeType.FRAGMENT,
+                position=flowui.XYPosition(800, 600), 
+                name="inline0",
+                flags=int(ADVNodeFlags.IS_INLINE_FLOW_DESC),
+            ),
             "add": ADVNodeModel(
                 id="add", 
                 nType=ADVNodeType.FRAGMENT,
@@ -285,8 +312,8 @@ return c + a
                 inlinesf_name="inline0",
                 impl=InlineCode(fragment_add),
             ),
-            "f1": ADVNodeModel(
-                id="f1", 
+            "add_func2": ADVNodeModel(
+                id="add_func2", 
                 nType=ADVNodeType.FRAGMENT,
                 position=flowui.XYPosition(400, 100), 
                 name="add_func2",

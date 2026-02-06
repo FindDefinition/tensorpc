@@ -1,6 +1,6 @@
 from typing import Any, Callable, Literal, Optional, Self, TypeGuard, TypeVar, Union
 
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec, NodePrepResult
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec, BackendNode
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 from tensorpc.apps.adv.codemgr import markers as adv_markers
@@ -66,4 +66,3 @@ class GlobalScriptParseResult(BaseParseResult):
             *lines,
             mark_end_stmt,
         ], 1, 1, len(lines), end_column)
-

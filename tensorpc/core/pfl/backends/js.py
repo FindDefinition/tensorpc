@@ -21,7 +21,7 @@ register_backend("js", PFLParseConfig(
     allow_custom_class=False,
     allow_dynamic_container_literal=True,
     allow_partial_in_slice=True,
-    allow_remove_optional_based_on_cond=False,
+    allow_remove_optional_based_on_cond=True,
 ))
 
 @register_pfl_std(mapped_name="len", backend="js", mapped=len)
@@ -272,6 +272,25 @@ class MathUtil:
     def binpack(boxes: list[tuple[float, float]], containerWidth: Optional[float] = None) -> BinpackResult:
         raise NotImplementedError
 
+@register_pfl_std(mapped_name="PerfettoColor", backend="js")
+@dataclasses.dataclass
+class PerfettoColor:
+    rgb: tuple[float, float, float]
+    cssString: str
+
+
+
+@register_pfl_std(mapped_name="PerfettoColorScheme", backend="js")
+@dataclasses.dataclass
+class PerfettoColorScheme:
+    base: PerfettoColor
+    variant: PerfettoColor
+    disabled: PerfettoColor
+    textBase: PerfettoColor
+    textVariant: PerfettoColor
+    textDisabled: PerfettoColor
+
+
 @register_pfl_std(mapped_name="ColorUtil", backend="js")
 @dataclasses.dataclass
 class ColorUtil:
@@ -294,6 +313,31 @@ class ColorUtil:
     def getPerfettoVariantSliceColorRGB(color: str) -> tuple[float, float, float]:
         res = perfetto_colors.perfetto_slice_to_color(color).variant.rgb
         return res[0], res[1], res[2]
+
+    @staticmethod
+    def getPerfettoColor(color: str) -> PerfettoColorScheme: 
+        res = perfetto_colors.perfetto_string_to_color(color)
+        return PerfettoColorScheme(
+            base=PerfettoColor(res.base.rgb, res.base.cssString),
+            variant=PerfettoColor(res.variant.rgb, res.variant.cssString),
+            disabled=PerfettoColor(res.disabled.rgb, res.disabled.cssString),
+            textBase=PerfettoColor(res.textBase.rgb, res.textBase.cssString),
+            textVariant=PerfettoColor(res.textVariant.rgb, res.textVariant.cssString),
+            textDisabled=PerfettoColor(res.textDisabled.rgb, res.textDisabled.cssString),
+        )
+
+    @staticmethod
+    def getPerfettoSliceColor(color: str) -> PerfettoColorScheme:
+        res = perfetto_colors.perfetto_slice_to_color(color)
+        return PerfettoColorScheme(
+            base=PerfettoColor(res.base.rgb, res.base.cssString),
+            variant=PerfettoColor(res.variant.rgb, res.variant.cssString),
+            disabled=PerfettoColor(res.disabled.rgb, res.disabled.cssString),
+            textBase=PerfettoColor(res.textBase.rgb, res.textBase.cssString),
+            textVariant=PerfettoColor(res.textVariant.rgb, res.textVariant.cssString),
+            textDisabled=PerfettoColor(res.textDisabled.rgb, res.textDisabled.cssString),
+        )
+
 
 @register_pfl_std(mapped_name="Common", backend="js")
 @dataclasses.dataclass

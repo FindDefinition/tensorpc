@@ -38,6 +38,8 @@ class BaseHandle(mui.FlexBox):
         handle_desc.bind_pfl_query(dm,
             value=(get_handle_fn, "name"),
             textAlign=(get_handle_fn, "textAlign"),
+            color=(get_handle_fn, "textColor"),
+
         )
         layout: mui.LayoutType = [
             handle_left_cond,
@@ -63,6 +65,24 @@ class BaseNodeWrapper(mui.FlexBox):
         self.node_type = node_type
         super().__init__(children)
 
+class TagWithInfo(mui.TooltipFlexBox):
+    def __init__(self, node_gid: str,
+                 dm: mui.DataModel[ADVRoot]):
+        get_tag_fn = partial(ADVRoot.get_tag, node_gid=node_gid)
+        chip = mui.Chip().prop(
+            size="small", muiColor="success", variant="outlined")
+        chip.bind_pfl_query(dm,
+            label=(get_tag_fn, "label"),
+        )
+        super().__init__("", [
+            chip,
+        ])
+
+        self.bind_pfl_query(dm,
+            title=(get_tag_fn, "tooltip"),
+        )
+
+
 class IONodeWrapper(BaseNodeWrapper):
 
     def __init__(self,
@@ -87,13 +107,13 @@ class IONodeWrapper(BaseNodeWrapper):
         icon.bind_pfl_query(dm, 
             icon=(get_node_fn, "iconType"))
         icon_is_shortcut = mui.Icon(mui.IconType.Shortcut).prop(iconSize="small", muiColor="primary")
-        icon_is_main_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small", muiColor="primary")
         icon_is_shortcut.bind_pfl_query(dm, show=(get_node_fn, "isRef"))
-        icon_is_main_flow.bind_pfl_query(dm, show=(get_node_fn, "isMainFlow"))
+        
+        icon_is_inline_flow = mui.Icon(mui.IconType.AccountTree).prop(iconSize="small")
+        icon_is_inline_flow.bind_pfl_query(dm, show=(get_node_fn, "isMainFlow"), color=(get_node_fn, "ifColor"),)
 
         header_icons = mui.HBox([
             icon_is_shortcut,
-            icon_is_main_flow,
         ])
         header_container = mui.HBox([
             icon_container,
@@ -106,17 +126,37 @@ class IONodeWrapper(BaseNodeWrapper):
         handles.prop(variant="fragment")
         handles.bind_pfl_query(dm, 
             dataList=(get_node_fn, "handles"))
+        
+        tags = mui.DataFlexBox(TagWithInfo(
+            node_gid, dm
+        ))
+        tags.prop(flexFlow="row wrap", justifyContent="center",
+            className=f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}")
+        tags.bind_pfl_query(dm, 
+            dataList=(get_node_fn, "tags"))
+        tags_cond = mui.MatchCase.binary_selection(True,
+            success=tags
+        )
+        tags_cond.bind_pfl_query(dm, 
+            condition=(get_node_fn, "hasTag"))
         moddle_node_overflow = mui.undefined
         if child_overflow is not None:
             moddle_node_overflow = child_overflow
         _run_status = mui.Typography().prop(variant="caption").bind_pfl_query(dm, 
-            value=(get_node_fn, "bottomMsg"))
+            value=(get_node_fn, "bottomMsg"),
+            color=(get_node_fn, "ifColor"),
+        )
         status_box = mui.HBox([
-            _run_status,
+            icon_is_inline_flow,
+            _run_status.prop(flex=1),
         ]).prop(
             className=
             f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
-
+        status_box_cond = mui.MatchCase.binary_selection(True,
+            success=status_box
+        )
+        status_box_cond.bind_pfl_query(dm, 
+            condition=(get_node_fn, "isMainFlow"))
         middle_node_container = mui.Fragment(([
             mui.VBox(children).prop(
                 className=ComputeFlowClasses.NodeItem,
@@ -125,11 +165,13 @@ class IONodeWrapper(BaseNodeWrapper):
         ] if children is not None else []))
         ui_dict = {
             "header": header_container,
+            "tags": tags_cond,
+
             # "input_args": self.input_args,
             "middle_node": middle_node_container,
             # "output_args": self.output_args,
             "handles": handles,
-            "status_box": status_box,
+            "status_box": status_box_cond,
             # "resizer": self.resizer,
         }
         super().__init__(node_gid, node_type, ui_dict)

@@ -3,7 +3,7 @@ from pathlib import Path
 import rich
 from tensorpc.apps.adv.codemgr.flow import ADVProjectBackendManager, ADVProjectChange
 from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser, create_adv_model
-from tensorpc.apps.adv.constants import TENSORPC_ADV_MD_MIN_SIZE
+from tensorpc.apps.adv.constants import TENSORPC_ADV_MD_MIN_SIZE, TENSORPC_ADV_ROOT_FLOW_ID
 from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IONodeWrapper, IndicatorWrapper, MarkdownNodeWrapper
 from tensorpc.apps.adv.test_data.simple import get_simple_nested_model
 from tensorpc.constants import PACKAGE_ROOT
@@ -16,17 +16,19 @@ from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Callable, Coroutine, Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeModifyConfig, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 from tensorpc.core.datamodel.draft import (get_draft_pflpath)
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
 import rich 
+from tensorpc.apps.adv.ide.ref_select import RefNodeSelectDialog
 import sys 
 
 
 class NodeContextMenu(enum.Enum):
     EnterNested = "Enter Nested"
     DeleteNode = "Delete Node"
+    ConfigureNode = "Configure"
 
 class PaneContextMenu(enum.Enum):
     AddFragment = "Add Fragment Node"
@@ -38,53 +40,7 @@ class PaneContextMenu(enum.Enum):
     AddMarkdown = "Add Markdown Node"
     Debug = "Debug"
 
-class RefNodeSelectDialog(mui.Dialog):
-    def __init__(self, on_click: Callable[[str, tuple[mui.NumberType, mui.NumberType]], Coroutine[Any, Any, None]]):
-        self.title = mui.Typography().prop(variant="body1")
-        self.qname = mui.Typography().prop(variant="caption", enableTooltipWhenOverflow=True)
-
-
-        self.info_icon = mui.Icon()
-        self.title.bind_fields(value="title")
-        self.qname.bind_fields(value="qname")
-        self.info_icon.bind_fields(tooltip="info")
-
-        self.card = mui.Paper([
-            self.title,
-            self.qname,
-            self.info_icon
-        ]).prop(width="150px", height="150px", margin="10px", flexFlow="column",)
-        # card get bigger when hover
-        self.card.update_raw_props({
-            ":hover": {
-                "transform": "scale(1.05)",
-                "transition": "transform 0.2s",
-            }
-        })
-        self.card.event_click.on_standard(self._handle_click)
-        self.content = mui.DataFlexBox(self.card).prop(flex=1, overflowY="auto", flexFlow="row wrap",
-            filterKey="qname", flexDirection="row")
-        self.search = mui.TextField("nodes")
-        self.search.prop(valueChangeTarget=(self.content, "filter"))
-        self._on_click = on_click
-        super().__init__([
-            self.search,
-            self.content,
-        ])
-        self.prop(overflow="hidden", title="Create Ref Node", 
-            display="flex", dialogMaxWidth=False, fullWidth=False,
-            width="75vw", height="75vh", includeFormControl=False, flexDirection="column")
-
-        self.position: tuple[mui.NumberType, mui.NumberType] = (0, 0)
-
-    async def _handle_click(self, event: mui.Event):
-        gid = event.get_keys_checked()[0]
-        try:
-            await self._on_click(gid, self.position)
-        finally:
-            await self.set_open(False)
-
-class App:
+class ADVIdeApp:
     @mark_create_layout
     def my_layout(self):
         adv_proj = {
@@ -107,9 +63,12 @@ class App:
             str(PACKAGE_ROOT.parent),
         ]
         model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
-        node_cm_items = [
-            mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
-            mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value),
+        base_node_cm_items = [
+            # mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
+            mui.MenuItem(id=NodeContextMenu.ConfigureNode.name, label=NodeContextMenu.ConfigureNode.value),
+            mui.MenuItem(id="divider0", divider=True),
+            mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value, 
+                confirmTitle="Are you sure to delete this node?", confirmMessage="This action cannot be undo."),
 
         ]
         items = [
@@ -134,7 +93,7 @@ class App:
             flowui.MiniMap(),
             flowui.Controls(),
             flowui.Background(),
-        ]).prop(nodeContextMenuItems=node_cm_items, paneContextMenuItems=items)
+        ]).prop(nodeContextMenuItems=base_node_cm_items, paneContextMenuItems=items)
         target_conn_valid_map = {
             ADVHandlePrefix.Input: {
                 # each input (target) can only connect one output (source)
@@ -145,7 +104,8 @@ class App:
                 ADVHandlePrefix.Output: 1
             },
         }
-        self.graph.prop(targetValidConnectMap=target_conn_valid_map, selectNodesOnDrag=False, debounce=300)
+        self.graph.prop(targetValidConnectMap=target_conn_valid_map, 
+            selectNodesOnDrag=False, debounce=300)
 
         self.graph.event_node_context_menu.on(self.handle_node_cm)
         path_breadcrumb = mui.Breadcrumbs([]).prop(keepHistoryPath=True)
@@ -186,12 +146,15 @@ class App:
                 self.graph,
             ]).prop(flex=1)
         self.new_node_dialog = ConfigPanelDialog(self._on_new_node_create)
+        self.node_configure_dialog = ConfigPanelDialog(self._on_node_configure)
+
         self.new_ref_dialog = RefNodeSelectDialog(self._handle_new_ref_node)
         self.dm = mui.DataModel(model, [
             graph_container,
             detail_ct,
             self.new_node_dialog,
             self.new_ref_dialog,
+            self.node_configure_dialog,
         ], json_only=True)
         draft = self.dm.get_draft()
         cur_root_proj = draft.draft_get_cur_adv_project()
@@ -267,13 +230,14 @@ class App:
             node_gid = node.get_global_uid()
             frag = self._manager._get_flow_code_lineno_by_node_gid(node_gid)
             if frag is not None:
-                if node.nType == ADVNodeType.MARKDOWN:
+                if node.nType == ADVNodeType.MARKDOWN or node.nType == ADVNodeType.CLASS:
                     # {node_gid}.md, not real path
                     return await self.editor.write(frag.code, frag.path, language="markdown", constrained_ranges=[])
                 else:
                     real_path_fs = str(Path(adv_proj.path) / Path(frag.path))
                     print("!", real_path_fs)
                     # print(pair[1].id, pair[1].nType, path, lineno)
+
                     constrained_ranges = [
                         mui.MonacoConstrainedRange(frag.code_range, node_gid, allowMultiline=True, decorationOptions=mui.MonacoModelDecoration(
                             linesDecorationsClassName="monaco-editor-content-decoration", isWholeLine=True,
@@ -311,10 +275,25 @@ class App:
                 self.dm,
                 ADVNodeType(node.nType),
             )
+        node_cm_items = mui.undefined
+        if node.flow is not None:
+            node_cm_items = [
+                mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
+                mui.MenuItem(id=NodeContextMenu.ConfigureNode.name, label=NodeContextMenu.ConfigureNode.value),
+                mui.MenuItem(id="divider0", divider=True),
+                mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value, 
+                    confirmTitle="Are you sure to delete this node?", confirmMessage="This action cannot be undo."),
+
+            ]
         ui_node = flowui.Node(type="app", 
             id=node.id, 
-            data=flowui.NodeData(component=comp, label=node.name), 
-            position=node.position)
+            data=flowui.NodeData(component=comp, label=node.name, contextMenuItems=node_cm_items), 
+            position=node.position,
+            # disable interaction for inherited nodes.
+            # user can unlock this by override in context menu.
+            deletable=not node.is_inherited_node(),
+            draggable=not node.is_inherited_node(),
+            connectable=not node.is_inherited_node())
         return ui_node
 
     def model_to_ui_edge(self, edge: ADVEdgeModel):
@@ -346,15 +325,15 @@ class App:
 
     async def handle_node_cm(self, data: flowui.NodeContextMenuEvent):
         item_id = data.itemId
+        node_id = data.nodeId
+        cur_proj = self.dm.model.get_cur_adv_project()
+        cur_path_val = self.dm.model.get_cur_adv_project().cur_path
+        new_path_val = cur_path_val + ['nodes', node_id]
+        pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, new_path_val)
+        if pair is None:
+            return 
+
         if item_id == NodeContextMenu.EnterNested.name:
-            node_id = data.nodeId
-            cur_proj = self.dm.model.get_cur_adv_project()
-            cur_path_val = self.dm.model.get_cur_adv_project().cur_path
-            new_path_val = cur_path_val + ['nodes', node_id, 'flow']
-            pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, new_path_val)
-            # validate node contains nested flow
-            if pair is None:
-                return 
             node = pair[1]
             if node.ref is not None and node.ref.fe_path is not None:
                 path = node.ref.fe_path
@@ -366,16 +345,27 @@ class App:
             D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
             draft.cur_path = path + ['flow']
         elif item_id == NodeContextMenu.DeleteNode.name:
-            
-            node_id = data.nodeId
-            cur_proj = self.dm.model.get_cur_adv_project()
-            cur_path_val = cur_proj.cur_path
-            new_path_val = cur_path_val + ['nodes', node_id, ]
-            pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, new_path_val)
-            assert pair is not None 
-
             change = self._manager.delete_node(pair[1].get_global_uid())
             await self._apply_flow_change(change)
+        elif item_id == NodeContextMenu.ConfigureNode.name:
+            node = pair[1]
+            container_node = pair[0]
+            if container_node is None:
+                flow_gid = TENSORPC_ADV_ROOT_FLOW_ID
+            else:
+                flow_gid = container_node.get_global_uid()
+            inline_flows = self._manager.collect_all_inline_flow_names(flow_gid)
+            selects = [(n, n) for n in inline_flows]
+            dynamic_enum_dict = {
+                "inline_flow_name": selects
+            }
+            await self.node_configure_dialog.open_config_dialog(ADVNodeModifyConfig(
+                name=node.name,
+                inline_flow_name=node.inlinesf_name or "",
+                alias_map=node.alias_map,
+            ), userdata={
+                "node_gid": node.get_global_uid(),
+            }, dynamic_enum_dict=dynamic_enum_dict)
 
     def handle_breadcrumb_click(self, data: list[str]):
         logic_path = data[1:] # remove root
@@ -459,12 +449,16 @@ class App:
                     "qname": qname,
                     "info": info,
                 })
-            await self.new_ref_dialog.send_and_wait(self.new_ref_dialog.content.update_event(dataList=datas))
+            ev = self.new_ref_dialog.content.update_event(dataList=datas)
+            inline_flow_names = self._manager.collect_all_inline_flow_names(cur_flow_gid)
+            ev += self.new_ref_dialog.inline_flow_select.update_event(options=[{"id": n, "label": n} for n in inline_flow_names])
+            await self.new_ref_dialog.send_and_wait(ev)
             self.new_ref_dialog.position = (data.flowPosition.x, data.flowPosition.y)
             await self.new_ref_dialog.set_open(True)
         elif data.itemId == PaneContextMenu.Debug.name:
             cur_model = self.dm.model.get_cur_adv_project().flow
             node_ids = [n.id for n in cur_model.nodes.values()]
+            rich.print("update_node_internals", node_ids)
             await self.graph.update_node_internals(node_ids)
 
     async def _handle_editor_acts(self, act: mui.MonacoActionEvent):
@@ -548,7 +542,7 @@ class {event.cfg.name}:
         change = self._manager.add_new_node(flow_gid, node)
         await self._apply_flow_change(change)
 
-    async def _handle_new_ref_node(self, gid: str, position: tuple[mui.NumberType, mui.NumberType]):
+    async def _handle_new_ref_node(self, gid: str, position: tuple[mui.NumberType, mui.NumberType], inline_flow_name: Optional[str]):
         cur_flow_gid = self._get_cur_flow_gid()
 
         import_path, node_id = ADVNodeModel.extract_path_and_id(gid)
@@ -559,9 +553,10 @@ class {event.cfg.name}:
             nType=cache.node.nType,
             name=cache.node.name,
             ref=ADVNodeRefInfo(node_id, import_path),
+            flags=cache.node.flags,
+            inlinesf_name=inline_flow_name,
         )
         change = self._manager.add_new_node(cur_flow_gid, node)
-        rich.print(node)
         await self._apply_flow_change(change)
 
         # print("_handle_new_ref_node", gid)
@@ -580,6 +575,12 @@ class {event.cfg.name}:
     async def _handle_edge_change(self, changed_edges: list[str]):
         cur_flow_gid = self._get_cur_flow_gid()
         change = self._manager.flow_edge_change(cur_flow_gid)
+        await self._apply_flow_change(change)
+
+    async def _on_node_configure(self, event: ConfigDialogEvent[ADVNodeModifyConfig]):
+        cfg = event.cfg
+        node_gid = event.userdata["node_gid"]
+        change = self._manager.modify_node_config(node_gid, cfg)
         await self._apply_flow_change(change)
 
 def _main():

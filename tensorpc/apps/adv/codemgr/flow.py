@@ -6,7 +6,7 @@ import shutil
 from typing import Any, Callable, Literal, Optional, Self, TypeGuard, TypeVar, Union
 
 import rich
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec, NodePrepResult
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec, BackendNode
 from tensorpc.apps.adv.codemgr.fragment import FragmentParseResult, FragmentParser, parse_alias_map
 from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser
 from tensorpc.apps.adv.codemgr.symbols import SymbolParseResult, SymbolParser
@@ -15,7 +15,7 @@ from tensorpc.constants import PACKAGE_ROOT
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.misc import OutIndicatorParseResult, MarkdownParseResult, GlobalScriptParseResult
 from tensorpc.apps.adv.logger import ADV_LOGGER
-from tensorpc.apps.adv.model import ADVConstHandles, ADVEdgeModel, ADVFlowModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeFlags, ADVNodeModel, ADVNodeHandle, ADVNodeType, ADVProject
+from tensorpc.apps.adv.model import ADVConstHandles, ADVEdgeModel, ADVFlowModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeFlags, ADVNodeModel, ADVNodeHandle, ADVNodeModifyConfig, ADVNodeRefInfo, ADVNodeType, ADVProject
 import hashlib
 from tensorpc.core.annolib import Undefined, is_undefined, undefined
 import dataclasses as dataclasses_plain
@@ -35,6 +35,7 @@ _NTYPE_TO_ID_PREFIX = {
     ADVNodeType.OUT_INDICATOR: "Out",
 
 }
+_NODE_ALLOW_REF = set([ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT, ADVNodeType.CLASS])
 
 
 _default_typing_imports = [
@@ -80,6 +81,7 @@ class NodeChangeFlag(enum.IntFlag):
     NEW = enum.auto() # indicate is new node
     ERROR_STATUS = enum.auto() # indicate error status changed
     IMPL_CODE = enum.auto()
+    REF = enum.auto() # ref changed
 
 @dataclasses.dataclass
 class ADVNodeChange:
@@ -152,9 +154,10 @@ class ExtNodeDesc:
 
 @dataclasses.dataclass
 class InlineFlowParseResult:
-    node_descs: list[NodePrepResult]
+    node_descs: list[BackendNode]
     input_handles: list[BackendHandle]
     output_handles: list[BackendHandle]
+    desc_node: Optional[BackendNode]
 
 @dataclasses.dataclass
 class FlowConnInternals:
@@ -171,22 +174,31 @@ class FlowCodeFragment:
     code_range: tuple[int, int, int, int]
     is_ref_node: bool = False
 
+@dataclasses.dataclass
+class InlineFlowDesc:
+    desc_node: Optional[BackendNode] # None for default inline flow
+    flow_be_nodes: list[BackendNode]
+
+@dataclasses.dataclass(kw_only=True)
+class InlineFlowNodeParseResult(FragmentParseResult):
+    pass
+
 @dataclasses.dataclass(kw_only=True)
 class FlowParseResult(FragmentParseResult):
     edges: list[ADVEdgeModel]
     flow_conn: FlowConnInternals
     symbol_dep_qnames: list[str] = dataclasses.field(default_factory=list)
-    isolate_fragments: list[NodePrepResult] = dataclasses.field(default_factory=list)
+    isolated_be_nodes: list[BackendNode] = dataclasses.field(default_factory=list)
 
     inlineflow_results: dict[str, InlineFlowParseResult] = dataclasses.field(default_factory=dict)
-    misc_node_parse_infos: dict[ADVNodeType, list[NodePrepResult]] = dataclasses.field(default_factory=dict)
-    ext_node_descs: list[NodePrepResult] = dataclasses.field(default_factory=list)
+    misc_be_nodes: dict[ADVNodeType, list[BackendNode]] = dataclasses.field(default_factory=dict)
+    ext_be_nodes: list[BackendNode] = dataclasses.field(default_factory=list)
     generated_code_lines: list[str] = dataclasses.field(default_factory=list)
     generated_code: str = ""
     has_subflow: bool = False
-    can_flow_node_be_ref: bool = False
     # class specific fields
-    auto_field_node_res: Optional[NodePrepResult] = None
+    auto_field_be_node: Optional[BackendNode] = None
+    base_inherited_be_node: Optional[BackendNode] = None
     
     def is_class(self):
         if self.node is None:
@@ -207,6 +219,85 @@ class FlowParseResult(FragmentParseResult):
         if self.node is None:
             return []
         return self.node.path + [self.node.name]
+
+    def get_ref_dep_lines(self):
+        if self.node is None:
+            # root flow
+            cur_import_path = []
+        else:
+            cur_import_path = self.node.path + [self.node.name]
+        if self._is_folder():
+            # add __adv_flow__.py to cur_import_path
+            dot_prefix = "." * (len(cur_import_path) + 1)
+        else:
+            # import path don't contains cur file, so add xxx.py to cur_import_path
+            dot_prefix = "." * (len(cur_import_path))
+
+        ref_dep_lines: list[str] = []
+        import_stmt_set: set[str] = set()
+        for node_desc in self.ext_be_nodes:
+            node = node_desc.node
+            import_stmt = node_desc.get_import_stmt(dot_prefix)
+            if import_stmt is not None:
+                import_stmt_set.add(import_stmt)
+        for import_stmt in import_stmt_set:
+            ref_dep_lines.append(import_stmt)
+        if self.base_inherited_be_node is not None:
+            assert self.node is not None and self.node.nType == ADVNodeType.CLASS
+            # add import stmt for base class
+            import_stmt = self.base_inherited_be_node.get_import_stmt(dot_prefix)
+            if import_stmt is not None:
+                import_stmt_set.add(import_stmt)
+
+        for node_desc in self.ext_be_nodes:
+            node = node_desc.node
+            # add marker to mark node id and position
+            kwarg_parts = self.get_node_meta_kwargs(node)
+            # if node_desc.type == "subflow":
+            #     kwarg_parts.append(f"is_subflow=True")
+            if node.inlinesf_name is not None:
+                kwarg_parts.append(f'inlineflow_name="{node.inlinesf_name}"')
+            if node_desc.is_subflow_def and node_desc.is_node_def_folder:
+                kwarg_parts.append(f'is_folder=True')
+            # ref import path is embedded to import stmt, so no need to save to marker here.
+            kwargs_str = ", ".join(kwarg_parts)
+            node_desc.is_node_def_folder
+            if node_desc.is_subflow_def:
+                if node_desc.is_class_node:
+                    mark_stmt = f"ADV.{adv_markers.mark_class_node.__name__}(name=\"{node_desc.node_def.name}\", {kwargs_str})"
+                else:
+                    mark_stmt = f"ADV.{adv_markers.mark_subflow_node.__name__}(name=\"{node_desc.node_def.name}\", {kwargs_str})"
+            else:
+                mark_stmt = f"ADV.{adv_markers.mark_ref_node.__name__}({node_desc.get_qualname_from_import()}, {node.nType}, flags={int(node.flags)}, {kwargs_str})"
+            ref_dep_lines.append(mark_stmt)
+        res_lines: list[str] = []
+        if ref_dep_lines:
+            res_lines.append("# ------ ADV Ref/Subflow Nodes Dependency Region (Optional) ------")
+            res_lines.append(f"ADV.{adv_markers.mark_ref_node_dep.__name__}()")
+            res_lines.extend(ref_dep_lines)
+            res_lines.append(f"ADV.{adv_markers.mark_ref_node_dep_end.__name__}()")
+
+        return res_lines
+
+    def _create_lines_for_frag_or_sym(self, descs: list[BackendNode], base_lineno: int, defined_in_class: Optional[bool] = None):
+        res_lines: list[str] = []
+        for node_desc in descs:
+            node = node_desc.node
+            if node.ref is not None:
+                continue 
+            if defined_in_class is not None:
+                if node.is_defined_in_class() == (not defined_in_class):
+                    continue
+            if isinstance(node_desc.parse_res, (FragmentParseResult, SymbolParseResult)):
+                parse_res = node_desc.parse_res
+            else:
+                raise RuntimeError("Invalid parse result type.")
+            parse_res.lineno = base_lineno + len(res_lines)
+            code_spec = parse_res.to_code_lines()
+            parse_res.loc = code_spec
+
+            res_lines.extend(code_spec.lines)
+        return res_lines
 
     def to_code_lines(self):
         self_is_class = False 
@@ -235,11 +326,11 @@ class FlowParseResult(FragmentParseResult):
         # global scripts
         # from ....apps import adv
         gs_lines_all: list[str] = []
-        if self.misc_node_parse_infos[ADVNodeType.GLOBAL_SCRIPT]:
+        if self.misc_be_nodes[ADVNodeType.GLOBAL_SCRIPT]:
             gs_lines_all.insert(0, "# ------ ADV Global Script Region ------")
 
-        for node_prep in self.misc_node_parse_infos[ADVNodeType.GLOBAL_SCRIPT]:
-            parse_res = node_prep.get_parse_res_checked(GlobalScriptParseResult)
+        for be_node in self.misc_be_nodes[ADVNodeType.GLOBAL_SCRIPT]:
+            parse_res = be_node.get_parse_res_checked(GlobalScriptParseResult)
             parse_res.lineno = len(lines) + len(gs_lines_all) + 1
             code_spec = parse_res.to_code_lines()
             parse_res.loc = code_spec
@@ -259,106 +350,60 @@ class FlowParseResult(FragmentParseResult):
         lines.extend(symbol_dep_lines)
         # ref deps
         ref_dep_lines: list[str] = []
-        if self.node is None:
-            # root flow
-            cur_import_path = []
-        else:
-            cur_import_path = self.node.path + [self.node.name]
-        if self._is_folder():
-            # add __adv_flow__.py to cur_import_path
-            dot_prefix = "." * (len(cur_import_path) + 1)
-        else:
-            # import path don't contains cur file, so add xxx.py to cur_import_path
-            dot_prefix = "." * (len(cur_import_path))
-        if self.ext_node_descs:
-            import_stmt_set: set[str] = set()
-            for node_desc in self.ext_node_descs:
-                node = node_desc.node
-                import_stmt = node_desc.get_import_stmt(dot_prefix)
-                if import_stmt is not None:
-                    import_stmt_set.add(import_stmt)
-            for import_stmt in import_stmt_set:
-                ref_dep_lines.append(import_stmt)
-
-            for node_desc in self.ext_node_descs:
-                node = node_desc.node
-                # add marker to mark node id and position
-                kwarg_parts = self.get_node_meta_kwargs(node)
-                # if node_desc.type == "subflow":
-                #     kwarg_parts.append(f"is_subflow=True")
-                if node.inlinesf_name is not None:
-                    kwarg_parts.append(f'inlineflow_name="{node.inlinesf_name}"')
-                if node_desc.is_subflow_def and node_desc.is_node_def_folder:
-                    kwarg_parts.append(f'is_folder=True')
-                # ref import path is embedded to import stmt, so no need to save to marker here.
-                kwargs_str = ", ".join(kwarg_parts)
-                node_desc.is_node_def_folder
-                if node_desc.is_subflow_def:
-                    if node_desc.is_class_node:
-                        mark_stmt = f"ADV.{adv_markers.mark_class_node.__name__}(name=\"{node_desc.node_def.name}\", {kwargs_str})"
-                    else:
-                        mark_stmt = f"ADV.{adv_markers.mark_subflow_def.__name__}(name=\"{node_desc.node_def.name}\", {kwargs_str})"
-                else:
-                    mark_stmt = f"ADV.{adv_markers.mark_ref_node.__name__}({node_desc.get_qualname_from_import()}, {node.nType}, {kwargs_str})"
-                ref_dep_lines.append(mark_stmt)
-        
-        if ref_dep_lines:
-            lines.append("# ------ ADV Ref/Subflow Nodes Dependency Region (Optional) ------")
-            lines.append(f"ADV.{adv_markers.mark_ref_node_dep.__name__}()")
-            lines.extend(ref_dep_lines)
-            lines.append(f"ADV.{adv_markers.mark_ref_node_dep_end.__name__}()")
+        if self.ext_be_nodes:
+            ref_dep_lines = self.get_ref_dep_lines()
+        lines.extend(ref_dep_lines)
         # symbol groups
         symbol_group_lines: list[str] = []
-        if self.misc_node_parse_infos[ADVNodeType.SYMBOLS]:
+        if self.misc_be_nodes[ADVNodeType.SYMBOLS]:
             symbol_group_lines.append("# ------ ADV Symbol Def Region ------")
-        for node_prep in self.misc_node_parse_infos[ADVNodeType.SYMBOLS]:
-            node = node_prep.node
+        for be_node in self.misc_be_nodes[ADVNodeType.SYMBOLS]:
+            node = be_node.node
             if node.ref is not None:
                 continue 
-            parse_res = node_prep.get_parse_res_checked(SymbolParseResult)
+            parse_res = be_node.get_parse_res_checked(SymbolParseResult)
             parse_res.lineno = len(lines) + len(symbol_group_lines) + 1
             code_spec = parse_res.to_code_lines()
             parse_res.loc = code_spec
             symbol_group_lines.extend(code_spec.lines)
         lines.extend(symbol_group_lines)
         # isolate fragments
-        isolate_fragment_lines: list[str] = []
-        for node_prep in self.isolate_fragments:
-            if node_prep.node.is_defined_in_class():
-                continue
-            parse_res = node_prep.get_parse_res_checked(FragmentParseResult)
-            parse_res.lineno = len(lines) + len(isolate_fragment_lines) + 1
-            code_spec = parse_res.to_code_lines()
-            parse_res.loc = code_spec
-            isolate_fragment_lines.extend(code_spec.lines)
+        isolate_fragment_lines: list[str] = self._create_lines_for_frag_or_sym(self.isolated_be_nodes, len(lines) + 1, defined_in_class=False)
         lines.extend(isolate_fragment_lines)
         # inline flow nodes not in class
-        inlineflow_noclass_lines: list[str] = []
-
         for inline_name, inline_desc in self.inlineflow_results.items():
-            for node_desc in inline_desc.node_descs:
-                node = node_desc.node
-                if node.ref is not None:
-                    continue 
-                if node.is_defined_in_class():
-                    continue
-                parse_res = node_desc.get_parse_res_checked(FragmentParseResult)
-                parse_res.lineno = len(lines) + len(inlineflow_noclass_lines) + 1
-                code_spec = parse_res.to_code_lines()
-                parse_res.loc = code_spec
-
-                inlineflow_noclass_lines.extend(code_spec.lines)
-        lines.extend(inlineflow_noclass_lines)
+            inline_ext_lines = self._create_lines_for_frag_or_sym(inline_desc.node_descs, len(lines) + 1, defined_in_class=False)
+            lines.extend(inline_ext_lines)
         # class def start
+        impl_spec = ImplCodeSpec(
+            [], -1, -1, -1, -1
+        )
         if self_is_class:
             assert self.node is not None 
-            # TODO inherit
-            lines.append(f"@ADV.{adv_markers.mark_class_def.__name__}()")
+            impl_spec = ImplCodeSpec(
+                [], 0, 1, -1, -1
+            )
+            self.lineno = len(lines) + 1
+            if self.base_inherited_be_node is not None:
+                inode_id = self.base_inherited_be_node.id
+                lines.append(f"@ADV.{adv_markers.mark_class_def.__name__}(inherit_node_id={repr(inode_id)})")
+            else:
+                lines.append(f"@ADV.{adv_markers.mark_class_def.__name__}()")
             if self.node.is_dataclass_node():
                 lines.append("@dataclasses.dataclass(kw_only=True)")
-            lines.append(f"class {class_name}:")
-            if self.auto_field_node_res is not None:
-                auto_field_parse_res = self.auto_field_node_res.parse_res
+            inherits: list[str] = []
+            if self.base_inherited_be_node is not None:
+                cls_name = self.base_inherited_be_node.node_def.name
+                inherits.append(cls_name)
+            if self.node is not None and not is_undefined(self.node.ext_inherits):
+                inherits.extend(self.node.ext_inherits)
+            if inherits:
+                cls_names = ", ".join(inherits)
+                lines.append(f"class {class_name}({cls_names}):")
+            else:
+                lines.append(f"class {class_name}:")
+            if self.auto_field_be_node is not None:
+                auto_field_parse_res = self.auto_field_be_node.parse_res
                 assert auto_field_parse_res is not None and isinstance(auto_field_parse_res, FragmentParseResult)
                 if self.node.is_dataclass_node():
                     # generate fields from auto field fn
@@ -366,43 +411,30 @@ class FlowParseResult(FragmentParseResult):
                 else:
                     lines.extend(auto_field_parse_res.create_init_fn_lines_if_auto_field())
         # all inline flow in class is method.
-        isolate_fragment_lines: list[str] = []
-        for node_prep in self.isolate_fragments:
-            if not node_prep.node.is_defined_in_class():
-                continue
-            parse_res = node_prep.get_parse_res_checked(FragmentParseResult)
-            parse_res.lineno = len(lines) + len(isolate_fragment_lines) + 1
-            code_spec = parse_res.to_code_lines()
-            parse_res.loc = code_spec
-            isolate_fragment_lines.extend(code_spec.lines)
+        isolate_fragment_lines = self._create_lines_for_frag_or_sym(self.isolated_be_nodes, len(lines) + 1, defined_in_class=True)
         lines.extend(isolate_fragment_lines)
 
         # subflow nodes
         inlineflow_lines: list[str] = []
 
         for inline_name, inline_desc in self.inlineflow_results.items():
-            for node_desc in inline_desc.node_descs:
-                node = node_desc.node
-                if node.ref is not None:
-                    continue 
-                if not node.is_defined_in_class():
-                    continue
-                parse_res = node_desc.get_parse_res_checked(FragmentParseResult)
-                parse_res.lineno = len(lines) + len(inlineflow_lines) + 1
-                code_spec = parse_res.to_code_lines()
-                parse_res.loc = code_spec
-                inlineflow_lines.extend(code_spec.lines)
+            inline_ext_lines = self._create_lines_for_frag_or_sym(inline_desc.node_descs, len(lines) + len(inlineflow_lines) + 1, defined_in_class=True)
+            inlineflow_lines.extend(inline_ext_lines)
             # build subflow
             func_name = inline_name
-            inlineflow_fn_lines = [
-                f"@ADV.{adv_markers.mark_inlineflow.__name__}()",
-                f"def {func_name}(",
-            ]
-            if self_is_class:
-                # add self
-                inlineflow_fn_lines.append(f"    self,")
-            inlineflow_fn_lines += FragmentParseResult.get_signature_lines_from_handles(inline_desc.input_handles)
-            inlineflow_fn_lines.append(f") -> dict[str, Any]:")
+            if inline_desc.desc_node is None:
+                inlineflow_fn_lines = [
+                    f"@ADV.{adv_markers.mark_inlineflow.__name__}()",
+                    f"def {func_name}(",
+                ]
+                if self_is_class:
+                    # add self
+                    inlineflow_fn_lines.append(f"    self,")
+                inlineflow_fn_lines += FragmentParseResult.get_signature_lines_from_handles(inline_desc.input_handles)
+                inlineflow_fn_lines.append(f") -> dict[str, Any]:")
+            else:
+                assert inline_desc.desc_node.node.is_inline_flow_desc()
+                inlineflow_fn_lines = inline_desc.desc_node.get_parse_res_checked(FragmentParseResult).get_code_lines_without_body(create_indent=False)
             body_lines: list[str] = []
             for node_desc in inline_desc.node_descs:
                 node = node_desc.node
@@ -411,7 +443,12 @@ class FlowParseResult(FragmentParseResult):
                     parse_res.input_handles,
                     self.flow_conn.out_node_handle_to_node,
                 )
-                anno = node_desc.get_ref_node_meta_anno_str()
+                type_str = None
+                if node.nType == ADVNodeType.CLASS:
+                    type_str = node_desc.node_def.name
+                elif node.is_class_method() and node_desc.node_def_parent is not None:
+                    type_str = node_desc.node_def_parent.name
+                anno = node_desc.get_ref_node_meta_anno_str(type_str)
                 if parse_res.out_type == "single":
                     var_name = parse_res.output_handles[0].name
                     body_lines.append(f"{var_name}{anno} = {func_call_str}")
@@ -422,8 +459,12 @@ class FlowParseResult(FragmentParseResult):
                     # dict
                     body_lines.append(f"_adv_tmp_out{anno} = {func_call_str}")
                     for h in parse_res.output_handles:
-                        assert not isinstance(h.handle.dict_key, Undefined)
-                        body_lines.append(f"{h.handle.name} = _adv_tmp_out['{h.handle.dict_key}']")
+                        if isinstance(h.handle.dict_key, Undefined):
+                            dict_key = h.handle.name 
+                        else:
+                            dict_key = h.handle.dict_key 
+
+                        body_lines.append(f"{h.handle.name} = _adv_tmp_out['{dict_key}']")
             # subflow always return dict
             body_lines.append("return {")
             for h in inline_desc.output_handles:
@@ -435,15 +476,20 @@ class FlowParseResult(FragmentParseResult):
             body_lines.append("}")
             body_lines_indented = [f"    {line}" for line in body_lines]
             inlineflow_fn_lines.extend(body_lines_indented)
-            if self_is_class:
-                inlineflow_fn_lines = [f"    {line}" for line in inlineflow_fn_lines]
+            if inline_desc.desc_node is None:
+                if self_is_class:
+                    inlineflow_fn_lines = [f"    {line}" for line in inlineflow_fn_lines]
+            else:
+                if inline_desc.desc_node.node.is_defined_in_class():
+                    inlineflow_fn_lines = [f"    {line}" for line in inlineflow_fn_lines]
+
             inlineflow_lines.extend(inlineflow_fn_lines)
         lines.extend(inlineflow_lines)
         out_indicator_lines: list[str] = []
-        if self.misc_node_parse_infos[ADVNodeType.OUT_INDICATOR]:
+        if self.misc_be_nodes[ADVNodeType.OUT_INDICATOR]:
             out_indicator_lines.append("# ------ ADV Out Indicator Region ------")
-        for node_prep in self.misc_node_parse_infos[ADVNodeType.OUT_INDICATOR]:
-            parse_res = node_prep.get_parse_res_checked(OutIndicatorParseResult)
+        for be_node in self.misc_be_nodes[ADVNodeType.OUT_INDICATOR]:
+            parse_res = be_node.get_parse_res_checked(OutIndicatorParseResult)
             parse_res.lineno = len(lines) + len(out_indicator_lines) + 1
             code_spec = parse_res.to_code_lines()
             parse_res.loc = code_spec
@@ -451,10 +497,10 @@ class FlowParseResult(FragmentParseResult):
         if out_indicator_lines:
             lines.extend(out_indicator_lines)
         markdown_lines: list[str] = []
-        if self.misc_node_parse_infos[ADVNodeType.MARKDOWN]:
+        if self.misc_be_nodes[ADVNodeType.MARKDOWN]:
             markdown_lines.append("# ------ ADV Markdown Region ------")
-        for node_prep in self.misc_node_parse_infos[ADVNodeType.MARKDOWN]:
-            node = node_prep.node
+        for be_node in self.misc_be_nodes[ADVNodeType.MARKDOWN]:
+            node = be_node.node
             assert node.impl is not None 
             content = node.impl.code
             assert not isinstance(node.width, Undefined) and not isinstance(node.height, Undefined)
@@ -477,22 +523,21 @@ class FlowParseResult(FragmentParseResult):
                          f"source_handle=\"{edge.sourceHandle}\", "
                          f"target=\"{edge.target}\", "
                          f"target_handle=\"{edge.targetHandle}\")")
-
-        return ImplCodeSpec(
-            lines, -1, -1, -1, -1
-        )
+        lines.append("# ------ End of ADV Flow Definition ------")
+        impl_spec.lines = lines
+        return impl_spec
 
 @dataclasses_plain.dataclass
 class ModifyParseCache:
     visited: set[str]
-    old_parse_res: dict[str, tuple[FlowParseResult, dict[str, BaseParseResult]]]
+    old_parse_res: dict[str, tuple[FlowParseResult, dict[str, BaseParseResult], dict[str, ADVEdgeModel]]]
 
 @dataclasses_plain.dataclass
 class FlowCache:
     flow: ADVFlowModel
     parser: "FlowParser"
     parent_node: Optional[ADVNodeModel]
-    node_name_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
+    named_node_name_set: set[str] = dataclasses_plain.field(default_factory=set)
     node_id_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
     edge_id_pool: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
     child_flow_gids: set[str] = dataclasses_plain.field(default_factory=set)
@@ -630,7 +675,7 @@ class ADVProjectBackendManager:
                         dep_flow_cache = flow_node_gid_to_cache[dep_flow_gid]
                         dep_flow_cache.child_flow_gids.add(flow_gid)
                         cache.dep_flow_gids.add(dep_flow_gid)
-                elif not is_undefined(node.cls_inherit_ref):
+                elif node.cls_inherit_ref is not None:
                     ref_node_cache = node_gid_to_cache[node.get_inherit_ref_global_uid()]
                     dep_flow_gid = ref_node_cache.flow_node_gid
                     if dep_flow_gid != flow_gid: # remove local ref
@@ -725,7 +770,9 @@ class ADVProjectBackendManager:
                 for child_node in node.flow.nodes.values():
                     self._node_gid_to_cache[child_node.get_global_uid()] = NodeConnCache(child_node, node_gid)
                     # self._node_gid_to_flow_node_gid[child_node.get_global_uid()] = node_gid
-                    fcache.node_name_pool(child_node.name)
+                    if child_node.is_named_node():
+                        assert child_node.name not in fcache.named_node_name_set, f"Named node name conflict: {child_node.name} in flow node {node_gid}."
+                        fcache.named_node_name_set.add(child_node.name)
                     fcache.node_id_pool(child_node.id)
                     _traverse_node(child_node)
         
@@ -770,9 +817,13 @@ class ADVProjectBackendManager:
             node_cache = self._node_gid_to_cache[ref_node_gid] 
             node_gid = ref_node_gid
             is_ref_node = True
-        if node_cache.node.flow is not None:
+        if node_cache.node.flow is not None and node_cache.node.nType != ADVNodeType.CLASS:
             # currently we don't support show code of subflow.
             return None 
+        if node_cache.node.is_inline_flow_desc():
+            # currently we don't support show code of inline flow.
+            return None 
+
         flow_gid = self._get_flow_gid_from_node_gid(node_gid)
         fcache = self._flow_node_gid_to_cache[flow_gid]
         parser = fcache.parser
@@ -878,9 +929,10 @@ class ADVProjectBackendManager:
             for flow_gid, _ in cur_layer:
                 # assert flow_gid not in layered_parse_visited
                 cur_flow_gids.append(flow_gid)
-                flow_parser = self._flow_node_gid_to_cache[flow_gid].parser
+                fcache = self._flow_node_gid_to_cache[flow_gid]
+                flow_parser = fcache.parser
                 if flow_parser._flow_parse_result is not None:
-                    gcache.old_parse_res[flow_gid] = (flow_parser._flow_parse_result, flow_parser._node_id_to_parse_result)
+                    gcache.old_parse_res[flow_gid] = (flow_parser._flow_parse_result, flow_parser._node_id_to_parse_result, fcache.flow.edges)
                 flow_parser.clear_parse_result()
 
             for flow_gid, changed_node_gids in cur_layer:
@@ -895,8 +947,9 @@ class ADVProjectBackendManager:
                 flow_parser = fcache.parser
                 prev_flow_parse_res = None
                 prev_nid_to_parse_res: dict[str, BaseParseResult] = {}
+                prev_edges: Optional[dict[str, ADVEdgeModel]] = None
                 if flow_gid in gcache.old_parse_res:
-                    prev_flow_parse_res, prev_nid_to_parse_res = gcache.old_parse_res[flow_gid]
+                    prev_flow_parse_res, prev_nid_to_parse_res, prev_edges = gcache.old_parse_res[flow_gid]
                 flow_parse_res = flow_parser._parse_flow_recursive(fcache.parent_node, flow_gid, flow, self, gcache.visited) 
                 flow_code_changed: bool = True
                 if prev_flow_parse_res is not None:
@@ -921,10 +974,15 @@ class ADVProjectBackendManager:
                                     symbol_group_gid_may_change.add(cur_node.get_global_uid())
                         elif node.nType == ADVNodeType.SYMBOLS:
                             symbol_group_gid_may_change.add(node_gid)
+                        elif node.nType == ADVNodeType.FRAGMENT and node.is_inline_flow_desc() and node.ref is None:
+                            # trigger all fragment node change.
+                            for node_id, node_parse_res in node_id_to_parse_res.items():
+                                cur_node = flow.nodes[node_id]
+                                if cur_node.nType == ADVNodeType.FRAGMENT and not cur_node.is_inline_flow_desc() and cur_node.id != node.id:
+                                    frag_id_may_change.add(cur_node.id)
                         # we don't care about frag/other node deletion here because
                         # they only affect inline flow, which is already handled in flow parse.
                         continue
-
                     node_cache = self._node_gid_to_cache[node_gid]
                     node = node_cache.node
                     node_parse_res = node_id_to_parse_res[node.id]
@@ -973,11 +1031,10 @@ class ADVProjectBackendManager:
 
                     elif node.nType == ADVNodeType.SYMBOLS:
                         symbol_group_gid_may_change.add(node_gid)
-                    elif node.nType == ADVNodeType.FRAGMENT:
+                    elif node.nType == ADVNodeType.FRAGMENT or node.nType == ADVNodeType.CLASS:
                         frag_id_may_change.add(node.id)
                     else:
                         remain_change_ids.add(node.id)
-
                 # 2. process all symbol group nodes
                 for sym_node_gid in symbol_group_gid_may_change:
                     if sym_node_gid in deleted_node_gid_map:
@@ -1026,12 +1083,23 @@ class ADVProjectBackendManager:
 
                 # 3. prepare frag nodes
                 frag_id_may_change_next: set[str] = set(frag_id_may_change)
+                all_changed_inline_flows: set[str] = set()
+                # add inline node descs
+                for frag_node_id in frag_id_may_change:
+                    frag_node = flow.nodes[frag_node_id]
+                    if frag_node.inlinesf_name is not None:
+                        all_changed_inline_flows.add(frag_node.inlinesf_name)
+                if all_changed_inline_flows:
+                    for node in flow.nodes.values():
+                        if node.is_inline_flow_desc() and node.ref is None:
+                            if node.name in all_changed_inline_flows:
+                                frag_id_may_change_next.add(node.id)
                 for frag_node_id in frag_id_may_change:
                     frag_node = flow.nodes[frag_node_id]
                     frag_node_cache = self._node_gid_to_cache[frag_node.get_global_uid()]
                     # always check local ref frag nodes to simplify logic
                     frag_id_may_change_next.update(frag_node_cache.ref_node_ids_local)
-                # 4. process fragment nodes
+                # 4. process fragment/class nodes
                 for node_id in frag_id_may_change_next:
                     node_parse_res = node_id_to_parse_res[node_id]
                     cur_node = flow.nodes[node_id]
@@ -1053,11 +1121,18 @@ class ADVProjectBackendManager:
                         is_node_io_changed = node_parse_res.is_io_handle_changed(prev_node_parse_res)
                         is_alias_map_changed = cur_node.alias_map != prev_node.alias_map
                         is_inline_flow_changed = cur_node.inlinesf_name != prev_node.inlinesf_name
+                        if cur_node.ref is not None and prev_node.ref is not None:
+                            is_ref_change = not cur_node.ref.is_equal_to(prev_node.ref)
+                        elif prev_node.ref is None and cur_node.ref is None:
+                            is_ref_change = False
+                        else:
+                            is_ref_change = True
                     else:
                         is_name_changed = not is_ref_node
                         is_node_io_changed = True
                         is_alias_map_changed = is_ref_node
                         is_inline_flow_changed = cur_node.inlinesf_name is not None
+                        is_ref_change = True
                     # local changes without ref
                     if is_node_io_changed:
                         change.flags |= NodeChangeFlag.HANDLES
@@ -1065,10 +1140,15 @@ class ADVProjectBackendManager:
                         change.flags |= NodeChangeFlag.ALIAS_MAP
                     if is_inline_flow_changed:
                         change.flags |= NodeChangeFlag.INLINE_FLOW
-
+                    if is_ref_change:
+                        change.flags |= NodeChangeFlag.REF
+                    # 1. IO change (except nested flow), 2. name change 
+                    # will trigger external ref update.
+                    # nested flow IO change is triggered when we handle that flow.
                     if not is_ref_node and cur_node.flow is None and is_node_io_changed:
                         next_layer_nodes.update(node_cache.ref_gids_external)
                     if not is_ref_node and is_name_changed:
+                        # TODO ref name alias?
                         change.flags |= NodeChangeFlag.NAME
                         next_layer_nodes.update(node_cache.ref_gids_external)
                     if change.flags != NodeChangeFlag(0):
@@ -1098,17 +1178,19 @@ class ADVProjectBackendManager:
                         change.flags |= NodeChangeFlag.IMPL_CODE
                     if change.flags != NodeChangeFlag(0):
                         node_changes[node_gid] = change
-
-                if prev_flow_parse_res is None or not self._is_edges_equal(prev_flow_parse_res.edges, flow_parse_res.edges):
+                # here we must compare flow_parse_res.edges with flow.edges instead of prev_flow_parse_res.edges
+                # because frontend already change flow.edges.
+                if prev_edges is None or not self._is_edges_equal(list(prev_edges.values()), flow_parse_res.edges):
                     new_flow_edges[flow_gid] = flow_parse_res.edges
 
                 # if flow main inline flow io is changed by any reparse, reparse all ref fragment+inline nodes
+                # TODO currently we don't support change base class node
                 is_inlineflow_changed = True 
                 if prev_flow_parse_res is not None:
                     assert isinstance(prev_flow_parse_res, FlowParseResult)
                     is_inlineflow_changed = prev_flow_parse_res.is_io_handle_changed(flow_parse_res)
                 if is_inlineflow_changed:
-                    # TODO currently root flow can't be used as a fragment node.
+                    # root flow can't be used as a fragment node.
                     if fcache.parent_node is not None:
                         parent_cache = self._node_gid_to_cache[fcache.parent_node.get_global_uid()]
                         next_layer_nodes.update(parent_cache.ref_gids_external)
@@ -1151,38 +1233,53 @@ class ADVProjectBackendManager:
             return ADVProjectChange()
         return self._reparse_changed_node(node_gid)
 
-    def modify_alias_map(self, node_gid: str, new_alias_map: str):
-        # new_alias_map is local change, 
-        node = self._node_gid_to_cache[node_gid].node
-        assert node.ref is not None or node.flow is not None, "Only ref node or subflow node can have alias map."
-        node.alias_map = new_alias_map
-        flow_gid = self._get_flow_gid_from_node_gid(node_gid)
-        return self._reparse_flow(flow_gid)
 
-
-    def modify_node_name(self, node_gid: str, new_name: str):
+    def modify_node_config(self, node_gid: str, cfg: ADVNodeModifyConfig):
         cache = self._node_gid_to_cache[node_gid]
         node = cache.node
-        assert not node.is_local_ref_node(), "you can't change name of local ref node."
         old_name = node.name
-        if old_name == new_name:
+        old_inline_flow_name = node.inlinesf_name
+        old_alias_map = node.alias_map
+        if old_name == cfg.name and old_inline_flow_name == cfg.inline_flow_name and old_alias_map == cfg.alias_map:
             return ADVProjectChange()
-        node.name = new_name
+        if old_name != cfg.name:
+            assert not node.is_local_ref_node(), "you can't change name of local ref node."
+        if old_alias_map != cfg.alias_map:
+            assert node.ref is not None or node.flow is not None, "Only ref node or subflow node can have alias map."
+
+        node.name = cfg.name
+        if cfg.inline_flow_name != "":
+            node.inlinesf_name = cfg.inline_flow_name
+        else:
+            node.inlinesf_name = None
+        node.alias_map = cfg.alias_map
         flow_gid = cache.flow_node_gid
-        fcache = self._flow_node_gid_to_cache[flow_gid]
-        fcache.node_name_pool.pop_if_exists(old_name)
-        # we use node id instead of name, 
-        # name is only used in code generation and user code.
-        # flow itself (include scheduler) don't use name.
-        return self._reparse_changed_node(node_gid)
+        changed_node_gids: list[str] = [node_gid]
+        if node.is_inline_flow_desc() and node.ref is None:
+            # change all node with same inline flow name
+            fcache = self._flow_node_gid_to_cache[flow_gid]
+            for node_cur in fcache.flow.nodes.values():
+                if node_cur.inlinesf_name == old_name:
+                    node_cur.inlinesf_name = cfg.name
+                    changed_node_gids.append(node_cur.get_global_uid())
+        if old_name != cfg.name:
+            fcache = self._flow_node_gid_to_cache[flow_gid]
+            assert not node.is_local_ref_node(), "you can't change name of local ref node."
+            # we use node id instead of name, 
+            # name is only used in code generation and user code.
+            # flow itself (include scheduler) don't use name.
+            if old_name in fcache.named_node_name_set:
+                fcache.named_node_name_set.remove(old_name)
+            fcache.named_node_name_set.add(cfg.name)
+        return self._reparse_changed_node_internal(flow_gid, changed_node_gids)
 
     def add_new_node(self, flow_node_gid: str, new_node: ADVNodeModel):
         fcache = self._flow_node_gid_to_cache[flow_node_gid]
-        if new_node.nType in [ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT]:
-            assert new_node.name not in fcache.node_name_pool, f"Node name {new_node.name} already exists in flow."
+        if new_node.is_named_node():
+            assert new_node.name not in fcache.named_node_name_set, f"Node name {new_node.name} already exists in flow."
             if fcache.parent_node is not None:
                 assert new_node.name != fcache.parent_node.name, "Symbol group/fragment name must be different from parent flow name."
-            fcache.node_name_pool(new_node.name)
+            # fcache.named_node_name_set.add(new_node.name)
         new_node.id = fcache.node_id_pool(new_node.id)
         adv_proj = self._root_flow_getter()
         fcache.flow.nodes[new_node.id] = new_node
@@ -1222,13 +1319,13 @@ class ADVProjectBackendManager:
             if new_node.flow is not None:
                 self._flow_node_gid_to_cache.pop(new_node.get_global_uid())
             self._node_gid_to_cache.pop(new_node.get_global_uid())
-            if new_node.nType in [ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT]:
-                fcache.node_name_pool.pop_if_exists(new_node.name)
             ngid_to_path, ngid_to_fpath = adv_proj.assign_path_to_all_node()
             adv_proj.update_ref_path(ngid_to_fpath)
             adv_proj.node_gid_to_path = ngid_to_path
             adv_proj.node_gid_to_frontend_path = ngid_to_fpath
             raise e
+        if new_node.is_named_node():
+            fcache.named_node_name_set.add(new_node.name)
         # add meta update to res
         res = self._reparse_changed_node(new_node.get_global_uid())
         if new_node.flow is None or not new_node.flow.nodes:
@@ -1300,6 +1397,8 @@ class ADVProjectBackendManager:
         for gid, (node, flow_gid) in all_gid_to_node_pairs.items():
             fcache = self._flow_node_gid_to_cache[flow_gid]
             fcache.flow.nodes.pop(node.id)
+            if node.name in fcache.named_node_name_set:
+                fcache.named_node_name_set.remove(node.name)
         self._reflesh_dependency(self._node_gid_to_cache, self._flow_node_gid_to_cache)
         res = self._reparse_changed_nodes_internal(list(flow_gid_to_deleted_node_gids.items()), {k: v[0] for k, v in all_gid_to_node_pairs.items()})
         res.deleted_node_pairs = list((v[0].id, v[1]) for k, v in all_gid_to_node_pairs.items())
@@ -1336,24 +1435,24 @@ class ADVProjectBackendManager:
                     assert isinstance(node_change.parse_res, (SymbolParseResult, FragmentParseResult, OutIndicatorParseResult))
                     handles = self._get_handles_from_parse_res(node_change.parse_res)
                     assert handles is not None 
-                    # import rich 
-                    # rich.print(handles)
                     node_draft.handles = handles
-                elif node_change.flags & NodeChangeFlag.NAME:
+                if node_change.flags & NodeChangeFlag.NAME:
                     node_draft.name = node.name
-                elif node_change.flags & NodeChangeFlag.ALIAS_MAP:
+                if node_change.flags & NodeChangeFlag.ALIAS_MAP:
                     node_draft.alias_map = node.alias_map
-                elif node_change.flags & NodeChangeFlag.INLINE_FLOW:
+                if node_change.flags & NodeChangeFlag.INLINE_FLOW:
                     node_draft.inlinesf_name = node.inlinesf_name
-                elif node_change.flags & NodeChangeFlag.IMPL_CODE:
+                if node_change.flags & NodeChangeFlag.IMPL_CODE:
                     assert node.nType == ADVNodeType.MARKDOWN
                     assert node.impl is not None 
                     node_draft.impl.code = node.impl.code
+                if node_change.flags & NodeChangeFlag.REF:
+                    node_draft.ref = node.ref
 
         for flow_node_gid, edges in change.new_flow_edges.items():
             edges_dict =  {e.id: e for e in edges}
             assert len(edges_dict) == len(edges)
-            if flow_node_gid == "":
+            if flow_node_gid == TENSORPC_ADV_ROOT_FLOW_ID:
                 draft.flow.edges = edges_dict
             else:
                 node_cache = self._node_gid_to_cache[flow_node_gid]
@@ -1388,17 +1487,35 @@ class ADVProjectBackendManager:
             if flow_gid in fcache_cur_flow.all_child_flow_gids:
                 continue
             for node in fcache.flow.nodes.values():
-                if node.ref is None and node.nType in (ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT):
+                if node.ref is None and node.nType in (ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT, ADVNodeType.CLASS):
                     if flow_node_gid == flow_gid and node.nType in (ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS):
                         # local ref of global script and symbol group is not allowed
+                        continue
+                    if flow_node_gid != flow_gid and node.is_init_fn():
+                        # init fn only allowed to be local ref
+                        # we use class node instead of init fn in external flows.
                         continue
                     if node.flow is not None:
                         fcache_cur_node = self._flow_node_gid_to_cache[node.get_global_uid()]
                         parse_res = fcache_cur_node.parser.get_flow_parse_result_checked()
-                        if not parse_res.can_flow_node_be_ref:
+                        if not parse_res.can_node_be_ref:
                             continue 
                     res.append(node)
         return res 
+
+    def collect_all_inline_flow_names(self, flow_node_gid: str) -> list[str]:
+        fcache_cur_flow = self._flow_node_gid_to_cache[flow_node_gid]
+        flow_node = fcache_cur_flow.parent_node
+        res: list[str] = []
+        if flow_node is not None:
+            if flow_node.nType == ADVNodeType.FRAGMENT:
+                # fragment node has a main inline flow that have same name as fragment node
+                res.append(flow_node.name)
+        # if fcache_cur_flow.parent_node
+        for node_id, node in fcache_cur_flow.flow.nodes.items():
+            if node.is_inline_flow_desc() and node.ref is None:
+                res.append(node.name)
+        return list(set(res)) 
 
     def flow_nodes_position_change(self, flow_node_gid: str):
         # change position may change auto-generated edge, and fragment siguature, 
@@ -1413,16 +1530,34 @@ class ADVProjectBackendManager:
         return self._reparse_changed_node_internal(flow_node_gid, changed_node_gids)
 
     def flow_edge_change(self, flow_node_gid: str):
-        # WARNING: edge change is already changed outside.
+        # WARNING: edges is already changed outside.
         fcache = self._flow_node_gid_to_cache[flow_node_gid]
         flow = fcache.flow
         changed_node_gids: list[str] = []
-        # edge change may change out indicator node handles
         for node in flow.nodes.values():
+            # edge change may change out indicator node handles
             if node.nType in [ADVNodeType.OUT_INDICATOR]:
+                changed_node_gids.append(node.get_global_uid())
+            # edge change may change inline flow desc nodes
+            if node.is_inline_flow_desc() and node.ref is None:
                 changed_node_gids.append(node.get_global_uid())
 
         return self._reparse_changed_node_internal(flow_node_gid, changed_node_gids)
+
+    def fragment_node_ref_change(self, node_gid: str, new_ref: Optional[ADVNodeRefInfo] = None):
+        # only allow ref node to change ref
+        # WARNING: edge change is already changed outside.
+        cache = self._node_gid_to_cache[node_gid]
+        assert cache.node.nType == ADVNodeType.FRAGMENT, "only fragment node can change ref."
+        assert cache.node.ref is not None, "only ref node can change ref."
+        flow_node_gid = cache.flow_node_gid
+        if new_ref is None:
+            node_def_gid = cache.node.get_ref_global_uid()
+            node_def = self._node_gid_to_cache[node_def_gid]
+            cache.node.impl = node_def.node.impl
+        # TODO we need to trigger editor change when we convert ref node to def node
+        self._reflesh_dependency(self._node_gid_to_cache, self._flow_node_gid_to_cache)
+        return self._reparse_changed_node_internal(flow_node_gid, [node_gid])
 
     def modify_flow_code_external(self, new_flow_codes: dict[str, str]):
         # only allow modify impl of fragment/symbolgroup/global script.
@@ -1432,9 +1567,9 @@ class ADVProjectBackendManager:
         new_path_to_code = {old_fcaches[gid].get_code_relative_path_checked(): code for gid, code in new_flow_codes.items()}
         fspath_to_old_fcaches = {v.get_code_relative_path_checked(): v for v in old_fcaches.values()}
 
-        all_flows_no_change = {v.get_code_relative_path_checked(): v.flow for v in self._flow_node_gid_to_cache.values()}
+        all_flow_nodes_no_change = {v.get_code_relative_path_checked(): (v.parent_node, v.flow) for v in self._flow_node_gid_to_cache.values()}
         for new_path in new_path_to_code:
-            all_flows_no_change.pop(new_path)
+            all_flow_nodes_no_change.pop(new_path)
         accessor: Callable[[list[str], Path], str] = lambda path, fspath: new_path_to_code[fspath]
         proj_parser = ADVProjectParser(path_code_accessor=accessor)
         parsed_flows: dict[Path, ADVFlowModel] = {}
@@ -1449,7 +1584,7 @@ class ADVProjectBackendManager:
             else:
                 path_with_name = fcache.parent_node.path + [fcache.parent_node.name]
 
-            proj_parser._parse_desc_to_flow_model(path_with_name, path, set(), parsed_flows)
+            proj_parser._parse_desc_to_flow_model(path_with_name, path, set(), parsed_flows, all_flow_nodes_no_change)
         changed_flow_and_node_ids: list[tuple[str, list[str]]] = []
         # check first
         for fspath, parsed_flow in parsed_flows.items():
@@ -1543,11 +1678,98 @@ class FlowParser:
         assert self._flow_parse_result is not None
         return self._flow_parse_result.to_code_lines()
 
+    def _node_to_be_node(self, node: ADVNodeModel, cur_flow_node: Optional[ADVNodeModel], flow_gid: str, 
+            cur_flow_is_folder: bool, mgr: ADVProjectBackendManager, visited: set[str], is_inherit_ref: bool = False):
+        node_type = ADVNodeType(node.nType)
+
+        is_subflow_def = False
+        is_local_ref = False
+        parent_is_folder = False
+        is_node_def_folder = False
+        if is_inherit_ref:
+            ref = node.cls_inherit_ref
+            assert ref is not None 
+        else:
+            ref = node.ref
+        if ref is not None:
+            assert node.flow is None, "Ref node cannot have nested flow."
+            assert node_type in _NODE_ALLOW_REF, f"Only nodes of type {_NODE_ALLOW_REF} can be ref node, but got {node_type.name}."
+
+            assert ref.fe_path is not None 
+            root_flow = mgr._root_flow_getter().flow
+            node_id_path = ADVProject.get_node_id_path_from_fe_path(ref.fe_path)
+            pair = ADVProject.get_flow_node_by_fe_path(root_flow, ref.fe_path)
+            assert pair is not None 
+            node_parent, node_def = pair
+            # if node_type == ADVNodeType.CLASS:
+            #     pass 
+            # node = mgr._node_id_to_node[node.ref_node_id]
+            # node_parent = None
+            if len(node_id_path) > 1:
+                assert node_parent is not None 
+                # node_parent = mgr._node_id_to_node[node_id_path[-2]]
+                parent_flow = node_parent.flow
+                assert parent_flow is not None
+                flow_parser = mgr.get_subflow_parser(node_parent)
+                flow_node_gid = node_parent.get_global_uid()
+            else:
+                fcache = mgr._flow_node_gid_to_cache[TENSORPC_ADV_ROOT_FLOW_ID]
+                flow_parser = fcache.parser
+                parent_flow = fcache.flow
+                flow_node_gid = TENSORPC_ADV_ROOT_FLOW_ID
+            if flow_gid == flow_node_gid:
+                is_local_ref = True 
+                parse_res = None
+            else:
+                if flow_parser._flow_parse_result is None:
+                    flow_parser._parse_flow_recursive(node_parent, flow_node_gid, parent_flow, mgr, visited)
+                parse_res = flow_parser._node_id_to_parse_result[node_def.id]
+                if isinstance(parse_res, FlowParseResult):
+                    is_node_def_folder = parse_res._is_folder()
+                assert flow_parser._flow_parse_result is not None 
+                parent_is_folder = flow_parser._flow_parse_result._is_folder()
+                parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(node))
+                if not is_inherit_ref:
+                    self._node_id_to_parse_result[node.id] = parse_res
+
+            # node_def, parse_res, is_local_ref, node_parent = self._get_or_compile_real_node(parent_node, flow_gid, node, mgr, visited)
+            assert node.nType == node_def.nType, f"Ref node type {node.nType} does not match original node type {node_def.nType}."
+        else:
+            node_def = node
+            node_parent = cur_flow_node
+            is_local_ref = False
+            parent_is_folder = cur_flow_is_folder
+            if node.flow is not None:
+                flow_parser = mgr.get_subflow_parser(node)
+                if flow_parser._flow_parse_result is None:
+                    parse_res = flow_parser._parse_flow_recursive(node, node.get_global_uid(), node.flow, mgr, visited)
+                else:
+                    parse_res = flow_parser._flow_parse_result
+                self._node_id_to_parse_result[node.id] = parse_res
+                is_subflow_def = True 
+                is_node_def_folder = parse_res._is_folder()
+            else:
+                parse_res = None
+        be_node = BackendNode(
+            node_def= node_def,
+            node=node,
+            node_def_parent=node_parent,
+            parse_res=parse_res,
+            is_local_ref=is_local_ref,
+            is_subflow_def=is_subflow_def,
+            is_parent_folder=parent_is_folder,
+            is_ext_node=parse_res is not None,
+            is_node_def_folder=isinstance(parse_res, FlowParseResult) and parse_res.has_subflow,
+        )
+        assert be_node.is_node_def_folder is is_node_def_folder
+        return be_node
+
+
     def _preprocess_nodes(self, cur_flow_node: Optional[ADVNodeModel], flow_gid: str, nodes: list[ADVNodeModel], 
             cur_flow_is_folder: bool,
-            mgr: ADVProjectBackendManager, visited: set[str]) -> dict[ADVNodeType, list[NodePrepResult]]:
+            mgr: ADVProjectBackendManager, visited: set[str]) -> tuple[dict[ADVNodeType, list[BackendNode]], Optional[BackendNode]]:
         # currently class node can't have nested class/fragment flow node.
-        res: dict[ADVNodeType, list[NodePrepResult]] = {
+        res: dict[ADVNodeType, list[BackendNode]] = {
             ADVNodeType.GLOBAL_SCRIPT: [],
             ADVNodeType.SYMBOLS: [],
             ADVNodeType.FRAGMENT: [],
@@ -1555,88 +1777,22 @@ class FlowParser:
             ADVNodeType.MARKDOWN: [],
             ADVNodeType.CLASS: [],
         }
-        node_allow_ref = set([ADVNodeType.GLOBAL_SCRIPT, ADVNodeType.SYMBOLS, ADVNodeType.FRAGMENT, ADVNodeType.CLASS])
         for node in nodes:
             node_type = ADVNodeType(node.nType)
-
-            is_subflow_def = False
-            is_local_ref = False
-            parent_is_folder = False
-            is_node_def_folder = False
-            if node.ref is not None:
-                assert node.flow is None, "Ref node cannot have nested flow."
-                assert node_type in node_allow_ref, f"Only nodes of type {node_allow_ref} can be ref node, but got {node_type.name}."
-
-                assert node.ref.fe_path is not None 
-                root_flow = mgr._root_flow_getter().flow
-                node_id_path = ADVProject.get_node_id_path_from_fe_path(node.ref.fe_path)
-                pair = ADVProject.get_flow_node_by_fe_path(root_flow, node.ref.fe_path)
-                assert pair is not None 
-                node_parent, node_def = pair
-                # if node_type == ADVNodeType.CLASS:
-                #     pass 
-                # node = mgr._node_id_to_node[node.ref_node_id]
-                # node_parent = None
-                if len(node_id_path) > 1:
-                    assert node_parent is not None 
-                    # node_parent = mgr._node_id_to_node[node_id_path[-2]]
-                    parent_flow = node_parent.flow
-                    assert parent_flow is not None
-                    flow_parser = mgr.get_subflow_parser(node_parent)
-                    flow_node_gid = node_parent.get_global_uid()
-                else:
-                    fcache = mgr._flow_node_gid_to_cache[TENSORPC_ADV_ROOT_FLOW_ID]
-                    flow_parser = fcache.parser
-                    parent_flow = fcache.flow
-                    flow_node_gid = TENSORPC_ADV_ROOT_FLOW_ID
-                if flow_gid == flow_node_gid:
-                    is_local_ref = True 
-                    parse_res = None
-                else:
-                    if flow_parser._flow_parse_result is None:
-                        flow_parser._parse_flow_recursive(node_parent, flow_node_gid, parent_flow, mgr, visited)
-                    parse_res = flow_parser._node_id_to_parse_result[node_def.id]
-                    if isinstance(parse_res, FlowParseResult):
-                        is_node_def_folder = parse_res._is_folder()
-                    assert flow_parser._flow_parse_result is not None 
-                    parent_is_folder = flow_parser._flow_parse_result._is_folder()
-                    parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(node))
-                    self._node_id_to_parse_result[node.id] = parse_res
-
-                # node_def, parse_res, is_local_ref, node_parent = self._get_or_compile_real_node(parent_node, flow_gid, node, mgr, visited)
-                assert node.nType == node_def.nType, f"Ref node type {node.nType} does not match original node type {node_def.nType}."
-            else:
-                node_def = node
-                node_parent = cur_flow_node
-                is_local_ref = False
-                parent_is_folder = cur_flow_is_folder
-                if node.flow is not None:
-                    flow_parser = mgr.get_subflow_parser(node)
-                    if flow_parser._flow_parse_result is None:
-                        parse_res = flow_parser._parse_flow_recursive(node, node.get_global_uid(), node.flow, mgr, visited)
-                    else:
-                        parse_res = flow_parser._flow_parse_result
-                    self._node_id_to_parse_result[node.id] = parse_res
-                    is_subflow_def = True 
-                    is_node_def_folder = parse_res._is_folder()
-                else:
-                    parse_res = None
-            prep_res = NodePrepResult(
-                node_def= node_def,
-                node=node,
-                node_def_parent=node_parent,
-                parse_res=parse_res,
-                is_local_ref=is_local_ref,
-                is_subflow_def=is_subflow_def,
-                is_parent_folder=parent_is_folder,
-                is_ext_node=parse_res is not None,
-                is_node_def_folder=isinstance(parse_res, FlowParseResult) and parse_res.has_subflow,
-            )
-            assert prep_res.is_node_def_folder is is_node_def_folder
-            res[node_type].append(prep_res)
-        return res 
+            be_node = self._node_to_be_node(node, cur_flow_node, flow_gid, cur_flow_is_folder, mgr, visited)
+            res[node_type].append(be_node)
+        base_inherited_be_node: Optional[BackendNode] = None
+        if cur_flow_node is not None and cur_flow_node.nType == ADVNodeType.CLASS:
+            if cur_flow_node.cls_inherit_ref is not None:
+                base_inherited_be_node = self._node_to_be_node(
+                    cur_flow_node, cur_flow_node=cur_flow_node, flow_gid=flow_gid, 
+                    cur_flow_is_folder=cur_flow_is_folder, mgr=mgr, visited=visited,
+                    is_inherit_ref=True)
+                assert base_inherited_be_node.node.ref is None
+        return res, base_inherited_be_node
 
     def _sort_flow_nodes(self, nodes_dict: dict[str, ADVNodeModel]) -> list[ADVNodeModel]:
+        # TODO use topological sort here to support local ref of inline flow.
         child_nodes = list(nodes_dict.values())
         node_sort_tuple: list[tuple[tuple[float, bool, float], ADVNodeModel]] = []
         for n in child_nodes:
@@ -1658,10 +1814,10 @@ class FlowParser:
         child_nodes = [t[1] for t in node_sort_tuple]
         return child_nodes
 
-    def _parse_global_scripts(self, node_preps: list[NodePrepResult]):
+    def _parse_global_scripts(self, be_nodes: list[BackendNode]):
         global_scripts: dict[str, str] = {}
-        for node_prep in node_preps:
-            node_def = node_prep.node_def
+        for be_node in be_nodes:
+            node_def = be_node.node_def
             assert node_def.nType == ADVNodeType.GLOBAL_SCRIPT
             assert node_def.impl is not None, f"GLOBAL_SCRIPT node {node_def.id} has no code."
             code = node_def.impl.code
@@ -1670,10 +1826,12 @@ class FlowParser:
             end_column = len(code_lines[-1]) + 1
 
             global_scripts[node_def.id] = (node_def.impl.code)
-            self._node_id_to_parse_result[node_def.id] = GlobalScriptParseResult(
-                node=dataclasses.replace(node_prep.node),
+            parse_res = GlobalScriptParseResult(
+                node=dataclasses.replace(be_node.node),
                 code=node_def.impl.code,
             )
+            self._node_id_to_parse_result[node_def.id] = parse_res
+            be_node.parse_res = parse_res
         global_script = "\n".join(global_scripts.values())
         global_scope = self._global_scope_parser.parse_global_script(global_script)
         # required for all adv meta code
@@ -1683,15 +1841,15 @@ class FlowParser:
         })
         return global_scripts, global_scope
 
-    def _parse_symbol_groups(self, node_preps: list[NodePrepResult], global_scripts: dict[str, str], global_scope: dict[str, Any]):
+    def _parse_symbol_groups(self, be_nodes: list[BackendNode], global_scripts: dict[str, str], global_scope: dict[str, Any]):
         symbols: list[BackendHandle] = []
         sym_group_dep_qnames: list[str] = []
         # use ordered symbol indexes to make sure arguments of fragment are stable
         cnt_base = 0
-        for node_prep in node_preps:
-            node = node_prep.node 
-            n_def = node_prep.node_def
-            cached_parse_res = node_prep.parse_res
+        for be_node in be_nodes:
+            node = be_node.node 
+            n_def = be_node.node_def
+            cached_parse_res = be_node.parse_res
             if cached_parse_res is not None:
                 assert isinstance(cached_parse_res, SymbolParseResult)
                 cached_parse_res = cached_parse_res.copy(node.id, cnt_base)
@@ -1705,21 +1863,41 @@ class FlowParser:
                 parser = SymbolParser()
                 parse_res = parser.parse_symbol_node(node, n_def.impl.code, global_scope, list(global_scripts.values()))
                 parse_res = parse_res.copy(offset=cnt_base, is_sym_handle=True)
-                node_prep.parse_res = parse_res
+                be_node.parse_res = parse_res
                 self._node_id_to_parse_result[node.id] = parse_res
             symbols.extend(parse_res.symbols)
             cnt_base += parse_res.num_symbols
         return symbols, sym_group_dep_qnames
 
-    def _parse_fragments(self, node_preps: list[NodePrepResult], root_symbol_scope: dict[str, BackendHandle], global_scope: dict[str, Any], parent_node: Optional[ADVNodeModel]):
+    def _parse_inline_flow_descs(self, flow_node: Optional[ADVNodeModel], be_nodes: list[BackendNode]) -> dict[str, Optional[BackendNode]]:
+        res: dict[str, Optional[BackendNode]] = {}
+        for be_node in be_nodes:
+            if be_node.node.is_inline_flow_desc() and be_node.node.ref is None:
+                res[be_node.node.name] = be_node
+                # assign a default parse result here.
+                be_node.parse_res = FragmentParseResult.create_empty_result(be_node.node)
+                self._node_id_to_parse_result[be_node.node.id] = be_node.parse_res
+        # we set `None` for default inline flow.
+        if flow_node is not None and flow_node.nType == ADVNodeType.FRAGMENT:
+            if flow_node.name not in res:
+                res[flow_node.name] = None
+        return res
+
+    def _parse_fragments_or_classes(self, be_nodes: list[BackendNode], root_symbol_scope: dict[str, BackendHandle], 
+            global_scope: dict[str, Any], parent_node: Optional[ADVNodeModel], inline_flow_desc_map: dict[str, Optional[BackendNode]]):
         # parse fragments, auto-generated edges will also be handled.
-        inlineflow_node_descs: dict[str, list[NodePrepResult]] = {}
+        inlineflow_descs: dict[str, InlineFlowDesc] = {}
         inlineflow_name_to_scope: dict[str, dict[str, BackendHandle]] = {}
-        isolated_node_preps: list[NodePrepResult] = []
-        for node_prep in node_preps:
-            n = node_prep.node
-            n_def = node_prep.node_def
-            ext_parse_res = node_prep.parse_res
+        isolated_be_nodes: list[BackendNode] = []
+        for be_node in be_nodes:
+            n = be_node.node
+            if n.is_inline_flow_desc() and n.ref is None:
+                # inline flow desc node (def) don't have code, no need to parse here.
+                continue 
+            n_def = be_node.node_def
+            ext_parse_res = be_node.parse_res
+            if n.ref is None and n.flow is None:
+                assert ext_parse_res is None
             alias_map = None
             # user can use output mapping to alias output symbols
             # of ref nodes or subflow nodes
@@ -1728,14 +1906,19 @@ class FlowParser:
                 alias_map = parse_alias_map(n.alias_map)
             # prepare symbol scope for each subflow
             subf_name = n.inlinesf_name
+            need_clear_inlinesf_name = False
+            if subf_name is not None and subf_name not in inline_flow_desc_map:
+                subf_name = None # invalid inline flow name, ignore it
+                need_clear_inlinesf_name = True
             if subf_name is not None:
-                assert n.name != n.inlinesf_name, f"Node {n.id} name cannot be same as inlineflow name."
+                assert n.name != subf_name, f"Node {n.id} name cannot be same as inlineflow name."
                 if subf_name not in inlineflow_name_to_scope:
                     inlineflow_name_to_scope[subf_name] = root_symbol_scope.copy()
                 symbol_scope = inlineflow_name_to_scope[subf_name]
             else:
                 # isolated fragment won't change symbol_scope.
                 symbol_scope = root_symbol_scope
+            
             if ext_parse_res is not None:
                 assert isinstance(ext_parse_res, FragmentParseResult)
                 ext_parse_res = ext_parse_res.copy(n.id)
@@ -1744,13 +1927,16 @@ class FlowParser:
                 if n_def.is_method():
                     parse_res = parse_res.add_self_handle()
             else:
-                if node_prep.is_local_ref:
+                if be_node.is_local_ref:
                     assert n.ref is not None
                     parse_res = self._node_id_to_parse_result[n.ref.node_id]
                     assert isinstance(parse_res, FragmentParseResult)
                     parse_res = parse_res.copy(n.id)
                     parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(n))
+                    if n_def.is_method():
+                        parse_res = parse_res.add_self_handle()
                 else:
+                    assert n_def.nType != ADVNodeType.CLASS, "shouldn't happen"
                     assert n_def.impl is not None, f"fragment node {n_def.id} has no code."
                     if n.id in self._node_id_to_parser:
                         parser = self._node_id_to_parser[n.id]
@@ -1768,35 +1954,40 @@ class FlowParser:
             if alias_map is not None:
                 parse_res = parse_res.do_alias_map(alias_map)
                 parse_res = dataclasses.replace(parse_res, alias_map=n.alias_map)
+            if need_clear_inlinesf_name:
+                be_node.node.inlinesf_name = None
             self._node_id_to_parse_result[n.id] = parse_res
-            node_prep.parse_res = parse_res
-            if subf_name is not None:
+            be_node.parse_res = parse_res
+            # TODO better auto edge.
+            if subf_name is not None and n.ref is None and n.flow is None:
                 # only main flow node will contribute symbols to symbol scope
                 # add outputs to symbol scope
                 for handle in parse_res.output_handles:
                     symbol_scope[handle.name] = handle 
+            # TODO check valid nodes in inline flow, e.g. non-method inline flow can't have method fragment.
             if subf_name is not None:
-                if subf_name not in inlineflow_node_descs:
-                    inlineflow_node_descs[subf_name] = []
-                inlineflow_node_descs[subf_name].append(node_prep)
+                if subf_name not in inlineflow_descs:
+                    inlineflow_descs[subf_name] = InlineFlowDesc(inline_flow_desc_map[subf_name], [])
+                # NOTE inline flow desc def node can't be inline flow node (ignored above), you need to create ref node.
+                inlineflow_descs[subf_name].flow_be_nodes.append(be_node)
             else:
-                if not node_prep.is_subflow_def and not node_prep.is_ext_node:
+                if not be_node.is_subflow_def and not be_node.is_ext_node:
                     # subflow nodes are handled separately
-                    isolated_node_preps.append(node_prep)
-        return inlineflow_node_descs, inlineflow_name_to_scope, isolated_node_preps
+                    isolated_be_nodes.append(be_node)
+        return inlineflow_descs, isolated_be_nodes
 
-    def _build_flow_connection(self, node_prep_res: dict[ADVNodeType, list[NodePrepResult]]) -> FlowConnInternals:
+    def _build_flow_connection(self, be_nodes_map: dict[ADVNodeType, list[BackendNode]]) -> FlowConnInternals:
         inp_node_handle_to_node: dict[tuple[str, str], tuple[ADVNodeModel, BackendHandle]] = {}
         node_id_to_inp_handles: dict[str, list[BackendHandle]] = {}
         out_node_handle_to_node: dict[tuple[str, str], tuple[ADVNodeModel, BackendHandle]] = {}
         node_id_to_out_handles: dict[str, list[BackendHandle]] = {}
         auto_edges: list[ADVEdgeModel] = []
-        frag_nodes = node_prep_res[ADVNodeType.FRAGMENT]
-        symbol_nodes = node_prep_res[ADVNodeType.SYMBOLS]
-        out_indicator_nodes = node_prep_res[ADVNodeType.OUT_INDICATOR]
-        class_nodes = node_prep_res[ADVNodeType.CLASS]
-        for node_prep in (frag_nodes + symbol_nodes + out_indicator_nodes + class_nodes):
-            n = node_prep.node
+        frag_nodes = be_nodes_map[ADVNodeType.FRAGMENT]
+        symbol_nodes = be_nodes_map[ADVNodeType.SYMBOLS]
+        out_indicator_nodes = be_nodes_map[ADVNodeType.OUT_INDICATOR]
+        class_nodes = be_nodes_map[ADVNodeType.CLASS]
+        for be_node in (frag_nodes + symbol_nodes + out_indicator_nodes + class_nodes):
+            n = be_node.node
             node_id_to_inp_handles[n.id] = []
             node_id_to_out_handles[n.id] = []
             parse_res = self._node_id_to_parse_result[n.id]
@@ -1809,11 +2000,12 @@ class FlowParser:
                         continue 
                     inp_node_handle_to_node[(n.id, handle.id)] = (n, handle)
                     node_id_to_inp_handles[n.id].append(handle)
-                    if n.ref is None and n.flow is None:
-                        assert handle.handle.source_info, f"{n.id}({handle.id}) input handle has no source info for auto edge."
+                    # inline flow desc (fragment) don't support auto edge.
+                    # if n.ref is None and n.flow is None and not n.is_inline_flow_desc():
+                    if handle.handle.source_info is not None:
+                        # assert handle.handle.source_info, f"{n.id}({handle.id}) input handle has no source info for auto edge."
                         snid = handle.handle.source_info.node_id
                         shid = handle.handle.source_info.handle_id
-
                         auto_edges.append(ADVEdgeModel(
                             id=self._edge_uid_pool(f"AE-{snid}({shid})->{n.id}({handle.id})"),
                             source=snid,
@@ -1825,7 +2017,6 @@ class FlowParser:
                 for handle in parse_res.output_handles:
                     out_node_handle_to_node[(n.id, handle.id)] = (n, handle)
                     node_id_to_out_handles[n.id].append(handle)
-                    # print("Out handle for fragment:", n.id, handle.id, handle.handle.symbol_name)
             elif isinstance(parse_res, SymbolParseResult):
                 for handle in parse_res.symbols:
                     out_node_handle_to_node[(n.id, handle.id)] = (n, handle)
@@ -1841,10 +2032,10 @@ class FlowParser:
             auto_edges=auto_edges,
         )
 
-    def _parse_out_indicators(self, node_preps: list[NodePrepResult]):
+    def _parse_out_indicators(self, be_nodes: list[BackendNode]):
         inlineflow_out_handles: list[tuple[str, BackendHandle]] = []
-        for node_prep in node_preps:
-            n = node_prep.node
+        for be_node in be_nodes:
+            n = be_node.node
             out_indicator_handle = ADVNodeHandle(
                 id=ADVConstHandles.OutIndicator,
                 name=n.name,
@@ -1854,24 +2045,28 @@ class FlowParser:
             )
             backend_handle = BackendHandle(handle=out_indicator_handle, index=0)
             # output indicator won't be ref node
-            self._node_id_to_parse_result[n.id] = OutIndicatorParseResult(
+            parse_res = OutIndicatorParseResult(
                 node=dataclasses.replace(n),
                 succeed=True,
                 handle=backend_handle,
             )
+            self._node_id_to_parse_result[n.id] = parse_res 
+            be_node.parse_res = parse_res
         return inlineflow_out_handles
 
-    def _parse_markdowns(self, node_preps: list[NodePrepResult]):
-        for node_prep in node_preps:
-            n = node_prep.node
+    def _parse_markdowns(self, be_nodes: list[BackendNode]):
+        for be_node in be_nodes:
+            n = be_node.node
             # output indicator won't be ref node
-            self._node_id_to_parse_result[n.id] = MarkdownParseResult(
+            md_parse_res = MarkdownParseResult(
                 node=dataclasses.replace(n),
                 succeed=True,
             )
+            self._node_id_to_parse_result[n.id] = md_parse_res
+            be_node.parse_res = md_parse_res
         return
 
-    def _parse_user_edges(self, user_edges: list[ADVEdgeModel], flow_conn: FlowConnInternals, ):
+    def _parse_user_edges(self, user_edges: list[ADVEdgeModel], flow_conn: FlowConnInternals, inline_flow_descs: dict[str, Optional[BackendNode]]):
         inlineflow_out_handles: list[tuple[str, BackendHandle]] = []
         valid_edges: list[ADVEdgeModel] = []
 
@@ -1884,6 +2079,30 @@ class FlowParser:
             if source_key_valid and target_key_valid:
                 source_node, source_handle = flow_conn.out_node_handle_to_node[source_key]
                 target_node, target_handle = flow_conn.inp_node_handle_to_node[target_key]
+                if source_node.nType == ADVNodeType.FRAGMENT or source_node.nType == ADVNodeType.CLASS:
+                    if target_node.nType == ADVNodeType.FRAGMENT or target_node.nType == ADVNodeType.CLASS:
+                        # we will remove invalid inline sf name later.
+                        source_iname = source_node.inlinesf_name
+                        if source_iname not in inline_flow_descs:
+                            source_iname = None
+                        target_iname = target_node.inlinesf_name
+                        if target_iname not in inline_flow_descs:
+                            target_iname = None
+                        if source_iname != target_iname:
+                            ADV_LOGGER.error(f"Edge from {edge.source}({edge.sourceHandle})<{source_iname}> "
+                                            f"to {edge.target}({edge.targetHandle})<{target_iname}> crosses inlineflow "
+                                            "and will be removed.")
+                            continue
+                if target_node.nType == ADVNodeType.OUT_INDICATOR:
+                    source_iname = source_node.inlinesf_name
+                    if source_iname not in inline_flow_descs:
+                        source_iname = None
+
+                    if source_iname is None:
+                        ADV_LOGGER.error(f"Edge from {edge.source}({edge.sourceHandle}) "
+                                        f"to {edge.target}({edge.targetHandle}) connects to output indicator "
+                                        "but source node is not in inlineflow and will be removed.")
+                        continue
                 target_handle.handle.set_source_info_inplace(source_node.id, source_handle.handle.id)
                 source_handle.target_node_handle_id.add((edge.target, edge.targetHandle))
                 if target_node.nType == ADVNodeType.OUT_INDICATOR:
@@ -1907,16 +2126,16 @@ class FlowParser:
                                    "and will be removed.")
         return valid_edges, inlineflow_out_handles
 
-    def _parse_inlineflow(self, inlineflow_descs: dict[str, list[NodePrepResult]], root_symbol_scope: dict[str, BackendHandle], 
-            inlineflow_scopes: dict[str, dict[str, BackendHandle]],
-            inlineflow_out_handles: list[tuple[str, BackendHandle]], flow_conn: FlowConnInternals, nodes_dict: dict[str, ADVNodeModel]):
-        sorted_subflow_descs: dict[str, list[NodePrepResult]] = {k: [] for k in inlineflow_descs.keys()}
+    def _parse_inlineflow(self, inlineflow_descs: dict[str, InlineFlowDesc], root_symbol_scope: dict[str, BackendHandle], 
+            inlineflow_out_handles: list[tuple[str, BackendHandle]], 
+            flow_conn: FlowConnInternals, nodes_dict: dict[str, ADVNodeModel]):
+        sorted_subflow_descs: dict[str, list[BackendNode]] = {k: [] for k in inlineflow_descs.keys()}
         subflow_node_ids: set[str] = set()
         out_handles_per_flow: dict[str, list[tuple[str, BackendHandle]]] = {}
-        for subf_name, node_descs in inlineflow_descs.items():
+        for subf_name, iflow_desc in inlineflow_descs.items():
             # look for nodes that have no connection on output handles
-            nodes = [nd.node for nd in node_descs]
-            node_id_to_nd = {nd.node.id: nd for nd in node_descs}
+            nodes = [nd.node for nd in iflow_desc.flow_be_nodes]
+            node_id_to_nd = {nd.node.id: nd for nd in iflow_desc.flow_be_nodes}
             root_nodes: list[ADVNodeModel] = []
             for node in nodes:
                 out_handles = flow_conn.node_id_to_out_handles[node.id]
@@ -1941,15 +2160,6 @@ class FlowParser:
             for source_node_id, source_handle in inlineflow_out_handles:
                 if source_node_id in subf_node_id_to_nodes:
                     out_handles_per_flow[subf_name].append((source_node_id, source_handle))
-            # TODO should we only allow output indicator as inline flow output?
-            # if not out_handles_per_flow[subf_name]:
-            #     # use non-symbol handles in current scope as output handles
-            #     scope = inlineflow_scopes[subf_name]
-            #     for symbol_name, handle in scope.items():
-            #         if not handle.handle.is_sym_handle:
-            #             handle.is_inlineflow_out = True
-            #             assert handle.handle.source_node_id is not None 
-            #             out_handles_per_flow[subf_name].append((handle.handle.source_node_id, handle))
             postorder_nodes: list[ADVNodeModel] = []
             visited_nodes: set[str] = set()
             for root_node in root_nodes:
@@ -1972,7 +2182,6 @@ class FlowParser:
             subf_node_id_to_nodes = {n.node.id: n for n in subf_descs}
             for handle in root_symbol_scope.values():
                 for target_node_id, _ in handle.target_node_handle_id:
-                    # print(flow_id, target_node_id, subf_node_id_to_nodes.keys())
                     if target_node_id in subf_node_id_to_nodes:
                         # input handle connects to outside node
                         handle = handle.copy(prefix=ADVHandlePrefix.Input)
@@ -1983,21 +2192,37 @@ class FlowParser:
             for source_node_id, source_handle in out_handles_per_flow[flow_name]:
                 subf_output_handles.append(source_handle)
             subf_output_handles.sort(key=lambda h: h.index)
-
+            desc_be_node = inlineflow_descs[flow_name].desc_node
             inlineflow_res[flow_name] = InlineFlowParseResult(
                 node_descs=subf_descs,
                 input_handles=subf_input_handles,
                 output_handles=subf_output_handles,
+                desc_node=desc_be_node,
             )
+            if desc_be_node is not None:
+                desc_be_node.parse_res = FragmentParseResult(
+                    succeed=True,
+                    func_name=desc_be_node.node.name,
+                    node=dataclasses.replace(desc_be_node.node),
+                    input_handles=subf_input_handles,
+                    output_handles=subf_output_handles,
+                    alias_map=desc_be_node.node.alias_map,
+                    out_type="dict",
+                    out_type_anno="dict[str, Any]",
+                    can_node_be_ref=len(subf_descs) > 0,
+                )
+                self._node_id_to_parse_result[desc_be_node.node.id] = desc_be_node.parse_res
         return inlineflow_res
 
+    def _clear_invalid_inlineflow_name(self, inlineflow_descs: dict[str, InlineFlowDesc]):
+        pass 
 
     def _parse_flow_recursive(self, flow_node: Optional[ADVNodeModel], flow_id: str, flow: ADVFlowModel, mgr: ADVProjectBackendManager, visited: set[str]):
         if self._flow_parse_result is not None:
             return self._flow_parse_result
         if flow_id in visited:
             raise ValueError(f"Cyclic flow reference detected at flow id {flow_id}, {visited}")
-        ADV_LOGGER.warning(f"Parsing flow {"__ROOT__" if not flow_id else flow_id} ...")
+        ADV_LOGGER.warning(f"Parsing flow {'__ROOT__' if not flow_id else flow_id} ...")
         child_nodes = self._sort_flow_nodes(flow.nodes)
         has_subflow = False
         for node in child_nodes:
@@ -2009,60 +2234,63 @@ class FlowParser:
         flow_node_is_class = False
         if flow_node is not None:
             flow_node_is_class = flow_node.nType == ADVNodeType.CLASS
-        node_prep_res = self._preprocess_nodes(flow_node, flow_id, child_nodes, has_subflow, mgr, visited)
+        be_nodes_map, base_inherited_be_node = self._preprocess_nodes(flow_node, flow_id, child_nodes, has_subflow, mgr, visited)
+        inline_flow_descs = self._parse_inline_flow_descs(flow_node, be_nodes_map[ADVNodeType.FRAGMENT])
         # store ref nodes and subflow nodes
-        nodes_canbe_ref = (node_prep_res[ADVNodeType.GLOBAL_SCRIPT] + node_prep_res[ADVNodeType.SYMBOLS] + 
-            node_prep_res[ADVNodeType.FRAGMENT] + node_prep_res[ADVNodeType.CLASS])
-        ext_node_descs: list[NodePrepResult] = []
-        for node_prep in nodes_canbe_ref:
-            if node_prep.is_subflow_def or node_prep.is_ext_node:
-                ext_node_descs.append(node_prep)
+        nodes_canbe_ref = (be_nodes_map[ADVNodeType.GLOBAL_SCRIPT] + be_nodes_map[ADVNodeType.SYMBOLS] + 
+            be_nodes_map[ADVNodeType.FRAGMENT] + be_nodes_map[ADVNodeType.CLASS])
+        ext_be_nodes: list[BackendNode] = []
+        for be_node in nodes_canbe_ref:
+            if be_node.is_subflow_def or be_node.is_ext_node:
+                ext_be_nodes.append(be_node)
         # 1. parse global script nodes to build global scope
-        global_scripts, global_scope = self._parse_global_scripts(node_prep_res[ADVNodeType.GLOBAL_SCRIPT])
+        global_scripts, global_scope = self._parse_global_scripts(be_nodes_map[ADVNodeType.GLOBAL_SCRIPT])
         # 2. parse symbol group to build symbol scope
-        symbols, sym_group_dep_qnames = self._parse_symbol_groups(node_prep_res[ADVNodeType.SYMBOLS], global_scripts, global_scope)
+        symbols, sym_group_dep_qnames = self._parse_symbol_groups(be_nodes_map[ADVNodeType.SYMBOLS], global_scripts, global_scope)
         root_symbol_scope: dict[str, BackendHandle] = {s.handle.symbol_name: s for s in symbols}
         # 3. parse fragments, auto-generated edges will also be handled.
-        inlineflow_node_descs, inlineflow_scopes, isolated_node_preps = self._parse_fragments(
-            node_prep_res[ADVNodeType.FRAGMENT], root_symbol_scope, global_scope, flow_node)
+        inlineflow_descs, isolated_be_nodes = self._parse_fragments_or_classes(
+            be_nodes_map[ADVNodeType.FRAGMENT] + be_nodes_map[ADVNodeType.CLASS], 
+            root_symbol_scope, global_scope, flow_node, inline_flow_descs)
         # now all nodes with output handle are parsed. we can build node-handle map.
-        self._parse_out_indicators(node_prep_res[ADVNodeType.OUT_INDICATOR])
-        self._parse_markdowns(node_prep_res[ADVNodeType.MARKDOWN])
+        self._parse_out_indicators(be_nodes_map[ADVNodeType.OUT_INDICATOR])
+        self._parse_markdowns(be_nodes_map[ADVNodeType.MARKDOWN])
         edges = list(flow.edges.values())
         edges = list(filter(lambda e: not e.isAutoEdge, edges))
-        flow_conn = self._build_flow_connection(node_prep_res)
-        valid_edges, inlineflow_out_handles = self._parse_user_edges(edges, flow_conn)
-        inlineflow_res = self._parse_inlineflow(inlineflow_node_descs, root_symbol_scope, 
-            inlineflow_scopes, inlineflow_out_handles, flow_conn, flow.nodes)
+        flow_conn = self._build_flow_connection(be_nodes_map)
+        valid_edges, inlineflow_out_handles = self._parse_user_edges(edges, flow_conn, inline_flow_descs)
+        inlineflow_res = self._parse_inlineflow(inlineflow_descs, root_symbol_scope, 
+            inlineflow_out_handles, flow_conn, flow.nodes)
         all_input_handles: list[BackendHandle] = []
         all_output_handles: list[BackendHandle] = []
         can_flow_node_be_ref = False
-        auto_field_node_res: Optional[NodePrepResult] = None
-
+        auto_field_be_node: Optional[BackendNode] = None
         if flow_node_is_class:
             # TODO currently user must defined a init function for class node.
             assert flow_node is not None 
             out_type = "single"
             out_type_anno = flow_node.name # TODO better name here.
             if flow_node is not None:
-                init_fn_node_res: Optional[NodePrepResult] = None
-                for prep_res in node_prep_res[ADVNodeType.FRAGMENT]:
-                    if prep_res.node_def.is_init_fn():
-                        init_fn_node = prep_res 
-                    if prep_res.node_def.is_auto_field_fn():
-                        auto_field_node_res = prep_res
+                init_fn_node_res: Optional[BackendNode] = None
+                for be_node in be_nodes_map[ADVNodeType.FRAGMENT]:
+                    if be_node.node_def.is_init_fn():
+                        init_fn_node_res = be_node 
+                    if be_node.node_def.is_auto_field_fn():
+                        auto_field_be_node = be_node
                 if init_fn_node_res is not None:
                     init_fn_parse_res = self._node_id_to_parse_result[init_fn_node_res.node.id]
                     assert isinstance(init_fn_parse_res, FragmentParseResult)
                     all_input_handles = init_fn_parse_res.input_handles
-                    all_output_handles = init_fn_parse_res.output_handles
+                    all_output_handles = [
+                        FragmentParseResult.create_self_handle(camel_to_snake(flow_node.name), init_fn_node_res.node.id, is_input=False)
+                    ]
                     can_flow_node_be_ref = True
-                elif auto_field_node_res is not None:
-                    auto_init_fn_parse_res = self._node_id_to_parse_result[auto_field_node_res.node.id]
+                elif auto_field_be_node is not None:
+                    auto_init_fn_parse_res = self._node_id_to_parse_result[auto_field_be_node.node.id]
                     assert isinstance(auto_init_fn_parse_res, FragmentParseResult)
                     all_input_handles = auto_init_fn_parse_res.input_handles
                     all_output_handles = [
-                        FragmentParseResult.create_self_handle(camel_to_snake(flow_node.name), is_input=False)
+                        FragmentParseResult.create_self_handle(camel_to_snake(flow_node.name), auto_field_be_node.node.id, is_input=False)
                     ]
                     can_flow_node_be_ref = True 
         else:
@@ -2074,13 +2302,11 @@ class FlowParser:
                 all_output_handles = inlineflow_res[flow_node.name].output_handles
                 can_flow_node_be_ref = len(inlineflow_res[flow_node.name].node_descs) > 0
         misc_nodes = {
-            ADVNodeType.GLOBAL_SCRIPT: [p for p in node_prep_res[ADVNodeType.GLOBAL_SCRIPT]],
-            ADVNodeType.OUT_INDICATOR: [p for p in node_prep_res[ADVNodeType.OUT_INDICATOR]],
-            ADVNodeType.SYMBOLS: [p for p in node_prep_res[ADVNodeType.SYMBOLS]],
-            ADVNodeType.MARKDOWN: [p for p in node_prep_res[ADVNodeType.MARKDOWN]],
+            ADVNodeType.GLOBAL_SCRIPT: [p for p in be_nodes_map[ADVNodeType.GLOBAL_SCRIPT]],
+            ADVNodeType.OUT_INDICATOR: [p for p in be_nodes_map[ADVNodeType.OUT_INDICATOR]],
+            ADVNodeType.SYMBOLS: [p for p in be_nodes_map[ADVNodeType.SYMBOLS]],
+            ADVNodeType.MARKDOWN: [p for p in be_nodes_map[ADVNodeType.MARKDOWN]],
         }
-        # import rich 
-        # rich.print(flow_id, all_input_handles, all_output_handles)
         flow_parse_res = FlowParseResult(
             node=dataclasses.replace(flow_node) if flow_node is not None else flow_node,
             func_name=flow_node.name if flow_node is not None else "",
@@ -2093,20 +2319,21 @@ class FlowParser:
             # flow related fields
             symbol_dep_qnames=list(set(sym_group_dep_qnames)),
             edges=valid_edges + flow_conn.auto_edges,
-            misc_node_parse_infos=misc_nodes,
-            isolate_fragments=isolated_node_preps,
+            misc_be_nodes=misc_nodes,
+            isolated_be_nodes=isolated_be_nodes,
             inlineflow_results=inlineflow_res,
-            ext_node_descs=ext_node_descs,
+            ext_be_nodes=ext_be_nodes,
             has_subflow=has_subflow if flow_node is not None else True,
             alias_map=flow_node.alias_map if flow_node is not None else "",
-            can_flow_node_be_ref=can_flow_node_be_ref,
-            auto_field_node_res=auto_field_node_res,
+            can_node_be_ref=can_flow_node_be_ref,
+            auto_field_be_node=auto_field_be_node,
+            base_inherited_be_node=base_inherited_be_node,
         )
         self._flow_parse_result = flow_parse_res
-        code_lines = flow_parse_res.to_code_lines()
-        flow_parse_res.generated_code_lines = code_lines.lines
-        flow_parse_res.generated_code = "\n".join(code_lines.lines)
-
+        code_spec = flow_parse_res.to_code_lines()
+        flow_parse_res.generated_code_lines = code_spec.lines
+        flow_parse_res.generated_code = "\n".join(code_spec.lines)
+        flow_parse_res.loc = code_spec
         return flow_parse_res
 
     def _post_order_access_nodes(self, accessor: Callable[[ADVNodeModel], None], node: ADVNodeModel, 
@@ -2119,8 +2346,8 @@ class FlowParser:
         for handle in inp_handles:
             if handle.handle.source_info is not None:
                 source_node = node_id_to_node[handle.handle.source_info.node_id]
-                if source_node.nType == ADVNodeType.FRAGMENT:
-                    # only traverse fragment nodes
+                if source_node.nType == ADVNodeType.FRAGMENT or source_node.nType == ADVNodeType.CLASS:
+                    # only traverse fragment/class nodes
                     self._post_order_access_nodes(accessor, source_node, visited, node_id_to_inp_handles, node_id_to_node)
         accessor(node)
 
@@ -2141,7 +2368,7 @@ def _main_diff():
         return path_to_code[fspath]
     proj_parser = ADVProjectParser(path_code_accessor=_simple_accessor)
 
-    flow_reparsed = proj_parser._parse_desc_to_flow_model(
+    flow_reparsed, _ = proj_parser._parse_desc_to_flow_model(
         [], Path(f"{TENSORPC_ADV_FOLDER_FLOW_NAME}.py"), set(), {}
     )
     reparsed_proj = ADVProject(

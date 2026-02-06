@@ -5,8 +5,8 @@ from typing_extensions import Literal
 from tensorpc.apps.adv.logger import ADV_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
-from tensorpc.apps.adv.codemgr.markers import mark_fragment_def
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVNodeFlags, ADVNodeModel, ADVNodeHandle
+from tensorpc.apps.adv.codemgr.markers import mark_fragment_def, mark_inlineflow_with_desc
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVHandleSourceInfo, ADVNodeFlags, ADVNodeModel, ADVNodeHandle
 import hashlib
 import dataclasses as dataclasses_plain
 from tensorpc.core.funcid import clean_source_code
@@ -33,29 +33,50 @@ class FragmentParseResult(BaseParseResult):
     out_type: Literal["single", "tuple", "dict", "none", "self"]
     out_type_anno: str
     alias_map: str
+    can_node_be_ref: bool = True
 
     @staticmethod 
-    def create_self_handle(name: str, is_input: bool = True) -> BackendHandle:
+    def create_empty_result(node: ADVNodeModel):
+        return FragmentParseResult(
+            node=dataclasses.replace(node),
+            succeed=True,
+            func_name=node.name,
+            input_handles=[],
+            output_handles=[],
+            out_type="none",
+            out_type_anno="None",
+            alias_map="",
+            can_node_be_ref=False,
+        ) 
+
+    @staticmethod 
+    def create_self_handle(name: str, node_id: str, is_input: bool = True) -> BackendHandle:
         flags = ADVHandleFlags.IS_METHOD_SELF
         handle_id = f"{ADVHandlePrefix.Input}-self" if is_input else f"{ADVHandlePrefix.Output}-self"
         if is_input:
             flags |= ADVHandleFlags.IS_INPUT
-        handle = BackendHandle(
-            handle=ADVNodeHandle(
-                id=handle_id,
-                name=name,
-                type="Self",
-                flags=int(flags),
-            ),
+        handle = ADVNodeHandle(
+            id=handle_id,
+            name=name,
+            type="Self",
+            flags=int(flags),
+        )
+        if not is_input:
+            handle.source_info = ADVHandleSourceInfo(
+                node_id=node_id,
+                handle_id=handle_id,
+            )
+        bhhandle = BackendHandle(
+            handle=handle,
             index=-1,
         )
-        return handle
+        return bhhandle
 
     def add_self_handle(self) -> Self:
-        assert self.node is not None and self.node.flags & ADVNodeFlags.IS_METHOD
+        assert self.node is not None and self.node.flags & ADVNodeFlags.IS_METHOD, f"{self.node}"
         if len(self.input_handles) > 0:
             assert not self.input_handles[0].handle.is_method_self(), "self handle already exists"
-        self_handle = self.create_self_handle("self", is_input=True)
+        self_handle = self.create_self_handle("self", self.node.id, is_input=True)
         new_input_handles: list[BackendHandle] = [self_handle] + self.input_handles
         return dataclasses.replace(
             self,
@@ -104,19 +125,45 @@ class FragmentParseResult(BaseParseResult):
             lines.append(f"    {line}")
         return lines
 
-    def to_code_lines(self):
+    def get_code_lines_without_body(self, create_indent: bool = True):
         assert self.node is not None 
         kwarg_str = ", ".join(self.get_node_meta_kwargs(self.node))
-        if self.node.alias_map != "":
-            kwarg_str += f', alias_map="{self.node.alias_map}"'
-        if self.node.inlinesf_name is not None:
-            kwarg_str += f', inlineflow_name="{self.node.inlinesf_name}"'
-        decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
+        kwarg_str += f', flags={self.node.flags}'
+        if self.node.is_inline_flow_desc():
+            decorator = f"ADV.{mark_inlineflow_with_desc.__name__}({kwarg_str})"
+        else:
+            if self.node.alias_map != "":
+                kwarg_str += f', alias_map="{self.node.alias_map}"'
+            if self.node.inlinesf_name is not None:
+                kwarg_str += f', inlineflow_name="{self.node.inlinesf_name}"'
+            decorator = f"ADV.{mark_fragment_def.__name__}({kwarg_str})"
+        # for fragment ref, we use inline Annotated instead of decorator
+        assert self.node.ref is None
+        # generate signature from handles
+        # TODO class support 
+        lines = [
+            f"@{decorator}",
+        ]
+        if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
+            lines.append(f"@classmethod")
+        lines.append(f"def {self.func_name}(",)
+        if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
+            # add cls
+            lines.append("    cls,")
+        elif self.node.flags & (ADVNodeFlags.IS_METHOD):
+            # add self
+            lines.append("    self,")
+        lines += self.get_signature_lines_from_handles(self.input_handles)
+        lines.append(f") -> {self.out_type_anno}:")
+        if create_indent and self.node.is_defined_in_class():
+            lines = [f"    {line}" for line in lines]
+        return lines
+
+    def to_code_lines(self):
+        assert self.node is not None 
         # for fragment ref, we use inline Annotated instead of decorator
         if self.node.ref is not None:
-            return ImplCodeSpec([
-                f"{decorator}({self.func_name})",
-            ], -1, -1, 1, -1)
+            return ImplCodeSpec([], -1, -1, 1, -1)
         else:
             impl = self.node.impl
             assert impl is not None 
@@ -124,25 +171,13 @@ class FragmentParseResult(BaseParseResult):
             code_lines = code.splitlines()
             # generate signature from handles
             # TODO class support 
-            lines = [
-                f"@{decorator}",
-            ]
-            if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
-                lines.append(f"@classmethod")
-            lines.append(f"def {self.func_name}(",)
-            if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
-                # add cls
-                lines.append("    cls,")
-            elif self.node.flags & (ADVNodeFlags.IS_METHOD):
-                # add self
-                lines.append("    self,")
-            lines += self.get_signature_lines_from_handles(self.input_handles)
-            lines.append(f") -> {self.out_type_anno}:")
+            lines_without_body = self.get_code_lines_without_body()
+            lines: list[str] = lines_without_body
             line_offset = len(lines)
             code_lines_indented = [f"    {line}" for line in code_lines]
+            if self.node.is_defined_in_class():
+                code_lines_indented = [f"    {line}" for line in code_lines_indented]
             lines.extend(code_lines_indented)
-            if self.node.flags & ADVNodeFlags.IS_METHOD:
-                lines = [f"    {line}" for line in lines]
             end_column = len(code_lines_indented[-1]) + 1
             return ImplCodeSpec(lines, line_offset, 1, len(code_lines_indented), end_column)
 
@@ -526,6 +561,7 @@ class FragmentParser(BaseParser):
         
         output_handles: list[BackendHandle] = []
         succeed = True
+        func_name = node.name
         if node.flags & ADVNodeFlags.IS_INIT_FN:
             output_desc = FragmentOutputDesc(
                 type="none",
@@ -553,8 +589,8 @@ class FragmentParser(BaseParser):
                     output_desc = default_cls_output_desc
 
         if node.flags & ADVNodeFlags.IS_CLASSMETHOD:
-            key, value = next(iter(output_desc.mapping.items()))
-            sym_handle = FragmentParseResult.create_self_handle(key, is_input=False)
+            key, (sym_name, alias) = next(iter(output_desc.mapping.items()))
+            sym_handle = FragmentParseResult.create_self_handle(alias, node.id, is_input=False)
             sym_handle.handle.set_source_info_inplace(node_id, sym_handle.handle.id)
             output_handles = [
                 sym_handle
@@ -596,7 +632,7 @@ class FragmentParser(BaseParser):
             # so we clone node here to keep old node info.
             node=dataclasses.replace(node), 
             succeed=succeed,
-            func_name=node.name,
+            func_name=func_name,
             input_handles=input_handles,
             output_handles=output_handles,
             out_type=output_desc.type,

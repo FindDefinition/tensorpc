@@ -23,6 +23,10 @@ class Enum:
     excludes: Optional[List[Any]] = None
 
 @dataclass
+class DynamicEnum:
+    alias: Optional[str] = None
+
+@dataclass
 class RangedInt:
     lo: int
     hi: int

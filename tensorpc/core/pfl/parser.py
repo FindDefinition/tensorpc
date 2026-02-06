@@ -24,8 +24,8 @@ from tensorpc.core.pfl.constants import (PFL_COMPILE_META_ATTR,
                                          PFL_STDLIB_FUNC_META_ATTR)
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE,
-                   PFL_LOGGER, PFLCompileConstant, PFLCompileConstantType,
+from .core import (BACKEND_CONFIG_REGISTRY, BASE_ANNO_TYPE_TO_PFLSTATIC_TYPE, 
+                   PFLCompileConstant, PFLCompileConstantType,
                    PFLCompileFuncMeta, PFLCompileReq, PFLErrorFormatContext,
                    PFLExprFuncArgInfo, PFLExprFuncInfo, PFLExprInfo,
                    PFLExprType, PFLInlineRunEnv, PFLMetaInferResult,
@@ -45,9 +45,10 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript,
                       PFLTreeNodeFinder, PFLTuple, PFLUnaryOp, PFLWhile,
                       UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk)
-from .pfl_reg import (ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem,
-                      compiler_isinstance, compiler_cast,
-                      compiler_print_type, compiler_remove_optional)
+from .pfl_reg import (ALL_COMPILE_TIME_FUNCS, STD_REGISTRY, StdRegistryItem)
+from .loggers import PFL_LOGGER
+
+from .compiler import _pfl_compiler_isinstance, _pfl_compiler_cast
 
 _ALL_SUPPORTED_AST_TYPES = {
     ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare, ast.Call, ast.Name,
@@ -405,6 +406,7 @@ class MapAstNodeToConstant(ast.NodeVisitor):
             return None
 
         is_stdlib = False
+        is_compiler_fn = False
         # TODO detect classmethod and reject it.
         # if isinstance(cur_obj, staticmethod):
         #     cur_obj = cur_obj.__func__
@@ -420,6 +422,7 @@ class MapAstNodeToConstant(ast.NodeVisitor):
                 else:
                     const_type = PFLCompileConstantType.FUNCTION
                 is_stdlib = True
+                is_compiler_fn = item.is_compiler_fn
                 cur_obj = item
             else:
                 # TODO support class
@@ -445,7 +448,8 @@ class MapAstNodeToConstant(ast.NodeVisitor):
             type=const_type,
             is_stdlib=is_stdlib,
             bound_self=bound_self,
-            var_meta=prep_res)
+            var_meta=prep_res,
+            is_compiler_fn=is_compiler_fn)
 
 
     def visit_Name(self, node: ast.Name):
@@ -766,9 +770,11 @@ class PFLParser:
                 if ctx.cfg.allow_partial_type_infer:
                     assert func.st.type != PFLExprType.UNKNOWN, f"function \"{unparse_pfl_expr(func)}\" in call can't be unknown in partial type infer."
                 raw_func = None
+                is_compiler_fn = False
                 if func.st.func_info is not None:
                     raw_func = func.st.func_info.raw_func
-                if raw_func is compiler_cast:
+                    is_compiler_fn = func.st.func_info.is_compiler_fn
+                if raw_func is _pfl_compiler_cast:
                     arg_val = self._parse_expr_to_pfl(expr.args[1], scope)
                     assert len(expr.args) == 2
                     anno_in_ast = evaluate_annotation_expr(expr.args[0])
@@ -792,12 +798,14 @@ class PFLParser:
                         assert not isinstance(
                             arg, ast.Starred), "don't support *arg for now"
                     kw_sts: dict[str, PFLExprInfo] = {}
+                    kws: dict[str, PFLExpr] = {}
                     for kw in expr.keywords:
                         assert kw.arg is not None, "don't support **kw"
                         kw_keys.append(kw.arg)
                         val_expr = self._parse_expr_to_pfl(kw.value, scope)
                         vals.append(val_expr)
                         kw_sts[kw.arg] = val_expr.st
+                        kws[kw.arg] = val_expr
                     arg_infos_from_call = ([a.st for a in args], kw_sts)
                     if func.st.delayed_compile_req is not None:
                         req = func.st.delayed_compile_req
@@ -813,65 +821,22 @@ class PFLParser:
                             req, allow_inline_expand=True)
                         func.st = dataclasses.replace(compiled_func.st)
                     # check is compile-time function
-                    if raw_func in ALL_COMPILE_TIME_FUNCS:
-                        if raw_func is compiler_print_type:
-                            assert len(args) == 1 and len(
-                                kw_keys
-                            ) == 0, "compiler_print_type only support one argument"
-                            args_str = ", ".join(str(a.st) for a in args)
-                            PFL_LOGGER.warning(args_str)
-                            res = args[0]
-                            expr = expr.args[0]
-                        elif raw_func is compiler_isinstance:
-                            # TODO currently int and float are treated as function.
+                    if is_compiler_fn:
+                        assert raw_func is not None
+                        res = raw_func(*args, **kws)
+                        if raw_func is _pfl_compiler_isinstance:
                             if not ctx.cfg.allow_isinstance:
                                 raise PFLAstParseError(
                                     "isinstance is disabled in config, you need to enable it in parse config.",
                                     expr)
-                            type_to_check = args[0].st
-                            type_candidates_expr = args[1]
-                            if type_candidates_expr.st.type == PFLExprType.TUPLE:
-                                type_candidates = type_candidates_expr.st.childs
-                                assert len(
-                                    type_candidates
-                                ) > 0, "type_candidates must not be empty"
-                            else:
-                                type_candidates = [type_candidates_expr.st]
-                            compare_res: list[bool] = []
-                            # TODO better compare
-                            if type_to_check.proxy_dcls is not None:
-                                for c in type_candidates:
-                                    if c.proxy_dcls is not None:
-                                        compare_res.append(
-                                            issubclass(type_to_check.proxy_dcls,
-                                                    c.proxy_dcls))
-                                    else:
-                                        compare_res.append(False)
-                            else:
-                                for c in type_candidates:
-                                    assert c.type == PFLExprType.DATACLASS_TYPE
-                                    if type_to_check.type == PFLExprType.DATACLASS_OBJECT:
-                                        compare_res.append(
-                                            issubclass(
-                                                type_to_check.
-                                                get_origin_type_checked(),
-                                                c.get_origin_type_checked()))
-                                    else:
-                                        compare_res.append(False)
+                        if res is None:
                             res = PFLConstant(PFLASTType.CONSTANT,
                                             source_loc,
-                                            value=any(compare_res))
+                                            value=None)
                             res.check_and_infer_type()
-                        elif raw_func is compiler_remove_optional:
-                            assert len(args) == 1
-                            res_st = dataclasses.replace(args[0].st).get_optional_undefined_removed()
-                            res = dataclasses.replace(
-                                args[0],
-                                st=res_st)
                         else:
-                            raise NotImplementedError(
-                                f"compile-time function {raw_func} not implemented"
-                            )
+                            assert isinstance(res, PFLExpr), "compile-time function must return PFLExpr or None"
+                        res.source_loc = source_loc
                     else:
                         parse_cfg = get_parse_context_checked().cfg
                         if not parse_cfg.allow_kw:
@@ -930,17 +895,19 @@ class PFLParser:
             raise PFLAstParseError(f"Unknown error {e}", expr) from e
         return res
 
-    def _get_plain_attribute_chain_name(self, expr: PFLExpr) -> Optional[PFLName]:
+    def _get_plain_attribute_chain_qualname(self, expr: PFLExpr) -> Optional[str]:
         if isinstance(expr, PFLAttribute):
-            return self._get_plain_attribute_chain_name(expr.value)
+            value_str = self._get_plain_attribute_chain_qualname(expr.value)
+            return f"{value_str}.{expr.attr}"
         elif isinstance(expr, PFLName):
-            return expr
+            return expr.id
         else:
-            return None
+            return None 
 
     def _if_test_optional_removal(self, expr: PFLExpr) -> dict[str, Union[PFLAttribute, PFLName]]:
         # TODO better match
         res: dict[str, Union[PFLAttribute, PFLName]] = {}
+        # TODO add dataclass field support
         if isinstance(expr, PFLBoolOp):
             if expr.op == BoolOpType.AND:
                 for value in expr.values:
@@ -957,11 +924,11 @@ class PFLParser:
                     const_node = None 
                     tgt_node = None
                 if const_node is not None and tgt_node is not None:
-                    nested_name = self._get_plain_attribute_chain_name(tgt_node)
+                    nested_name = self._get_plain_attribute_chain_qualname(tgt_node)
                     if nested_name is not None:
                         attr_expr = tgt_node
                         assert isinstance(attr_expr, (PFLAttribute, PFLName))
-                        res[nested_name.id] = attr_expr
+                        res[nested_name] = attr_expr
         return res 
 
     def _parse_block_to_pfl_ast(
@@ -2108,3 +2075,5 @@ def pfl_ast_to_dict(node: PFLAstNodeBase):
 
 def ast_dump(node: PFLAstNodeBase):
     return _AstAsDict()._ast_as_dict_for_dump(node)
+
+

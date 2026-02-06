@@ -4632,6 +4632,7 @@ class ControlNodeType(enum.IntEnum):
     VectorN = 7
     ColorRGB = 8
     ColorRGBA = 9
+    Autocomplete = 10
 
 
 @dataclasses.dataclass

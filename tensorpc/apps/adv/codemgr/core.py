@@ -1,7 +1,7 @@
 from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components.mui.editor import MonacoRange
-from tensorpc.apps.adv.model import ADVHandleFlags, ADVNodeFlags, ADVNodeHandle, ADVNodeModel, ADVNodeType
+from tensorpc.apps.adv.model import ADVHandleFlags, ADVNodeFlags, ADVNodeHandle, ADVNodeModel, ADVNodeRefInfo, ADVNodeType
 from typing import Any, Optional, Self, TypeVar, Union
 import abc 
 
@@ -16,7 +16,8 @@ class ImplCodeSpec:
 
     @property 
     def end_lineno_offset(self):
-        assert self.lineno_offset > 0 and self.num_lines > 0 
+        if not (self.lineno_offset > 0 and self.num_lines > 0):
+            return -1
         return self.lineno_offset + self.num_lines - 1
 
 
@@ -140,6 +141,7 @@ class BaseNodeCodeMeta:
 class RefNodeMeta:
     id: str 
     ref_node_id: str
+    flags: int
     position: tuple[Union[int, float], Union[int, float]]
     alias_map: str = ""
     is_local_ref: bool = False
@@ -151,7 +153,7 @@ class BaseParser:
 _T = TypeVar("_T", bound=BaseParseResult)
 
 @dataclasses.dataclass
-class NodePrepResult:
+class BackendNode:
     node: ADVNodeModel
     node_def: ADVNodeModel
     node_def_parent: Optional[ADVNodeModel]
@@ -195,7 +197,7 @@ class NodePrepResult:
                 return node_def.name
 
     def get_parse_res_checked(self, cls_type: type[_T]) -> _T:
-        assert isinstance(self.parse_res, cls_type), f"parse_res must be {cls_type} in node {self.node.id}."
+        assert isinstance(self.parse_res, cls_type), f"parse_res must be {cls_type} in node {self.node.id}, got {type(self.parse_res)}"
         return self.parse_res
 
     def get_qualname_from_import(self) -> str:
@@ -231,8 +233,9 @@ class NodePrepResult:
     def get_import_stmt(self, dot_prefix: str) -> Optional[str]:
         node_desc = self
         node = node_desc.node
-        if node.ref is not None:
-            ref_import_path = node.ref.import_path
+        ref = node.ref
+        if ref is not None:
+            ref_import_path = ref.import_path
             assert ref_import_path is not None 
             if node_desc.is_node_def_folder:
                 ref_import_path = ref_import_path + [TENSORPC_ADV_FOLDER_FLOW_NAME]
@@ -315,13 +318,15 @@ class NodePrepResult:
             arg_names = ", ".join(x[1] for x in arg_name_parts)
         return f"{func_call_str}({arg_names})"
 
-    def get_ref_node_meta_anno_str(self):
+    def get_ref_node_meta_anno_str(self, type_str: Optional[str] = None):
         node = self.node
+        if type_str is None:
+            type_str = "Any"
         node_desc = self
         anno = ""
         if node.ref is not None:
             # use Annotated to attach ref node meta
-            arg_parts = [f"\"{node.id}\"", f"\"{node.ref.node_id}\"", f"({node.position.x}, {node.position.y})"]
+            arg_parts = [f"\"{node.id}\"", f"\"{node.ref.node_id}\"", f"{int(node.flags)}", f"({node.position.x}, {node.position.y})"]
             if node.alias_map != "":
                 arg_parts.append(f"\"{node.alias_map}\"")
             else:
@@ -329,6 +334,6 @@ class NodePrepResult:
             if node_desc.is_local_ref:
                 arg_parts.append(f"True")
             arg_str = ", ".join(arg_parts)
-            anno = f": Annotated[Any, ADV.RefNodeMeta({arg_str})]" 
+            anno = f": Annotated[{type_str}, ADV.RefNodeMeta({arg_str})]" 
         return anno
 

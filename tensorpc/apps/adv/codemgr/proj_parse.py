@@ -22,6 +22,7 @@ class SingleADVMarker:
     marker_node: ast.Call
     kwargs: dict[str, Any]
     node_between: list[ast.stmt] = dataclasses_plain.field(default_factory=list)
+    parent: Optional["BlockedADVMarker"] = None
 
 @dataclasses_plain.dataclass
 class BlockedADVMarker:
@@ -30,6 +31,8 @@ class BlockedADVMarker:
     kwargs: dict[str, Any]
     marker_node: ast.Call
     lineno: int
+    child_marker_range: tuple[int, int] = (-1, -1)
+    parent: Optional["BlockedADVMarker"] = None
 
 
 @dataclasses_plain.dataclass
@@ -69,6 +72,14 @@ class SubflowDefDesc:
     marker: SingleADVMarker
 
 @dataclasses_plain.dataclass
+class ClassNodeDesc:
+    marker: SingleADVMarker
+
+@dataclasses_plain.dataclass
+class ClassDefDesc:
+    marker: BlockedADVMarker
+
+@dataclasses_plain.dataclass
 class MarkdownDesc:
     marker: SingleADVMarker
 
@@ -79,6 +90,7 @@ class InlineFlowDefDesc:
     name: str
     marker: BlockedADVMarker
     body: list[ast.stmt]
+    is_desc_node: bool
 
 @dataclasses_plain.dataclass
 class ADVFlowCodeDesc:
@@ -92,6 +104,8 @@ class ADVFlowCodeDesc:
     fragment_def_descs: list[FragmentDefDesc]
     inline_flow_def_descs: list[InlineFlowDefDesc]
     markdown_descs: list[MarkdownDesc]
+    class_node_descs: list[ClassNodeDesc]
+    class_def_descs: list[ClassDefDesc]
     user_edge_nodes: list[SingleADVMarker] = dataclasses_plain.field(default_factory=list)
 
 
@@ -107,7 +121,7 @@ class ADVProjectParser:
     def _parse_flow_code_to_desc(self, code: str):
         lines = code.splitlines()
         tree = ast.parse(code)
-        markers = self._parse_markers(tree)
+        markers = self._parse_markers(tree.body)
         # 1. global scripts
         marker_idx = 0
         global_script_descs: list[GlobalScriptCodeDesc] = []
@@ -119,6 +133,8 @@ class ADVProjectParser:
         inline_flow_def_descs: list[InlineFlowDefDesc] = []
         user_edge_nodes: list[SingleADVMarker] = []
         subflow_descs: list[SubflowDefDesc] = []
+        class_node_descs: list[ClassNodeDesc] = []
+        class_def_descs: list[ClassDefDesc] = []
         markdown_descs: list[MarkdownDesc] = []
         # import rich 
         # rich.print(markers)
@@ -163,8 +179,10 @@ class ADVProjectParser:
                                 marker_idx += 1
                                 break
                             else:
-                                if next_marker.marker_name == adv_markers.mark_subflow_def.__name__:
+                                if next_marker.marker_name == adv_markers.mark_subflow_node.__name__:
                                     subflow_descs.append(SubflowDefDesc(next_marker))
+                                elif next_marker.marker_name == adv_markers.mark_class_node.__name__:
+                                    class_node_descs.append(ClassNodeDesc(next_marker))
                                 else:
                                     assert next_marker.marker_name == adv_markers.mark_ref_node.__name__
                                     ref_node_descs.append(RefNodeDesc(next_marker))
@@ -202,7 +220,12 @@ class ADVProjectParser:
                         marker=marker,
                         code_lines=code_lines,
                     ))
-                elif marker.marker_name == adv_markers.mark_fragment_def.__name__ or marker.marker_name == adv_markers.mark_inlineflow.__name__:
+                elif marker.marker_name == adv_markers.mark_class_def.__name__:
+                    class_def_descs.append(ClassDefDesc(marker)) 
+
+                elif (marker.marker_name == adv_markers.mark_fragment_def.__name__ 
+                        or marker.marker_name == adv_markers.mark_inlineflow.__name__
+                        or marker.marker_name == adv_markers.mark_inlineflow_with_desc.__name__):
                     assert isinstance(marker.block_node, (ast.FunctionDef, ast.AsyncFunctionDef))
                     return_anno = marker.block_node.returns
                     assert return_anno is not None 
@@ -222,6 +245,7 @@ class ADVProjectParser:
                             name=marker.block_node.name,
                             marker=marker,
                             body=marker.block_node.body,
+                            is_desc_node=marker.marker_name == adv_markers.mark_inlineflow_with_desc.__name__,
                         )
                         inline_flow_def_descs.append(inline_flow_def_desc)
                 else:
@@ -239,6 +263,9 @@ class ADVProjectParser:
             inline_flow_def_descs=inline_flow_def_descs,
             subflow_descs=subflow_descs,
             markdown_descs=markdown_descs,
+            class_node_descs=class_node_descs,
+            class_def_descs=class_def_descs,
+            # class_marker=class_marker,
         )
         return desc
 
@@ -250,17 +277,17 @@ class ADVProjectParser:
                         return True 
         return False
 
-    def _parse_markers(self, tree: ast.Module) -> list[Union[SingleADVMarker, BlockedADVMarker]]:
+    def _parse_markers(self, body: list[ast.stmt], parent: Optional[BlockedADVMarker] = None) -> list[Union[SingleADVMarker, BlockedADVMarker]]:
         res: list[Union[SingleADVMarker, BlockedADVMarker]] = []
         ast_stmt_between_single_markers: list[ast.stmt] = []
         prev_single_marker: Optional[SingleADVMarker] = None
-        for node in tree.body:
+        for node in body:
             if isinstance(node, ast.Expr) and self._is_adv_single_mark_call(node.value):
                 node = node.value
                 assert isinstance(node.func, ast.Attribute)
                 marker_name = node.func.attr
                 marker_kwargs = self._parse_marker_kwargs(node)
-                single_marker = SingleADVMarker(marker_node=node, marker_name=marker_name, kwargs=marker_kwargs)
+                single_marker = SingleADVMarker(marker_node=node, marker_name=marker_name, kwargs=marker_kwargs, parent=parent)
                 if prev_single_marker is not None:
                     prev_single_marker.node_between = ast_stmt_between_single_markers
                 ast_stmt_between_single_markers = []
@@ -277,19 +304,25 @@ class ADVProjectParser:
                         if len(decorators) > 1:
                             lineno = decorators[1].lineno
                         marker_kwargs = self._parse_marker_kwargs(may_adv_decorator)
-
-                        res.append(BlockedADVMarker(
+                        block_marker = BlockedADVMarker(
                             block_node=node, 
                             marker_node=may_adv_decorator, 
                             marker_name=marker_name,
                             kwargs=marker_kwargs,
                             lineno=lineno,
-                        ))
+                            parent=parent,
+                        )
+                        child_markers: list[Union[SingleADVMarker, BlockedADVMarker]] = []
+                        if isinstance(node, ast.ClassDef):
+                            child_markers = self._parse_markers(node.body, parent=block_marker)
+                            block_marker.child_marker_range = (len(res), len(res) + len(child_markers))
+                        res.append(block_marker)
+                        res.extend(child_markers)
                 ast_stmt_between_single_markers.append(node)
             else:
                 ast_stmt_between_single_markers.append(node)
                 
-        return res 
+        return res
 
     def _parse_marker_kwargs(self, marker_node: ast.Call) -> dict[str, Any]:
         kwargs = marker_node.keywords
@@ -303,14 +336,30 @@ class ADVProjectParser:
 
     def _parse_desc_to_flow_model(self, path_with_node_name: list[str], fspath: Path, visited: set[Path], 
             parsed_flows: dict[Path, ADVFlowModel],
-            ext_flows: Optional[dict[Path, ADVFlowModel]] = None):
+            ext_flow_nodes: Optional[dict[Path, tuple[Optional[ADVNodeModel], ADVFlowModel]]] = None,
+            is_class_flow: bool = False) -> tuple[ADVFlowModel, Optional[ADVNodeRefInfo]]:
         if fspath in visited:
             raise ValueError(f"Cyclic flow import detected for flow at path {fspath}.")
-        if ext_flows is not None and fspath in ext_flows:
-            return ext_flows[fspath]
+        if ext_flow_nodes is not None and fspath in ext_flow_nodes:
+            res_flow_node = ext_flow_nodes[fspath][0]
+            res_flow = ext_flow_nodes[fspath][1]
+            assert res_flow is not None 
+            if res_flow_node is None:
+                return res_flow, None
+            else:
+                return res_flow, res_flow_node.cls_inherit_ref
         visited.add(fspath)
         code = self._path_code_accessor(path_with_node_name, fspath)
         flow_desc = self._parse_flow_code_to_desc(code)
+        main_cls_def: Optional[ClassDefDesc] = None
+        if is_class_flow:
+            node_name = path_with_node_name[-1]
+            cls_defs = flow_desc.class_def_descs
+            for cls_def in cls_defs:
+                if cls_def.marker.block_node.name == node_name:
+                    main_cls_def = cls_def
+                    break
+            assert main_cls_def is not None, f"Class flow {node_name} not found in flow file {fspath}."
         node_id_to_node: dict[str, ADVNodeModel] = {}
         # we won't serialize edge id to code, so edge id is generated in each parse.
         edge_id_to_edge: dict[str, ADVEdgeModel] = {}
@@ -398,8 +447,12 @@ class ADVProjectParser:
             
             alias_map = desc.marker.kwargs.get("alias_map", "")
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
+            flags = desc.marker.kwargs.get("flags", 0)
             # TODO better way to handle indent here.
-            code = "\n".join([line[4:] for line in desc.code_lines])
+            indent_num = 4
+            if ADVNodeModel.is_defined_in_class_static(flags, ADVNodeType.FRAGMENT.value):
+                indent_num = 8
+            code = "\n".join([line[indent_num:] for line in desc.code_lines])
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
@@ -408,12 +461,32 @@ class ADVProjectParser:
                 impl=InlineCode(code),
                 alias_map=alias_map,
                 inlinesf_name=inlineflow_name,
+                flags=flags,
             )
+            if desc.marker.parent is not None:
+                # validate
+                assert adv_node.is_defined_in_class(), "Fragment flags wrong, expected method or classmethod."
             name_to_frag[desc.name] = adv_node
             node_id_to_node[node_id] = adv_node
+        ref_node_desc_dict: dict[str, ADVNodeModel] = {}
+        import_name_to_desc: dict[str, RefImportDesc] = {}
+        for import_desc in flow_desc.ref_import_descs:
+            import_name_to_desc[import_desc.name if import_desc.asname is None else import_desc.asname] = import_desc
+        cls_inherit_ref: Optional[ADVNodeRefInfo] = None
+        if is_class_flow and main_cls_def is not None:
+            inherit_node_id = main_cls_def.marker.kwargs.get("inherit_node_id", None)
+            if inherit_node_id is not None:
+                cls_node = main_cls_def.marker.block_node
+                assert isinstance(cls_node, ast.ClassDef)
+                first_inherit = cls_node.bases[0]
+                assert isinstance(first_inherit, ast.Name)
+                import_name = first_inherit.id
+                import_desc = import_name_to_desc[import_name]
+                ref_import_path, _ = self._preprocess_import_desc(import_desc)
+                cls_inherit_ref = ADVNodeRefInfo(inherit_node_id, ref_import_path)
         # handle ref nodes after fragment parse 
         # to handle local ref.
-        for desc in flow_desc.subflow_descs:
+        for desc in (flow_desc.subflow_descs + flow_desc.class_node_descs):
             name = desc.marker.kwargs["name"]
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
@@ -424,28 +497,28 @@ class ADVProjectParser:
                 path=new_import_path,
                 is_folder=is_folder,
             )
-            subflow = self._parse_desc_to_flow_model(new_import_path, relative_path, visited, parsed_flows, ext_flows)
+            is_class_subflow = isinstance(desc, ClassNodeDesc)
+            subflow, cls_inherit_ref_cur = self._parse_desc_to_flow_model(new_import_path, relative_path, visited, parsed_flows, ext_flow_nodes,
+                is_class_flow=is_class_subflow)
+            
             adv_node = ADVNodeModel(
                 flow=subflow,
                 id=node_id, 
                 name=name,
                 position=XYPosition(x=position[0], y=position[1]),
-                nType=ADVNodeType.FRAGMENT.value,
+                nType=ADVNodeType.CLASS.value if is_class_subflow else ADVNodeType.FRAGMENT.value,
                 inlinesf_name=inlineflow_name,
+                cls_inherit_ref=cls_inherit_ref_cur,
             )
             node_id_to_node[node_id] = adv_node
 
-        ref_node_desc_dict: dict[str, ADVNodeModel] = {}
-        import_name_to_desc: dict[str, RefImportDesc] = {}
-        for import_desc in flow_desc.ref_import_descs:
-            import_name_to_desc[import_desc.name if import_desc.asname is None else import_desc.asname] = import_desc
         for desc in flow_desc.ref_node_descs:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
             ref_node_id = desc.marker.kwargs["ref_node_id"]
             inlineflow_name = desc.marker.kwargs.get("inlineflow_name", None)
             alias_map = desc.marker.kwargs.get("alias_map", "")
-
+            flags = desc.marker.kwargs.get("flags", 0)
             ref_node_qname_node = desc.marker.marker_node.args[0]
             ref_node_ntype_node = desc.marker.marker_node.args[1]
             if isinstance(ref_node_qname_node, ast.Name):
@@ -453,24 +526,16 @@ class ADVProjectParser:
             else:
                 assert isinstance(ref_node_qname_node, ast.Attribute)
                 assert isinstance(ref_node_qname_node.value, ast.Name)
-                import_name =  ref_node_qname_node.value.id
-            assert isinstance(ref_node_qname_node, ast.Name)
+                import_name = ref_node_qname_node.value.id
             ref_node_ntype = ast_constant_expr_to_value(ref_node_ntype_node)
             assert isinstance(ref_node_ntype, int)
             import_desc = import_name_to_desc[import_name]
+            ref_alias = "" if import_desc.asname is None else import_desc.asname
+
             # build import path of ref node
             # for non-subflow ref imports, it already contains full import path.
             # so no need to deal with level.
-            ref_import_path = import_desc.module.split(".")
-            is_folder = False
-            ref_alias = "" if import_desc.asname is None else import_desc.asname
-            if ref_import_path[-1] == TENSORPC_ADV_FOLDER_FLOW_NAME:
-                is_folder = True  
-                ref_import_path = ref_import_path[:-1]
-            is_inlineflow = ref_import_path[-1] == import_desc.name
-            if is_inlineflow:
-                assert len(ref_import_path) > 0
-                ref_import_path = ref_import_path[:-1]
+            ref_import_path, _ = self._preprocess_import_desc(import_desc)
             ref = ADVNodeRefInfo(ref_node_id, ref_import_path)
             # TODO parse flow node from import path?
             adv_node = ADVNodeModel(
@@ -481,9 +546,23 @@ class ADVProjectParser:
                 inlinesf_name=inlineflow_name,
                 alias_map=alias_map,
                 name=ref_alias,
+                flags=flags,
             )
             ref_node_desc_dict[node_id] = adv_node
         for inline_flow_desc in flow_desc.inline_flow_def_descs:
+            if inline_flow_desc.is_desc_node:
+                node_id = inline_flow_desc.marker.kwargs["node_id"]
+                position = inline_flow_desc.marker.kwargs["position"]
+                flags = inline_flow_desc.marker.kwargs.get("flags", 0)
+                name = inline_flow_desc.name
+                adv_node = ADVNodeModel(
+                    id=node_id, 
+                    position=XYPosition(x=position[0], y=position[1]),
+                    nType=ADVNodeType.FRAGMENT.value,
+                    name=name,
+                    flags=flags,
+                )
+                node_id_to_node[node_id] = adv_node
             # we only need to extract ref node infos here.
             for stmt in inline_flow_desc.body:
                 # currently each stmt is always assign/annassign stmt with call except return.
@@ -520,7 +599,19 @@ class ADVProjectParser:
             edges=edge_id_to_edge,
         )
         parsed_flows[fspath] = flow_model
-        return flow_model
+        return flow_model, cls_inherit_ref
+
+    def _preprocess_import_desc(self, import_desc: RefImportDesc) -> tuple[list[str], bool]:
+        ref_import_path = import_desc.module.split(".")
+        is_folder = False
+        if ref_import_path[-1] == TENSORPC_ADV_FOLDER_FLOW_NAME:
+            is_folder = True  
+            ref_import_path = ref_import_path[:-1]
+        is_flow_level_node = ref_import_path[-1] == import_desc.name
+        if is_flow_level_node:
+            assert len(ref_import_path) > 0
+            ref_import_path = ref_import_path[:-1]
+        return ref_import_path, is_folder
 
 def _adv_accessor(path_parts: list[str], fspath: Path, root_folder: Path) -> str:
     with open(root_folder / fspath, "r", encoding="utf-8") as f:
@@ -530,7 +621,7 @@ def _adv_accessor(path_parts: list[str], fspath: Path, root_folder: Path) -> str
 def parse_adv_project_root_flow(root_folder: Path) -> ADVFlowModel:
     accessor = partial(_adv_accessor, root_folder=root_folder)
     proj_parser = ADVProjectParser(path_code_accessor=accessor)
-    root_flow = proj_parser._parse_desc_to_flow_model(
+    root_flow, _ = proj_parser._parse_desc_to_flow_model(
         [], Path(f"{TENSORPC_ADV_FOLDER_FLOW_NAME}.py"), set(), {}
     )
     return root_flow 

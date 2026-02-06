@@ -317,6 +317,12 @@ class JsonLikeNode:
         else:
             return []
 
+    def get_uid_to_node(self) -> dict[str, "JsonLikeNode"]:
+        res: dict[str, "JsonLikeNode"] = {self.id.uid_encoded: self}
+        for c in self.children:
+            res.update(c.get_uid_to_node())
+        return res
+
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:

@@ -277,7 +277,7 @@ class TritonSimModel:
     @pfl.js.mark_js_compilable
     def _on_matrix_table_elem_enter_pfl(self, data: three.PointerEvent):
         if data.dataIndexes:
-            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            dataIndexes = pfl.compiler.remove_optional(data.dataIndexes)
             local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
             for mat in self.expr_trace_matrices.matrices:
                 mat.hovered = False
@@ -286,7 +286,7 @@ class TritonSimModel:
     @pfl.js.mark_js_compilable
     def _on_matrix_table_elem_click_pfl(self, data: three.PointerEvent):
         if data.dataIndexes:
-            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            dataIndexes = pfl.compiler.remove_optional(data.dataIndexes)
             local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
             for mat in self.expr_trace_matrices.matrices:
                 mat.selected = False

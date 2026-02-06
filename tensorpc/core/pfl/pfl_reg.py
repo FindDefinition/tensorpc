@@ -1,5 +1,5 @@
 from types import ModuleType
-from typing import Any, Callable, ClassVar, Optional, Type, Union, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type, Union, TypeVar, cast
 
 from tensorpc.core.annolib import DataclassType
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -7,7 +7,6 @@ import inspect
 import dataclasses
 
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
-
 
 @dataclasses.dataclass
 class StdRegistryItem:
@@ -30,6 +29,7 @@ class StdRegistryItem:
     # wben some args is constexpr in constructor,
     # we can create a partial-constexpr dataclass.
     constexpr_infer: Optional[Callable[..., Any]] = None
+    is_compiler_fn: bool = False
 
 
 T = TypeVar("T")
@@ -56,6 +56,7 @@ class StdRegistry:
         constexpr_infer: Optional[Callable[..., Any]] = None,
         _internal_disable_type_check: bool = False,
         _is_register_builtin_proxy: bool = False,
+        is_compiler_fn: bool = False,
     ):
 
         def wrapper(func: T) -> T:
@@ -134,6 +135,7 @@ class StdRegistry:
                     constexpr_infer=constexpr_infer,
                     is_builtin=_is_register_builtin_proxy,
                     _internal_disable_type_check=_internal_disable_type_check,
+                    is_compiler_fn=is_compiler_fn,
                 )
 
                 if mapped is not None:
@@ -251,32 +253,22 @@ def register_pfl_builtin_proxy(
         _internal_disable_type_check=_internal_disable_type_check,
         _is_register_builtin_proxy=True)
 
-# compile-time system functions
-@register_pfl_std(mapped_name="compiler_print_type", backend=None)
-def compiler_print_type(x: Any) -> Any:
-    raise NotImplementedError("can't be called directly.")
+ALL_COMPILE_TIME_FUNCS: set[Callable] = set()
 
 
-@register_pfl_std(mapped_name="compiler_print_metadata", backend=None)
-def compiler_print_metadata(x: Any) -> Any:
-    raise NotImplementedError("can't be called directly.")
+def register_pfl_compiler_func(
+    func=None,
+    *,
+    mapped_name: Optional[str] = None,
+    mapped: Optional[Union[ModuleType, Type, Callable]] = None,
+):
 
-@register_pfl_std(mapped_name="compiler_isinstance", backend=None, mapped=isinstance)
-def compiler_isinstance(x: Any, cls: Any) -> bool:
-    raise NotImplementedError("can't be called directly.")
+    return STD_REGISTRY.register(
+        func,
+        mapped=mapped,
+        mapped_name=mapped_name,
+        backend=None,
+        is_compiler_fn=True)
 
-@register_pfl_std(mapped_name="compiler_remove_optional", backend=None)
-def compiler_remove_optional(x: Any) -> Any:
-    raise NotImplementedError("can't be called directly.")
 
-@register_pfl_std(mapped_name="compiler_cast", backend=None, mapped=cast)
-def compiler_cast(x: Any, cls: Any) -> Any:
-    raise NotImplementedError("can't be called directly.")
 
-ALL_COMPILE_TIME_FUNCS = {
-    compiler_print_type,
-    compiler_print_metadata,
-    compiler_isinstance,
-    compiler_remove_optional,
-    compiler_cast,
-}
