@@ -245,13 +245,13 @@ class DataPortal(ThreeContainerBase[DataPortalProps, ThreeComponentType]):
 class Object3dBaseProps(ThreeBasicProps):
     # position already exists in base flex props, so we use another name
     position: Annotated[Union[Vector3Type, Undefined],
-                        typemetas.Vector3(0.01)] = undefined
+                        typemetas.Vector3(step=0.01)] = undefined
     rotation: Annotated[Union[Vector3Type, Undefined],
-                        typemetas.Vector3(0.1)] = undefined
+                        typemetas.Vector3(step=0.1)] = undefined
     up: Union[Vector3Type, Undefined] = undefined
     scale: Annotated[
         Union[Vector3Type, NumberType, Undefined],
-        typemetas.RangedVector3(0.01, 10.0, 0.01, default=(1, 1,
+        typemetas.RangedVector3(lo=0.01, hi=10.0, step=0.01, default=(1, 1,
                                                            1))] = undefined
     visible: Annotated[Union[bool, Undefined],
                        typemetas.CommonObject(default=True)] = undefined
@@ -259,7 +259,7 @@ class Object3dBaseProps(ThreeBasicProps):
     castShadow: Union[bool, Undefined] = undefined
     renderOrder: Union[int, Undefined] = undefined
     layers: Annotated[Union[int, Undefined],
-                      typemetas.RangedInt(0, 31, 1, default=0)] = undefined
+                      typemetas.RangedInt(lo=0, hi=31, step=1, default=0)] = undefined
 
 
 @dataclasses.dataclass

@@ -321,11 +321,11 @@ class PFLParseCache:
                           ext_preproc_res: Optional["PFLProcessedVarMeta"] = None,
                           external_local_ids: Optional[list[int]] = None,
                           is_compiler_fn: bool = False) -> "PFLExprInfo":
-        preproc_res = self._var_preproc(func)
-        func = preproc_res.value
         if ext_preproc_res is not None:
             compilable_meta = ext_preproc_res.compilable_meta
         else:
+            preproc_res = self._var_preproc(func)
+            func = preproc_res.value
             compilable_meta = preproc_res.compilable_meta
         if func in self._func_parse_result_cache:
             return self._func_parse_result_cache[func]
@@ -657,7 +657,7 @@ class PFLExprFuncArgInfo:
         # we assume new type don't contains typevar.
         return dataclasses.replace(self, type=self.type.typevar_substitution(typevar_map))
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         if not is_undefined(self.default):
             return f"{self.name}:{self.type}={self.default}"
         return f"{self.name}:{self.type}"
@@ -783,7 +783,7 @@ class PFLExprFuncInfo:
             if a.is_vaargs:
                 self._vararg_pos = i
     
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         args_str = []
         for arg in self.args:
             if arg.is_vaargs:
@@ -1227,7 +1227,7 @@ class PFLExprInfo:
             res["dcls_info"] = self.dcls_info.to_dict()
         return res
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         if self.type == PFLExprType.ARRAY:
             child_repr = str(self.childs[0])
             res = f"{child_repr}[]"
@@ -1740,7 +1740,7 @@ class PFLExprInfo:
         # func info won't be copied to due with template dcls.
         return dataclasses.replace(self, childs=self.childs.copy())
 
-    def _check_equal_type_with_unk_any_type_promption(self, other: Self, msg: str = "") -> Self:
+    def _check_equal_type_and_promption(self, other: Self, msg: str = "", check: bool = True) -> Self:
         unk_or_any_types = [PFLExprType.UNKNOWN, PFLExprType.ANY]
         self_is_unk_or_any = self.type in unk_or_any_types
         other_is_unk_or_any = other.type in unk_or_any_types
@@ -1749,10 +1749,15 @@ class PFLExprInfo:
         elif other_is_unk_or_any:
             return self
         else:
-            assert self.is_equal_type(other, check_nested=False), f"type not match: {self} vs {other}, {msg}"
+            is_equal_type = self.is_equal_type(other, check_nested=False)
+            if check:
+                assert is_equal_type, f"type not match: {self} vs {other}, {msg}"
+            else:
+                if not is_equal_type:
+                    return self.__class__(PFLExprType.ANY)
             new_childs = []
             for c1, c2 in zip(self.childs, other.childs):
-                new_childs.append(c1._check_equal_type_with_unk_any_type_promption(c2))
+                new_childs.append(c1._check_equal_type_and_promption(c2, msg=msg, check=check))
             return dataclasses.replace(self, childs=new_childs)
 
     def _remove_optional(self):
@@ -1895,7 +1900,7 @@ class PFLCompileReq:
         if self.is_method_def:
             assert self.self_type is not None 
 
-    def __repr__(self):
+    def __str__(self):
         if self.is_dcls:
             prefix = f"[dcls]"
             if self.meta.is_template:

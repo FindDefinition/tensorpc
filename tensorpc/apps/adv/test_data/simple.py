@@ -5,7 +5,7 @@ from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.dock import flowui
 
 from typing import Callable, Coroutine, Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeFlags, ADVNodeHandle, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
+from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNodeFlags, ADVNodeHandle, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
 
 def _get_simple_flow(name: str, op: Literal["+", "-", "*", "/"], sym_import_path: list[str]):
     fragment = f"""

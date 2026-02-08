@@ -147,16 +147,16 @@ def find_component_trace_by_uid_with_not_exist_parts(
 
 @dataclasses.dataclass
 class PointCfg:
-    size: Annotated[float, RangedFloat(1, 10, 0.1)] = 3
+    size: Annotated[float, RangedFloat(lo=1, hi=10, step=0.1)] = 3
     encode_method: Literal["none", "int16"] = "none"
-    encode_scale: Annotated[float, RangedFloat(25, 100, 0.1)] = 50
+    encode_scale: Annotated[float, RangedFloat(lo=25, hi=100, step=0.1)] = 50
 
 
 @dataclasses.dataclass
 class BoxCfg:
-    edge_width: Annotated[float, RangedFloat(1, 5, 0.1)] = 1
+    edge_width: Annotated[float, RangedFloat(lo=1, hi=5, step=0.1)] = 1
     add_cross: bool = True
-    opacity: Annotated[float, RangedFloat(0.0, 1.0, 0.01)] = 0.2
+    opacity: Annotated[float, RangedFloat(lo=0.0, hi=1.0, step=0.01)] = 0.2
 
 
 @dataclasses.dataclass

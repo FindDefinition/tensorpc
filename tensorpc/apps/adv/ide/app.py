@@ -1,44 +1,49 @@
 import enum
+import sys
+from functools import partial
 from pathlib import Path
+from typing import Any, Callable, Coroutine, Literal, Optional
+
 import rich
-from tensorpc.apps.adv.codemgr.flow import ADVProjectBackendManager, ADVProjectChange
-from tensorpc.apps.adv.codemgr.proj_parse import ADVProjectParser, create_adv_model
-from tensorpc.apps.adv.constants import TENSORPC_ADV_MD_MIN_SIZE, TENSORPC_ADV_ROOT_FLOW_ID
-from tensorpc.apps.adv.nodes.base import BaseNodeWrapper, IONodeWrapper, IndicatorWrapper, MarkdownNodeWrapper
+
+import tensorpc.core.datamodel.funcs as D
+from tensorpc.apps.adv.codemgr.flow import (ADVProjectBackendManager,
+                                            ADVProjectChange)
+from tensorpc.apps.adv.codemgr.proj_parse import (ADVProjectParser,
+                                                  create_adv_model)
+from tensorpc.apps.adv.constants import (TENSORPC_ADV_MD_MIN_SIZE,
+                                         TENSORPC_ADV_ROOT_FLOW_ID)
+from tensorpc.apps.adv.ide.ref_select import RefNodeSelectDialog
+from tensorpc.apps.adv.config import ADVNewNodeConfig, ADVNodeCMConfig, ADVPaneContextMenu
+
+from tensorpc.apps.adv.model import (ADVEdgeModel, ADVFlowModel,
+                                     ADVHandlePrefix, ADVNodeFlags,
+                                     ADVNodeHandle, ADVNodeModel,
+                                     ADVNodeRefInfo, ADVNodeType, 
+                                     ADVProject, ADVRoot,
+                                     InlineCode)
+
+from tensorpc.apps.adv.nodes.base import (BaseNodeWrapper, IndicatorWrapper,
+                                          IONodeWrapper, MarkdownNodeWrapper)
 from tensorpc.apps.adv.test_data.simple import get_simple_nested_model
 from tensorpc.constants import PACKAGE_ROOT
+from tensorpc.core.datamodel.draft import (create_draft_type_only,
+                                           create_literal_draft,
+                                           get_draft_pflpath)
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.core.funcid import remove_common_indent_from_code
-from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
-from tensorpc.core.datamodel.draft import create_draft_type_only, create_literal_draft
-import tensorpc.core.datamodel.funcs as D
-from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-
-from typing import Callable, Coroutine, Literal, Optional, Any
-from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandlePrefix, ADVNewNodeConfig, ADVNodeHandle, ADVNodeModifyConfig, ADVNodeRefInfo, ADVNodeType, ADVRoot, ADVProject, ADVNodeModel, ADVFlowModel, InlineCode
-from tensorpc.core.datamodel.draft import (get_draft_pflpath)
+from tensorpc.dock import (appctx, flowui, mark_create_layout, models, mui,
+                           plus, three)
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
-from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
-import rich 
-from tensorpc.apps.adv.ide.ref_select import RefNodeSelectDialog
-import sys 
+from tensorpc.dock.components.plus.config import (ConfigDialogEvent,
+                                                  ConfigPanelDialog)
 
 
 class NodeContextMenu(enum.Enum):
     EnterNested = "Enter Nested"
     DeleteNode = "Delete Node"
     ConfigureNode = "Configure"
-
-class PaneContextMenu(enum.Enum):
-    AddFragment = "Add Fragment Node"
-    AddNestedFragment = "Add Fragment Subflow"
-    AddGlobalScript = "Add Global Script"
-    AddSymbolGroup = "Add Symbol Group"
-    AddOutput = "Add Output"
-    AddRef = "Add Ref Node"
-    AddMarkdown = "Add Markdown Node"
-    Debug = "Debug"
 
 class ADVIdeApp:
     @mark_create_layout
@@ -65,35 +70,17 @@ class ADVIdeApp:
         model = ADVRoot(cur_adv_project="project", adv_projects=adv_proj)
         base_node_cm_items = [
             # mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
-            mui.MenuItem(id=NodeContextMenu.ConfigureNode.name, label=NodeContextMenu.ConfigureNode.value),
+            mui.MenuItem(id=NodeContextMenu.ConfigureNode.value, label=NodeContextMenu.ConfigureNode.value),
             mui.MenuItem(id="divider0", divider=True),
-            mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value, 
+            mui.MenuItem(id=NodeContextMenu.DeleteNode.value, label=NodeContextMenu.DeleteNode.value, 
                 confirmTitle="Are you sure to delete this node?", confirmMessage="This action cannot be undo."),
 
         ]
-        items = [
-            mui.MenuItem(id=PaneContextMenu.AddRef.name, label=PaneContextMenu.AddRef.value),
-            mui.MenuItem(id="divider0", divider=True),
-
-            mui.MenuItem(id=PaneContextMenu.AddFragment.name, label=PaneContextMenu.AddFragment.value),
-            mui.MenuItem(id=PaneContextMenu.AddGlobalScript.name, label=PaneContextMenu.AddGlobalScript.value),
-            mui.MenuItem(id=PaneContextMenu.AddSymbolGroup.name, label=PaneContextMenu.AddSymbolGroup.value),
-            mui.MenuItem(id=PaneContextMenu.AddOutput.name, label=PaneContextMenu.AddOutput.value),
-            mui.MenuItem(id=PaneContextMenu.AddMarkdown.name, label=PaneContextMenu.AddMarkdown.value),
-
-            mui.MenuItem(id="divider1", divider=True),
-            mui.MenuItem(id=PaneContextMenu.AddNestedFragment.name, label=PaneContextMenu.AddNestedFragment.value),
-            mui.MenuItem(id="divider2", divider=True),
-            mui.MenuItem(id=PaneContextMenu.Debug.name, label=PaneContextMenu.Debug.value),
-
-
-        ]            
-
         self.graph = flowui.Flow([], [], [
             flowui.MiniMap(),
             flowui.Controls(),
             flowui.Background(),
-        ]).prop(nodeContextMenuItems=base_node_cm_items, paneContextMenuItems=items)
+        ]).prop(nodeContextMenuItems=base_node_cm_items)
         target_conn_valid_map = {
             ADVHandlePrefix.Input: {
                 # each input (target) can only connect one output (source)
@@ -171,7 +158,7 @@ class ADVIdeApp:
         # })
         self._manager = manager
         graph_container.update_raw_props(default_compute_flow_css())
-
+        self.graph.bind_pfl_query(self.dm, paneContextMenuItems=(ADVRoot.get_cur_flow_props, "paneMenuItems"))
         self.graph.event_pane_context_menu.on(partial(self._handle_pane_context_menu, target_flow_draft=cur_model_draft))
         # self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=preview_model_draft))
         # draft only support raw path, so we use [1::3] to convert from raw path to real node path
@@ -198,7 +185,7 @@ class ADVIdeApp:
         binder.event_edge_new.on(self._handle_edge_change)
 
         # detail.bind_fields(data=cur_root_proj.draft_get_selected_node())
-        detail.bind_pfl_query(self.dm, data=(ADVRoot.get_cur_node_flows, "selectedNode"))
+        detail.bind_pfl_query(self.dm, data=(ADVRoot.get_cur_flow_props, "selectedNode"))
         # has_code, code_draft, path_draft = cur_root_proj.draft_get_node_impl_editor(cur_root_proj.draft_get_selected_node().id)
         # editor.bind_draft_change_uncontrolled(code_draft, path_draft=path_draft)
         # editor_ct.bind_fields(condition=has_code)
@@ -210,7 +197,7 @@ class ADVIdeApp:
             partial(self._code_editor_draft_change),
             installed_comp=editor)
 
-        editor_ct.bind_pfl_query(self.dm, condition=(ADVRoot.get_cur_node_flows, "enableCodeEditor"))
+        editor_ct.bind_pfl_query(self.dm, condition=(ADVRoot.get_cur_flow_props, "enableCodeEditor"))
         # self.dm.debug_print_draft_change(has_code)
 
         return mui.HBox([
@@ -278,10 +265,10 @@ class ADVIdeApp:
         node_cm_items = mui.undefined
         if node.flow is not None:
             node_cm_items = [
-                mui.MenuItem(id=NodeContextMenu.EnterNested.name, label=NodeContextMenu.EnterNested.value),
-                mui.MenuItem(id=NodeContextMenu.ConfigureNode.name, label=NodeContextMenu.ConfigureNode.value),
+                mui.MenuItem(id=NodeContextMenu.EnterNested.value, label=NodeContextMenu.EnterNested.value),
+                mui.MenuItem(id=NodeContextMenu.ConfigureNode.value, label=NodeContextMenu.ConfigureNode.value),
                 mui.MenuItem(id="divider0", divider=True),
-                mui.MenuItem(id=NodeContextMenu.DeleteNode.name, label=NodeContextMenu.DeleteNode.value, 
+                mui.MenuItem(id=NodeContextMenu.DeleteNode.value, label=NodeContextMenu.DeleteNode.value, 
                     confirmTitle="Are you sure to delete this node?", confirmMessage="This action cannot be undo."),
 
             ]
@@ -333,7 +320,7 @@ class ADVIdeApp:
         if pair is None:
             return 
 
-        if item_id == NodeContextMenu.EnterNested.name:
+        if item_id == NodeContextMenu.EnterNested.value:
             node = pair[1]
             if node.ref is not None and node.ref.fe_path is not None:
                 path = node.ref.fe_path
@@ -344,10 +331,10 @@ class ADVIdeApp:
             # xyflow will clear previous selection and send clear-selection event when flow is switched.
             D.getitem_path_dynamic(draft.flow, draft.cur_path, Optional[ADVFlowModel]).selected_nodes = []
             draft.cur_path = path + ['flow']
-        elif item_id == NodeContextMenu.DeleteNode.name:
+        elif item_id == NodeContextMenu.DeleteNode.value:
             change = self._manager.delete_node(pair[1].get_global_uid())
             await self._apply_flow_change(change)
-        elif item_id == NodeContextMenu.ConfigureNode.name:
+        elif item_id == NodeContextMenu.ConfigureNode.value:
             node = pair[1]
             container_node = pair[0]
             if container_node is None:
@@ -359,13 +346,10 @@ class ADVIdeApp:
             dynamic_enum_dict = {
                 "inline_flow_name": selects
             }
-            await self.node_configure_dialog.open_config_dialog(ADVNodeModifyConfig(
-                name=node.name,
-                inline_flow_name=node.inlinesf_name or "",
-                alias_map=node.alias_map,
-            ), userdata={
+            cfg, exclude_ids = ADVNodeCMConfig.from_node(node)
+            await self.node_configure_dialog.open_config_dialog(cfg, userdata={
                 "node_gid": node.get_global_uid(),
-            }, dynamic_enum_dict=dynamic_enum_dict)
+            }, dynamic_enum_dict=dynamic_enum_dict, root_exclude_ids=exclude_ids)
 
     def handle_breadcrumb_click(self, data: list[str]):
         logic_path = data[1:] # remove root
@@ -396,48 +380,37 @@ class ADVIdeApp:
         # await self.graph.update_node_internals(node_ids)
         cur_flow_gid = self._get_cur_flow_gid()
         add_node_items = [
-            PaneContextMenu.AddFragment.name, PaneContextMenu.AddGlobalScript.name, 
-            PaneContextMenu.AddSymbolGroup.name, PaneContextMenu.AddNestedFragment.name,
-            PaneContextMenu.AddOutput.name, PaneContextMenu.AddMarkdown.name
+            ADVPaneContextMenu.AddFragment.value, ADVPaneContextMenu.AddGlobalScript.value, 
+            ADVPaneContextMenu.AddSymbolGroup.value, ADVPaneContextMenu.AddNestedFragment.value,
+            ADVPaneContextMenu.AddOutput.value, ADVPaneContextMenu.AddMarkdown.value,
+            ADVPaneContextMenu.AddInlineFlowDesc.value, ADVPaneContextMenu.AddClass.value,
         ]
         if data.itemId in add_node_items:
-            if data.itemId == PaneContextMenu.AddFragment.name or data.itemId == PaneContextMenu.AddNestedFragment.name:
-                ntype = ADVNodeType.FRAGMENT.value 
-                if data.itemId == PaneContextMenu.AddNestedFragment.name:
-                    name_default = "new_subflow"
-                else:
-                    name_default = "new_fragment"
-            elif data.itemId == PaneContextMenu.AddGlobalScript.name:
-                ntype = ADVNodeType.GLOBAL_SCRIPT.value
-                name_default = "new_global_script"
-            elif data.itemId == PaneContextMenu.AddSymbolGroup.name:
-                ntype = ADVNodeType.SYMBOLS.value
-                name_default = "NewSymbolGroup"
-            elif data.itemId == PaneContextMenu.AddOutput.name:
-                name_default = ""
-                ntype = ADVNodeType.OUT_INDICATOR.value
-            elif data.itemId == PaneContextMenu.AddMarkdown.name:
-                name_default = ""
-                ntype = ADVNodeType.MARKDOWN.value
-
-            else:
-                raise NotImplementedError
-
+            cfg, nType, exc_fields = ADVNodeCMConfig.from_pane_action(ADVPaneContextMenu(data.itemId))
+            flags = 0
+            if data.itemId == ADVPaneContextMenu.AddInlineFlowDesc.value:
+                flags = int(ADVNodeFlags.IS_INLINE_FLOW_DESC)
             assert data.flowPosition is not None 
             position = (data.flowPosition.x, data.flowPosition.y)
-            await self.new_node_dialog.open_config_dialog(ADVNewNodeConfig(
-                name=name_default,
-            ), userdata={
+            inline_flows = self._manager.collect_all_inline_flow_names(cur_flow_gid)
+            selects = [(n, n) for n in inline_flows]
+            dynamic_enum_dict = {
+                "inline_flow_name": selects
+            }
+            is_subflow = (data.itemId == ADVPaneContextMenu.AddNestedFragment.value or 
+                    data.itemId == ADVPaneContextMenu.AddClass.value) 
+            await self.new_node_dialog.open_config_dialog(cfg, userdata={
                 "flow_gid": cur_flow_gid,
-                "ntype": ntype,
+                "ntype": nType,
                 "position": position,
-                "is_subflow": data.itemId == PaneContextMenu.AddNestedFragment.name,
-            })
-        elif data.itemId == PaneContextMenu.AddRef.name:
+                "flags": flags,
+                "is_subflow": data.itemId == is_subflow,
+            }, root_exclude_ids=exc_fields, dynamic_enum_dict=dynamic_enum_dict)
+        elif data.itemId == ADVPaneContextMenu.AddRef.value:
             all_ref_nodes = self._manager.collect_possible_ref_nodes(cur_flow_gid)
             assert data.flowPosition is not None 
 
-            rich.print([n.id for n in all_ref_nodes])
+            rich.print("ALL REFS", [n.id for n in all_ref_nodes])
             datas = []
             for n in all_ref_nodes:
                 name = n.name
@@ -455,7 +428,7 @@ class ADVIdeApp:
             await self.new_ref_dialog.send_and_wait(ev)
             self.new_ref_dialog.position = (data.flowPosition.x, data.flowPosition.y)
             await self.new_ref_dialog.set_open(True)
-        elif data.itemId == PaneContextMenu.Debug.name:
+        elif data.itemId == ADVPaneContextMenu.Debug.value:
             cur_model = self.dm.model.get_cur_adv_project().flow
             node_ids = [n.id for n in cur_model.nodes.values()]
             rich.print("update_node_internals", node_ids)
@@ -497,6 +470,7 @@ class ADVIdeApp:
         flow_gid = event.userdata["flow_gid"]
         ntype = ADVNodeType(event.userdata["ntype"])
         is_subflow = event.userdata["is_subflow"]
+        flags = event.userdata["flags"]
         node_id_base = event.cfg.name
         if ntype != ADVNodeType.OUT_INDICATOR and ntype != ADVNodeType.MARKDOWN:
             assert event.cfg.name.isidentifier()
@@ -510,9 +484,13 @@ class ADVIdeApp:
             if is_subflow:
                 subflow = ADVFlowModel(nodes={}, edges={})
             else:
-                impl = InlineCode(f"ADV.mark_outputs() # mark output symbols here.")
+                if not flags & ADVNodeFlags.IS_INLINE_FLOW_DESC:
+                    impl = InlineCode(f"ADV.mark_outputs() # mark output symbols here.")
         elif ntype == ADVNodeType.GLOBAL_SCRIPT:
             impl = InlineCode(f"")
+        elif ntype == ADVNodeType.CLASS:
+            subflow = ADVFlowModel(nodes={}, edges={})
+
         elif ntype == ADVNodeType.SYMBOLS:
             impl = InlineCode(f"""
 @dataclasses.dataclass
@@ -535,6 +513,7 @@ class {event.cfg.name}:
             name=event.cfg.name,
             impl=impl,
             flow=subflow,
+            flags=flags,
         )
         if ntype == ADVNodeType.MARKDOWN:
             node.width = TENSORPC_ADV_MD_MIN_SIZE[0]
@@ -577,7 +556,7 @@ class {event.cfg.name}:
         change = self._manager.flow_edge_change(cur_flow_gid)
         await self._apply_flow_change(change)
 
-    async def _on_node_configure(self, event: ConfigDialogEvent[ADVNodeModifyConfig]):
+    async def _on_node_configure(self, event: ConfigDialogEvent[ADVNodeCMConfig]):
         cfg = event.cfg
         node_gid = event.userdata["node_gid"]
         change = self._manager.modify_node_config(node_gid, cfg)

@@ -356,6 +356,12 @@ def parse_to_control_nodes(origin_obj,
         # check anno meta first
         if annotated_metas is not None:
             first_anno_meta = annotated_metas[0]
+            if isinstance(first_anno_meta, typemetas.BaseObject):
+                if first_anno_meta.alias is not None:
+                    child_node.name = first_anno_meta.alias
+                if first_anno_meta.tooltip is not None:
+                    child_node_item.tooltip = first_anno_meta.tooltip
+
             if isinstance(first_anno_meta,
                           (typemetas.ColorRGB, typemetas.ColorRGBA)):
                 if isinstance(first_anno_meta, typemetas.ColorRGB):
@@ -419,8 +425,6 @@ def parse_to_control_nodes(origin_obj,
                     child_node_item.min = first_anno_meta.lo
                     child_node_item.max = first_anno_meta.hi
                 child_node_item.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
-                if first_anno_meta.alias is not None:
-                    child_node.name = first_anno_meta.alias
 
                 setter = partial(setattr_vector_n_tuple,
                                  obj=current_obj,
@@ -448,8 +452,6 @@ def parse_to_control_nodes(origin_obj,
                     child_node_item.max = first_anno_meta.hi
                     child_node_item.isInteger = isinstance(first_anno_meta,
                                                       typemetas.RangedInt)
-                    if first_anno_meta.alias is not None:
-                        child_node.name = first_anno_meta.alias
                     child_node_item.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
                     if first_anno_meta.step is None and ty is int:
                         child_node_item.step = 1
@@ -459,8 +461,6 @@ def parse_to_control_nodes(origin_obj,
             elif isinstance(first_anno_meta, (typemetas.Enum)):
                 res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None and issubclass(ty, (enum.Enum, enum.IntEnum)):
-                    if first_anno_meta.alias is not None:
-                        child_node.name = first_anno_meta.alias
                     if first_anno_meta.excludes is not None:
                         child_node_item.selects = list((x.name, x.value) for x in ty if x not in first_anno_meta.excludes)
                     res_node.children.append(child_node)
@@ -474,8 +474,6 @@ def parse_to_control_nodes(origin_obj,
                 res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None and issubclass(ty, str):
                     child_node_item.type = mui.ControlNodeType.Select.value
-                    if first_anno_meta.alias is not None:
-                        child_node.name = first_anno_meta.alias
                     child_node_item.selects = selects
                     res_node.children.append(child_node)
                     obj_uid_to_meta[next_name] = res
@@ -483,8 +481,6 @@ def parse_to_control_nodes(origin_obj,
             elif isinstance(first_anno_meta, (typemetas.CommonObject)):
                 res = _parse_base_type(ty, current_obj, f.name, child_node_item)
                 if res is not None:
-                    if first_anno_meta.alias is not None:
-                        child_node.alias = first_anno_meta.alias
                     if first_anno_meta.default is not None:
                         if isinstance(child_node.value, mui.Undefined):
                             child_node.value = first_anno_meta.default
@@ -651,12 +647,15 @@ class ConfigPanelDialog(mui.Dialog, Generic[T]):
         self._cur_cfg: Optional[T] = None
         self._cur_user_data: Any = None
 
-    async def open_config_dialog(self, config_obj: T, userdata: Any = None, dynamic_enum_dict: Optional[dict[str, Any]] = None):
+    async def open_config_dialog(self, config_obj: T, userdata: Any = None, dynamic_enum_dict: Optional[dict[str, Any]] = None,
+            root_exclude_ids: Optional[list[str]] = None):
         assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
         config_obj = dataclasses.replace(config_obj)
         self._cur_cfg = config_obj
         self._cur_user_data = userdata
         panel = ConfigPanel(config_obj, dynamic_enum_dict=dynamic_enum_dict)
+        if root_exclude_ids is not None:
+            panel.prop(rootExcludedIds=root_exclude_ids)
         await self.update_childs({
             self.__layout_key: panel,
         }, post_ev_creator=lambda: self.update_event(open=True)) 

@@ -1,13 +1,10 @@
-from collections.abc import Sequence
 from pathlib import Path
-import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, Self, Union, cast
 from tensorpc.apps.adv.constants import TENSORPC_ADV_FOLDER_FLOW_NAME
 from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel import typemetas
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
 from tensorpc.dock.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
@@ -75,12 +72,14 @@ class ADVHandleFlags(enum.IntFlag):
 
 class ADVNodeFlags(enum.IntFlag):
     # fragment flags
+    # base func types
     IS_METHOD = enum.auto()
+    IS_CLASSMETHOD = enum.auto()
+    IS_STATICMETHOD = enum.auto()
+    # extend func types
     IS_INIT_FN = enum.auto()
     IS_AUTO_FIELD_FN = enum.auto()
     IS_DOCK_UI_LAYOUT_FN = enum.auto()
-    IS_CLASSMETHOD = enum.auto()
-    IS_STATICMETHOD = enum.auto()
     # special flag for inherited fragments.
     IS_INHERITED_NODE = enum.auto()
     # special flag for inline flow description node
@@ -88,6 +87,23 @@ class ADVNodeFlags(enum.IntFlag):
     IS_INLINE_FLOW_DESC = enum.auto()
     # class flags
     IS_DATACLASS = enum.auto()
+
+
+class ADVPaneContextMenu(enum.Enum):
+    AddFragment = "Add Fragment"
+    AddNestedFragment = "Add Fragment Subflow"
+    AddClass = "Add Class"
+    AddGlobalScript = "Add Global Script"
+    AddSymbolGroup = "Add Symbol Group"
+    AddOutput = "Add Output"
+    AddMarkdown = "Add Markdown"
+    AddInlineFlowDesc = "Add Inline Flow Desc"
+    # special actions
+    AddRef = "Add Ref Node"
+
+    # misc actions
+    Debug = "Debug"
+
 
 @dataclasses.dataclass
 class ADVHandleSourceInfo:
@@ -199,6 +215,9 @@ class ADVNodeModel(BaseNodeModel):
 
     def is_inline_flow_desc(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INLINE_FLOW_DESC)) != 0
+
+    def is_inline_flow_desc_def(self):
+        return self.ref is None and self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INLINE_FLOW_DESC)) != 0
 
     def is_method(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_METHOD)) != 0
@@ -503,8 +522,63 @@ class ADVRoot:
     def draft_get_cur_model(self):
         return self.draft_get_cur_adv_project().draft_get_cur_model()
 
+    @pfl.mark_pfl_compilable
+    @staticmethod
+    def get_pane_context_menu_items(cur_flow_ntype: int) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = [
+            {
+                "id": ADVPaneContextMenu.AddRef.value,
+            },
+            {
+                "id": "divider0",
+                "divider": True,
+            },
+            {
+                "id": ADVPaneContextMenu.AddFragment.value,
+            },
+            {
+                "id": ADVPaneContextMenu.AddGlobalScript.value,
+            },
+            {
+                "id": ADVPaneContextMenu.AddSymbolGroup.value,
+            },
+            {
+                "id": ADVPaneContextMenu.AddOutput.value,
+            },
+            {
+                "id": ADVPaneContextMenu.AddMarkdown.value,
+            },
+            {
+                "id": ADVPaneContextMenu.AddInlineFlowDesc.value,
+            },
+        ]
+        if cur_flow_ntype != ADVNodeType.CLASS:
+            items.extend([
+                {
+                    "id": "divider_class",
+                    "divider": True,
+                },
+                {
+                    "id": ADVPaneContextMenu.AddNestedFragment.value,
+                },
+                {
+                    "id": ADVPaneContextMenu.AddClass.value,
+                },
+
+            ])
+        items.extend([
+            {
+                "id": "divider_final",
+                "divider": True,
+            },
+            {
+                "id": ADVPaneContextMenu.Debug.value,
+            },
+        ])
+        return items
+
     @mui.DataModel.mark_pfl_query_func
-    def get_cur_node_flows(self) -> dict[str, Any]:
+    def get_cur_flow_props(self) -> dict[str, Any]:
         cur_proj = self.adv_projects[self.cur_adv_project]
         # cur_flow = cast(Optional[ADVFlowModel], pfl.js.Common.getItemPath(
         #     cur_proj.flow, cur_proj.cur_path))
@@ -513,9 +587,17 @@ class ADVRoot:
         res: dict[str, Any] = {
             "selectedNode": None,
             "enableCodeEditor": False,
+            "paneMenuItems": [],
         }
         if cur_flow is None:
             return res
+        cur_flow_parent_type = ADVNodeType.FRAGMENT
+        if len(cur_proj.cur_path) >= 1:
+            cur_flow_parent: Optional[ADVNodeModel] = pfl.js.Common.getItemPath(
+                cur_proj.flow, cur_proj.cur_path[:-1])
+            if cur_flow_parent is not None:
+                cur_flow_parent_type = cur_flow_parent.nType
+        res["paneMenuItems"] = self.get_pane_context_menu_items(cur_flow_parent_type)
         selected_node_ids = cur_flow.selected_nodes
         if len(selected_node_ids) == 1:
             selected_node = cur_flow.nodes[selected_node_ids[0]]
@@ -742,13 +824,3 @@ class ADVRoot:
             # if is_input:
             #     res["hborder"] = "1px solid #4caf50"
         return res
-
-@dataclasses.dataclass
-class ADVNewNodeConfig:
-    name: str
-
-@dataclasses.dataclass
-class ADVNodeModifyConfig:
-    name: str
-    inline_flow_name: Annotated[str, typemetas.DynamicEnum(alias="Inline Flow Name")]
-    alias_map: Annotated[str, typemetas.CommonObject(alias="Alias Map (e.g. n1->new1,n2->new2)")]

@@ -257,7 +257,7 @@ class SegmentsProps(ThreeBasicProps):
     opacity: Annotated[Union[NumberType, Undefined],
                        typemetas.CommonObject(default=1.0)] = undefined
     layers: Annotated[Union[int, Undefined],
-                      typemetas.RangedInt(0, 31, 1, default=0)] = undefined
+                      typemetas.RangedInt(lo=0, hi=31, step=1, default=0)] = undefined
 
     @staticmethod
     def lines_validator(v: np.ndarray):
@@ -621,9 +621,9 @@ class Wireframe(ThreeComponentBase[WireframeProps]):
 @dataclasses.dataclass
 class InfiniteGridHelperProps(Object3dBaseProps):
     size1: Annotated[Union[NumberType, Undefined],
-                     RangedFloat(1, 50, 0.1)] = undefined
+                     RangedFloat(lo=1, hi=50, step=0.1)] = undefined
     size2: Annotated[Union[NumberType, Undefined],
-                     RangedFloat(1, 200, 0.5)] = undefined
+                     RangedFloat(lo=1, hi=200, step=0.5)] = undefined
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     distance: Union[NumberType, Undefined] = undefined
     axes: Union[str, Undefined] = undefined
@@ -882,7 +882,7 @@ class TextProps(Object3dBaseProps):
                      typemetas.ColorRGB(default="white")] = undefined
     fontSize: Annotated[
         Union[NumberType, Undefined],
-        typemetas.RangedFloat(0.1, 20, 0.02, default=1)] = undefined
+        typemetas.RangedFloat(lo=0.1, hi=20, step=0.02, default=1)] = undefined
     maxWidth: Union[NumberType, Undefined] = undefined
     lineHeight: Union[NumberType, Undefined] = undefined
     letterSpacing: Union[NumberType, Undefined] = undefined

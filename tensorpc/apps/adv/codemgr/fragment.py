@@ -140,7 +140,6 @@ class FragmentParseResult(BaseParseResult):
         # for fragment ref, we use inline Annotated instead of decorator
         assert self.node.ref is None
         # generate signature from handles
-        # TODO class support 
         lines = [
             f"@{decorator}",
         ]
@@ -170,7 +169,6 @@ class FragmentParseResult(BaseParseResult):
             code = impl.code
             code_lines = code.splitlines()
             # generate signature from handles
-            # TODO class support 
             lines_without_body = self.get_code_lines_without_body()
             lines: list[str] = lines_without_body
             line_offset = len(lines)
@@ -238,6 +236,14 @@ class FragmentParseResult(BaseParseResult):
                 default_str = f" = {bh.handle.default}"
             lines.append(f"    {var_name}: {type_str}{default_str}")
         return lines
+
+    def copy_for_ref_node(self, ref_node: ADVNodeModel) -> Self:
+        assert self.node is not None
+        parse_res = self.copy(ref_node.id)
+        parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(ref_node))
+        if self.node.is_method():
+            parse_res = parse_res.add_self_handle()
+        return parse_res
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
     if "->" in desc:

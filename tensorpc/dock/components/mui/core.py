@@ -4687,6 +4687,7 @@ class SimpleControlsItem:
     # for vectorN
     count: Union[Undefined, int] = undefined
     isInteger: Union[Undefined, bool] = undefined
+    tooltip: Union[Undefined, str] = undefined
 
 
 @dataclasses.dataclass
@@ -4699,7 +4700,7 @@ class SimpleControlsProps(MUIFlexBoxProps):
     controlled: Union[Undefined, bool] = undefined  # True by default
     expanded: Union[bool, Dict[str,
                                bool]] = dataclasses.field(default_factory=dict)
-
+    rootExcludedIds: Union[Undefined, List[str]] = undefined
 
 class SimpleControls(MUIComponentBase[SimpleControlsProps]):
 

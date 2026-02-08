@@ -13,73 +13,70 @@ Vector2Type: TypeAlias = Tuple[float, float]
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 @dataclass
-class CommonObject:
+class BaseObject:
     alias: Optional[str] = None
+    tooltip: Optional[str] = None
+
+@dataclass
+class CommonObject(BaseObject):
     default: Optional[Any] = None
 
 @dataclass
-class Enum:
-    alias: Optional[str] = None
+class Enum(BaseObject):
     excludes: Optional[List[Any]] = None
 
 @dataclass
-class DynamicEnum:
-    alias: Optional[str] = None
+class DynamicEnum(BaseObject):
+    pass
 
-@dataclass
-class RangedInt:
+@dataclass(kw_only=True)
+class RangedInt(BaseObject):
     lo: int
     hi: int
     step: Optional[int] = None
-    alias: Optional[str] = None
     default: Optional[int] = None
 
 
-@dataclass
-class RangedFloat:
+@dataclass(kw_only=True)
+class RangedFloat(BaseObject):
     lo: float
     hi: float
     step: Optional[float] = None
-    alias: Optional[str] = None
     default: Optional[float] = None
 
 
 @dataclass
-class ColorRGB:
+class ColorRGB(BaseObject):
     value_is_string: bool = True
     default: Optional[Union[int, str]] = None
 
 
 @dataclass
-class ColorRGBA:
+class ColorRGBA(BaseObject):
     value_is_string: bool = True
     default: Optional[Union[int, str]] = None
 
 
-@dataclass
-class RangedVector3:
+@dataclass(kw_only=True)
+class RangedVector3(BaseObject):
     lo: float
     hi: float
     step: Optional[float] = None
-    alias: Optional[str] = None
     default: Optional[Tuple[float, float, float]] = None
 
-@dataclass
-class RangedVector2:
+@dataclass(kw_only=True)
+class RangedVector2(BaseObject):
     lo: float
     hi: float
     step: Optional[float] = None
-    alias: Optional[str] = None
     default: Optional[Tuple[float, float]] = None
 
 @dataclass
-class Vector3:
+class Vector3(BaseObject):
     step: Optional[float] = None
-    alias: Optional[str] = None
     default: Optional[Tuple[float, float, float]] = None
 
 @dataclass
-class Vector2:
+class Vector2(BaseObject):
     step: Optional[float] = None
-    alias: Optional[str] = None
     default: Optional[Tuple[float, float]] = None

@@ -826,12 +826,12 @@ class WTF:
     c: bool = False
     e: str = "RTX"
     h: TestEnum = TestEnum.C
-    i: V.Annotated[int, V.RangedInt(0, 10)] = 1
+    i: V.Annotated[int, V.RangedInt(lo=0, hi=10)] = 1
     j: TestEnumInt = TestEnumInt.C
-    wtf: V.Annotated[float, V.RangedFloat(0, 1, 0.05, "ftw")] = 0.5
+    wtf: V.Annotated[float, V.RangedFloat(lo=0, hi=1, step=0.05, alias="ftw")] = 0.5
     wtfcolor: V.Annotated[str, V.ColorRGB()] = "red"
     v3: three.Vector3Type = (1, 2, 3)
-    v4: V.Annotated[three.Vector3Type, V.Vector3(1.0)] = (1, 2, 3)
+    v4: V.Annotated[three.Vector3Type, V.Vector3(step=1.0)] = (1, 2, 3)
 
 
 class SampleConfigApp(EditableApp):

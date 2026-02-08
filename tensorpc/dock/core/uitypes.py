@@ -108,6 +108,7 @@ class IconType(enum.IntEnum):
 @dataclasses.dataclass
 class MenuItem:
     id: str
+    # will use id if label is undefined
     label: Union[Undefined, str] = undefined
     # null icon has same effect as undefined,
     # the only difference is we ignore undefined by default,

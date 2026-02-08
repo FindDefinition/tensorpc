@@ -90,10 +90,10 @@ class TracerUIConfig:
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     manual_scope: Annotated[str, typemetas.CommonObject(alias="Manual Scope")] = ""
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
-    breakpoint_count: Annotated[int, typemetas.RangedInt(1, 100, alias="Breakpoint Count")] = 1
-    max_stack_depth: Annotated[int, typemetas.RangedInt(1, 50, alias="Max Stack Depth")] = 10
+    breakpoint_count: Annotated[int, typemetas.RangedInt(lo=1, hi=100, alias="Breakpoint Count")] = 1
+    max_stack_depth: Annotated[int, typemetas.RangedInt(lo=1, hi=50, alias="Max Stack Depth")] = 10
     ignore_c_function: Annotated[bool, typemetas.CommonObject(alias="Ignore C Function")] = True
-    min_duration: Annotated[float, typemetas.RangedInt(0, 5000, alias="Min Duration (us, VizTracer)")] = 0
+    min_duration: Annotated[float, typemetas.RangedInt(lo=0, hi=5000, alias="Min Duration (us, VizTracer)")] = 0
     profile_memory: Annotated[bool, typemetas.CommonObject(alias="Profile Memory (PyTorch)")] = False
     pytorch_with_stask: Annotated[bool, typemetas.CommonObject(alias="PyTorch Record Python")] = False
     replace_sitepkg_prefix: Annotated[bool, typemetas.CommonObject(alias="Remove site-packages Prefix")] = True

@@ -764,7 +764,7 @@ class PFLIfExp(PFLExpr):
         res_st = body_st
         if not allow_partial or not operands_has_unk:
             msg = f"body and orelse must be same type, but got {body_st} and {orelse_st}"
-            res_st = body_st._check_equal_type_with_unk_any_type_promption(orelse_st, msg) 
+            res_st = body_st._check_equal_type_and_promption(orelse_st, msg) 
         if operands_has_unk:
             self.st = PFLExprInfo(PFLExprType.UNKNOWN)
         else:
@@ -1495,8 +1495,8 @@ class PFLAttribute(PFLExpr):
                                                    is_type=True)
                     self.st = new_st
                 else:
-                    unbound_func = getattr(dcls_type, self.attr)
-                    prep_res = get_parse_cache_checked()._var_preproc(unbound_func)
+                    unbound_func_static = inspect.getattr_static(dcls_type, self.attr)
+                    prep_res = get_parse_cache_checked()._var_preproc(unbound_func_static)
                     is_prop = prep_res.is_property
                     unbound_func = prep_res.value
                     if is_prop:
@@ -1504,9 +1504,13 @@ class PFLAttribute(PFLExpr):
                     is_method_def = False
                     if value_st.type == PFLExprType.DATACLASS_OBJECT:
                         # TODO handle classmethod
-                        is_method_def = not isinstance(unbound_func, staticmethod)
-                        self_type = value_st.annotype
-                        self_st_type = value_st
+                        is_method_def = not prep_res.is_static and not prep_res.is_classmethod
+                        if prep_res.is_static:
+                            self_type = None
+                            self_st_type = None
+                        else:
+                            self_type = value_st.annotype
+                            self_st_type = value_st
                     else:
                         self_type = None
                         self_st_type = None
@@ -1830,7 +1834,7 @@ class PFLArray(PFLExpr):
                 return
             if ctx.cfg.allow_dynamic_container_literal:
                 if not first_elt_st.is_equal_type(elt_st):
-                    final_st = PFLExprInfo(PFLExprType.ANY)
+                    final_st = first_elt_st._check_equal_type_and_promption(elt_st, check=False)
             else:
                 assert first_elt_st.is_equal_type(elt_st), f"all elts must be same type, but got {first_elt_st} and {elt_st}"
         self.st = PFLExprInfo(PFLExprType.ARRAY,
@@ -1916,7 +1920,8 @@ class PFLDict(PFLExpr):
                     is_eq_type = value_st.is_equal_type(value_st_cur)
                     if allow_dynamic_container_literal:
                         if not is_eq_type:
-                            value_st = PFLExprInfo(PFLExprType.ANY)
+                            value_st = value_st_cur._check_equal_type_and_promption(value_st, check=False)
+                            # value_st = PFLExprInfo(PFLExprType.ANY)
                     else:
                         assert value_st.is_equal_type(value_st_cur), f"all values must be same type, but got {value_st} and {value_st_cur}"
             else:
@@ -1925,7 +1930,8 @@ class PFLDict(PFLExpr):
                     is_eq_type = value_st.is_equal_type(value_st_cur)
                     if allow_dynamic_container_literal:
                         if not is_eq_type:
-                            value_st = PFLExprInfo(PFLExprType.ANY)
+                            value_st = value_st_cur._check_equal_type_and_promption(value_st, check=False)
+                            # value_st = PFLExprInfo(PFLExprType.ANY)
                     else:
                         assert value_st.is_equal_type(value_st_cur.childs[
                             0]), f"all values must be same type, but got {value_st} and {value_st_cur.childs[0]}"

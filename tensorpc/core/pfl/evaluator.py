@@ -19,7 +19,7 @@ from tensorpc.core.moduleid import get_module_id_of_type
 from tensorpc.core.pfl.constants import PFL_BUILTIN_PROXY_INIT_FN
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .core import (BACKEND_CONFIG_REGISTRY, PFL_LOGGER, PFLErrorFormatContext, PFLInlineRunEnv, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
+from .core import (BACKEND_CONFIG_REGISTRY, PFLErrorFormatContext, PFLInlineRunEnv, PFLParseCache, StaticEvalConfig, PFLMetaInferResult, PFLParseConfig,
                    PFLParseContext, PFLExprInfo, PFLExprType,
                    enter_parse_context, get_parse_context, get_parse_context_checked)
 from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
@@ -30,7 +30,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript, PFLTreeNodeFinder, PFLTuple,
                       PFLUnaryOp, PFLWhile, UnaryOpType, iter_child_nodes, unparse_pfl_ast, unparse_pfl_expr, walk,
                       PFLAstParseError, PFLEvalError)
-
+from .loggers import PFL_LOGGER
 from .pfl_reg import  STD_REGISTRY, StdRegistryItem
 from .parser import PFLLibrary, default_pfl_var_proc
 
