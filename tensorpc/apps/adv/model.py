@@ -77,7 +77,6 @@ class ADVNodeFlags(enum.IntFlag):
     IS_CLASSMETHOD = enum.auto()
     IS_STATICMETHOD = enum.auto()
     # extend func types
-    IS_INIT_FN = enum.auto()
     IS_AUTO_FIELD_FN = enum.auto()
     IS_DOCK_UI_LAYOUT_FN = enum.auto()
     # special flag for inherited fragments.
@@ -210,8 +209,8 @@ class ADVNodeModel(BaseNodeModel):
     @staticmethod
     def is_defined_in_class_static(flags: int, nType: int):
         # init_fn, ui fn are all method (IS_METHOD set), so no need to check them.
-        is_method = bool(flags & int(ADVNodeFlags.IS_METHOD)) or bool(flags & int(ADVNodeFlags.IS_CLASSMETHOD))
-        return nType == ADVNodeType.FRAGMENT and is_method
+        is_class_body_def = bool(flags & int(ADVNodeFlags.IS_METHOD | ADVNodeFlags.IS_CLASSMETHOD | ADVNodeFlags.IS_STATICMETHOD))
+        return nType == ADVNodeType.FRAGMENT and is_class_body_def
 
     def is_inline_flow_desc(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INLINE_FLOW_DESC)) != 0
@@ -225,8 +224,11 @@ class ADVNodeModel(BaseNodeModel):
     def is_class_method(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_CLASSMETHOD)) != 0
 
+    def is_static_method(self):
+        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_STATICMETHOD)) != 0
+
     def is_init_fn(self):
-        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_INIT_FN)) != 0
+        return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_METHOD)) != 0 and self.name == "__init__"
 
     def is_auto_field_fn(self):
         return self.nType == ADVNodeType.FRAGMENT and (self.flags & int(ADVNodeFlags.IS_AUTO_FIELD_FN)) != 0
@@ -689,6 +691,7 @@ class ADVRoot:
                 "hpos": "left" if is_input else "right",
                 "textAlign": "start" if (is_input or is_sym_handle) else "end",
                 "is_input": is_input,
+                "tooltip": handle.type,
             }
             if is_self:
                 res["textColor"] = CodeStyles.VscodeClassColorLight
@@ -705,6 +708,7 @@ class ADVRoot:
         is_cls_method = (flags & ADVNodeFlags.IS_CLASSMETHOD) != 0
         is_static_method = (flags & ADVNodeFlags.IS_STATICMETHOD) != 0
         is_inherited = (flags & ADVNodeFlags.IS_INHERITED_NODE) != 0
+        is_init_fn = is_method and node.name == "__init__"
         if is_method:
             tags.append({
                 "id": "M",
@@ -725,6 +729,12 @@ class ADVRoot:
                 "id": "I",
                 "tooltip": "Inherited Fragment",
             })
+        if is_init_fn:
+            tags.append({
+                "id": "INIT",
+                "tooltip": "__init__",
+            })
+
         return tags
 
     @mui.DataModel.mark_pfl_query_nested_func

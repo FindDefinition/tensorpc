@@ -5,7 +5,7 @@ from tensorpc.apps.adv.model import ADVNodeType
 from typing import Any, Optional, TypedDict, Union
 from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
 
-class BaseHandle(mui.FlexBox):
+class BaseHandle(mui.TooltipFlexBox):
     def __init__(self, node_gid: str,
                  dm: mui.DataModel[ADVRoot]):
         get_handle_fn = partial(ADVRoot.get_handle, node_gid=node_gid)
@@ -46,13 +46,19 @@ class BaseHandle(mui.FlexBox):
             handle_desc,
             handle_right_cond,
         ]
-        super().__init__(layout)
+        super().__init__("", layout)
         self.prop(
             className=
-            f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"
+            f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}",
+            enterDelay=300,
+            placement="right",
+            arrow=True,
         )
         self.bind_pfl_query(dm,
             outline=(get_handle_fn, "outline"),
+        )
+        self.bind_pfl_query(dm,
+            title=(get_handle_fn, "tooltip"),
         )
 
 

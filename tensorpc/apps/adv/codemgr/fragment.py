@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional, Self, TypeVar, Union
 from typing_extensions import Literal
 from tensorpc.apps.adv.logger import ADV_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.apps.adv.codemgr.core import BackendHandle, BaseParseResult, BaseParser, ImplCodeSpec
+from tensorpc.apps.adv.codemgr.core import BackendHandle, BackendNode, BaseParseResult, BaseParser, ImplCodeSpec
 from tensorpc.apps.adv.codemgr.markers import mark_fragment_def, mark_inlineflow_with_desc
 from tensorpc.apps.adv.model import ADVEdgeModel, ADVHandleFlags, ADVHandlePrefix, ADVHandleSourceInfo, ADVNodeFlags, ADVNodeModel, ADVNodeHandle
 import hashlib
@@ -101,13 +101,23 @@ class FragmentParseResult(BaseParseResult):
         )
 
     def do_alias_map(self, alias_map: dict[str, str]) -> Self:
-        new_output_handles: list[BackendHandle] = []
-        for h in self.output_handles:
-            new_h = h.copy()
-            if h.handle.symbol_name in alias_map:
-                new_alias = alias_map[h.handle.symbol_name]
-                new_h.handle.name = new_alias
-            new_output_handles.append(new_h)
+        if self.out_type == "single" or self.out_type == "self":
+            _, alias = next(iter(alias_map.items()))
+            assert len(self.output_handles) == 1
+            new_h = self.output_handles[0].copy()
+            new_h.handle.name = alias
+            new_output_handles = [
+                new_h
+            ]
+        else:
+            new_output_handles: list[BackendHandle] = []
+
+            for h in self.output_handles:
+                new_h = h.copy()
+                if h.handle.symbol_name in alias_map:
+                    new_alias = alias_map[h.handle.symbol_name]
+                    new_h.handle.name = new_alias
+                new_output_handles.append(new_h)
         return dataclasses.replace(
             self,
             output_handles=new_output_handles,
@@ -145,6 +155,9 @@ class FragmentParseResult(BaseParseResult):
         ]
         if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
             lines.append(f"@classmethod")
+        elif self.node.flags & (ADVNodeFlags.IS_STATICMETHOD):
+            lines.append(f"@staticmethod")
+
         lines.append(f"def {self.func_name}(",)
         if self.node.flags & (ADVNodeFlags.IS_CLASSMETHOD):
             # add cls
@@ -178,6 +191,17 @@ class FragmentParseResult(BaseParseResult):
             lines.extend(code_lines_indented)
             end_column = len(code_lines_indented[-1]) + 1
             return ImplCodeSpec(lines, line_offset, 1, len(code_lines_indented), end_column)
+
+    @staticmethod 
+    def early_validate_code(code: str):
+        code_lines = code.splitlines()
+        lines = [
+            f"def func():",
+            *[f"    {line}" for line in code_lines]
+        ]
+        final_code = "\n".join(lines)
+        ast.parse(final_code)
+
 
     def is_io_handle_changed(self, other_res: Self):
         """Compare io handles between two flow parse result. 
@@ -237,12 +261,18 @@ class FragmentParseResult(BaseParseResult):
             lines.append(f"    {var_name}: {type_str}{default_str}")
         return lines
 
-    def copy_for_ref_node(self, ref_node: ADVNodeModel) -> Self:
+    def copy_for_ref_node(self, ref_be_node: BackendNode) -> Self:
         assert self.node is not None
-        parse_res = self.copy(ref_node.id)
-        parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(ref_node))
+        parse_res = self.copy(ref_be_node.id)
+        parse_res = dataclasses.replace(parse_res, node=dataclasses.replace(ref_be_node.node))
         if self.node.is_method():
             parse_res = parse_res.add_self_handle()
+        for bhhandle in parse_res.output_handles:
+            if bhhandle.is_method_self:
+                # parent is class
+                assert ref_be_node.node_def_parent is not None 
+                bhhandle.handle.flags &= ~int(ADVHandleFlags.IS_METHOD_SELF)
+                bhhandle.handle.type = ref_be_node.node_def_parent.name
         return parse_res
 
 def _parse_single_desc(desc: str) -> tuple[str, str]:
@@ -568,7 +598,7 @@ class FragmentParser(BaseParser):
         output_handles: list[BackendHandle] = []
         succeed = True
         func_name = node.name
-        if node.flags & ADVNodeFlags.IS_INIT_FN:
+        if node.is_init_fn():
             output_desc = FragmentOutputDesc(
                 type="none",
                 mapping={},
@@ -609,6 +639,10 @@ class FragmentParser(BaseParser):
                     succeed = False
                 else: 
                     sym_handle = cur_scope[sym_name].copy()
+                    # if sym_handle.is_method_self:
+                    #     # remove self, clear bit
+                    #     # TODO add class info
+                    #     sym_handle.handle.flags &= ~int(ADVHandleFlags.IS_METHOD_SELF)
                     sym_handle.handle.set_source_info_inplace(node_id, sym_handle.handle.id)
                     sym_handle.handle.name = alias
                     if output_desc.type == "dict":
@@ -620,6 +654,12 @@ class FragmentParser(BaseParser):
             sym_handle.target_node_handle_id.add((node_id, sym_handle.handle.id))
             sym_handle = sym_handle.copy(prefix=ADVHandlePrefix.Input)
             sym_handle.handle.flags |= int(ADVHandleFlags.IS_INPUT)
+            # if sym_handle.is_method_self:
+            #     # remove self, clear bit
+            #     # TODO add class info
+            #     sym_handle.handle.flags &= ~int(ADVHandleFlags.IS_METHOD_SELF)
+            #     # sym_handle.handle.type = 
+
             input_handles.append(sym_handle)
         # make order of input handles stable.
         input_handles.sort(key=lambda h: (h.handle.default is not None, h.index))

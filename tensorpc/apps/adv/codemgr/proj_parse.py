@@ -397,12 +397,15 @@ class ADVProjectParser:
         for desc in flow_desc.symbol_group_descs:
             node_id = desc.marker.kwargs["node_id"]
             position = desc.marker.kwargs["position"]
+            indent_num = 4
+            code = "\n".join([line[indent_num:] for line in desc.code_lines])
+
             adv_node = ADVNodeModel(
                 id=node_id, 
                 position=XYPosition(x=position[0], y=position[1]),
                 nType=ADVNodeType.SYMBOLS.value,
                 name=desc.name,
-                impl=InlineCode("\n".join(desc.code_lines))
+                impl=InlineCode(code)
             )
             node_id_to_node[node_id] = adv_node
         edge_id_pool = UniqueNamePool()

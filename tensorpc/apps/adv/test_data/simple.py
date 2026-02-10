@@ -112,7 +112,7 @@ return cls(a=a + 1)
             name=f"__init__",
             # inlinesf_name=name,
             impl=InlineCode(fragment_init),
-            flags=int(ADVNodeFlags.IS_METHOD | ADVNodeFlags.IS_INIT_FN),
+            flags=int(ADVNodeFlags.IS_METHOD),
         ),
         }, edges={
             "e0": ADVEdgeModel(
@@ -130,20 +130,16 @@ def get_simple_nested_model():
 import numpy as np 
     """
     symbolgroup0 = f"""
-@dataclasses.dataclass
-class SymbolGroup0:
-    a: int 
-    b: float
-    c: float
-    d: int
+a: int 
+b: float
+c: float
+d: np.ndarray
     """
     symbolgroupNested = f"""
-@dataclasses.dataclass
-class SymbolGroupNested:
-    a: int 
-    b: float
-    c: float
-    d: int
+a: int 
+b: float
+c: float
+d: int
     """
 
     fragment_add = f"""

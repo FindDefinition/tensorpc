@@ -16,7 +16,7 @@ class _CMCfgField(enum.IntFlag):
     NAME = enum.auto()
     INLINE_FLOW_NAME = enum.auto()
     ALIAS_MAP = enum.auto()
-    FUNC_TYPE = enum.auto()
+    FUNC_BASE_TYPE = enum.auto()
     IS_DATACLASS = enum.auto()
 
 
@@ -24,16 +24,16 @@ class _CMCfgField(enum.IntFlag):
 class ADVNodeCMConfig:
     name: str
     inline_flow_name: Annotated[str, typemetas.DynamicEnum(alias="Inline Flow Name")]
-    alias_map: Annotated[str, typemetas.CommonObject(alias="Alias Map", tooltip="e.g. n1->new1,n2->new2")]
-    func_type: Annotated[Literal["Global", "Method", "Class Method", "Static Method"], typemetas.CommonObject(alias="Function Base Type")] = "Global"
+    alias_map: Annotated[str, typemetas.CommonObject(alias="Output Alias", tooltip="e.g. n1->new1,n2->new2")]
+    func_base_type: Annotated[Literal["Global", "Method", "Class Method", "Static Method"], typemetas.CommonObject(alias="Function Base Type")] = "Global"
     is_dataclass: Annotated[bool, typemetas.CommonObject(alias="Is Dataclass")] = False
 
     @staticmethod
-    def _get_pane_act_exc_fields(pane_act: ADVPaneContextMenu):
+    def _get_pane_act_exc_fields(pane_act: ADVPaneContextMenu, flow_node_type: ADVNodeType):
         base_field_flag = _CMCfgField.NAME
-        pane_act_field_map_exc_name = {
-            ADVPaneContextMenu.AddFragment: _CMCfgField.INLINE_FLOW_NAME | _CMCfgField.FUNC_TYPE,
-            ADVPaneContextMenu.AddNestedFragment: _CMCfgField.INLINE_FLOW_NAME | _CMCfgField.FUNC_TYPE,
+        pane_act_field_map = {
+            ADVPaneContextMenu.AddFragment: _CMCfgField.INLINE_FLOW_NAME,
+            ADVPaneContextMenu.AddNestedFragment: _CMCfgField.INLINE_FLOW_NAME,
             ADVPaneContextMenu.AddGlobalScript: _CMCfgField(0),
             ADVPaneContextMenu.AddClass: _CMCfgField.INLINE_FLOW_NAME | _CMCfgField.IS_DATACLASS | _CMCfgField.ALIAS_MAP,
             ADVPaneContextMenu.AddSymbolGroup: _CMCfgField(0),
@@ -41,7 +41,10 @@ class ADVNodeCMConfig:
             ADVPaneContextMenu.AddMarkdown: _CMCfgField(0),
             ADVPaneContextMenu.AddInlineFlowDesc: _CMCfgField(0),
         } 
-        valid_fields = pane_act_field_map_exc_name[pane_act] | base_field_flag
+        if flow_node_type == ADVNodeType.CLASS:
+            # regular fragments don't have special type.
+            pane_act_field_map[ADVPaneContextMenu.AddFragment] |= _CMCfgField.FUNC_BASE_TYPE
+        valid_fields = pane_act_field_map[pane_act] | base_field_flag
 
         exc_fields: list[str] = []
         for field in _CMCfgField:
@@ -52,15 +55,15 @@ class ADVNodeCMConfig:
                     exc_fields.append("inline_flow_name")
                 elif field == _CMCfgField.ALIAS_MAP:
                     exc_fields.append("alias_map")
-                elif field == _CMCfgField.FUNC_TYPE:
-                    exc_fields.append("func_type")
+                elif field == _CMCfgField.FUNC_BASE_TYPE:
+                    exc_fields.append("func_base_type")
                 elif field == _CMCfgField.IS_DATACLASS:
                     exc_fields.append("is_dataclass")
         return exc_fields
 
     @staticmethod
-    def from_pane_action(pane_act: ADVPaneContextMenu) -> tuple["ADVNodeCMConfig", ADVNodeType, list[str]]:
-        excluded_fields: list[str] = ADVNodeCMConfig._get_pane_act_exc_fields(pane_act)
+    def from_pane_action(pane_act: ADVPaneContextMenu, flow_node_type: ADVNodeType) -> tuple["ADVNodeCMConfig", ADVNodeType, list[str]]:
+        excluded_fields: list[str] = ADVNodeCMConfig._get_pane_act_exc_fields(pane_act, flow_node_type)
         pane_act_enum = ADVPaneContextMenu(pane_act)
         if pane_act_enum == ADVPaneContextMenu.AddFragment or pane_act_enum == ADVPaneContextMenu.AddNestedFragment:
             ntype = ADVNodeType.FRAGMENT 
@@ -99,34 +102,40 @@ class ADVNodeCMConfig:
         return res_cfg, ntype, excluded_fields
 
     @staticmethod
-    def from_node(node: ADVNodeModel) -> tuple["ADVNodeCMConfig", list[str]]:
+    def from_node(node: ADVNodeModel, parent_node_type: ADVNodeType) -> tuple["ADVNodeCMConfig", list[str]]:
         res = ADVNodeCMConfig(
             name=node.name,
             inline_flow_name=node.inlinesf_name or "",
             alias_map=node.alias_map,
-            func_type="Global"
+            func_base_type="Global"
         ) 
         if node.flags & int(ADVNodeFlags.IS_CLASSMETHOD):
-            res.func_type = "Class Method"
+            res.func_base_type = "Class Method"
         elif node.flags & int(ADVNodeFlags.IS_STATICMETHOD):
-            res.func_type = "Static Method"
+            res.func_base_type = "Static Method"
         elif node.flags & int(ADVNodeFlags.IS_METHOD):
-            res.func_type = "Method"
+            res.func_base_type = "Method"
         excluded_fields: list[str] = []
         if node.nType != ADVNodeType.CLASS:
             excluded_fields.append("is_dataclass")
         if node.nType != ADVNodeType.FRAGMENT:
             if node.nType == ADVNodeType.CLASS:
-                excluded_fields += ["func_type"]
+                excluded_fields += ["func_base_type"]
             else:
-                excluded_fields += ["func_type", "alias_map", "inline_flow_name"]
+                excluded_fields += ["func_base_type", "alias_map", "inline_flow_name"]
         else:
             if node.ref is None:
                 # node def don't have alias map
                 excluded_fields += ["alias_map"]
             else:
                 # node ref can't change method type
-                excluded_fields += ["func_type"]
+                excluded_fields += ["func_base_type"]
+        if parent_node_type != ADVNodeType.CLASS:
+            excluded_fields.append("func_base_type")
+        if node.ref is not None:
+            excluded_fields.extend(["is_dataclass", "func_base_type"])
+
+        excluded_fields = list(set(excluded_fields))
         return res, excluded_fields
 
 

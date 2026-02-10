@@ -683,7 +683,7 @@ def unparse_type_expr(expr: Any, get_type_str: Callable[[Any], str] = get_qualna
         return "..."
     module = expr.__module__
     # TODO support TypeVar, ParamSpec, etc.
-    is_typing = module == "typing" or module == "typing_extensions"
+    is_typing = module == "typing" or module == "typing_extensions" or module == "collections"
     if (is_typing or (module == "builtins")):
         origin = get_origin(expr)
         if origin is None:

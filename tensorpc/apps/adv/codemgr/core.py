@@ -200,6 +200,10 @@ class BackendNode:
         assert isinstance(self.parse_res, cls_type), f"parse_res must be {cls_type} in node {self.node.id}, got {type(self.parse_res)}"
         return self.parse_res
 
+    def get_parse_res_raw_checked(self) -> BaseParseResult:
+        assert isinstance(self.parse_res, BaseParseResult), f"parse_res must not be None"
+        return self.parse_res
+
     def get_qualname_from_import(self) -> str:
         def_qname = self.get_def_qualname()
         node_def = self.node_def
@@ -230,6 +234,14 @@ class BackendNode:
                 res = node.name
         return res
 
+    @staticmethod
+    def get_class_import_stmt(node: ADVNodeModel, dot_prefix: str) -> str:
+        assert node.nType == ADVNodeType.CLASS
+        ref_import_path = node.path 
+        ref_import_path = ref_import_path + [node.name]
+        import_stmt = f"from {dot_prefix}{'.'.join(ref_import_path)} import {node.name}"
+        return import_stmt
+
     def get_import_stmt(self, dot_prefix: str) -> Optional[str]:
         node_desc = self
         node = node_desc.node
@@ -243,7 +255,7 @@ class BackendNode:
                 # inline flow node or class
                 flow_node_name = node_desc.node_def.name
                 ref_import_path = ref_import_path + [flow_node_name]
-            if node_desc.node_def.flags & ADVNodeFlags.IS_METHOD:
+            if node_desc.node_def.is_defined_in_class():
                 assert node_desc.node_def_parent is not None 
                 cls_name = node_desc.node_def_parent.name
                 import_stmt = f"from {dot_prefix}{'.'.join(ref_import_path)} import {cls_name}"
@@ -275,7 +287,7 @@ class BackendNode:
         if node_desc.node_def.flags & ADVNodeFlags.IS_METHOD:
             if self.is_method_def:
                 # method def node don't have self handle.
-                if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+                if node_desc.node_def.is_init_fn():
                     assert node_desc.node_def_parent is not None # class node
                     func_call_str = node_desc.node_def_parent.name
                 else:
@@ -283,7 +295,7 @@ class BackendNode:
             else:
                 self_handle = input_handles[0]
                 input_handles = input_handles[1:]
-                if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+                if node_desc.node_def.is_init_fn():
                     assert node_desc.node_def_parent is not None # class node
                     func_call_str = node_desc.node_def_parent.name
                 else:    
@@ -299,7 +311,7 @@ class BackendNode:
 
         use_kwarg = False
         # always use kwarg for init fn and class node (init or dataclass)
-        if node_desc.node_def.flags & ADVNodeFlags.IS_INIT_FN:
+        if node_desc.node_def.is_init_fn():
             use_kwarg = True 
         if node_desc.node_def.nType == ADVNodeType.CLASS:
             use_kwarg = True

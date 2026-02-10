@@ -23,7 +23,7 @@ from tensorpc.apps.adv.model import (ADVEdgeModel, ADVFlowModel,
                                      ADVProject, ADVRoot,
                                      InlineCode)
 
-from tensorpc.apps.adv.nodes.base import (BaseNodeWrapper, IndicatorWrapper,
+from tensorpc.apps.adv.ide.nodes.base import (IndicatorWrapper,
                                           IONodeWrapper, MarkdownNodeWrapper)
 from tensorpc.apps.adv.test_data.simple import get_simple_nested_model
 from tensorpc.constants import PACKAGE_ROOT
@@ -341,12 +341,17 @@ class ADVIdeApp:
                 flow_gid = TENSORPC_ADV_ROOT_FLOW_ID
             else:
                 flow_gid = container_node.get_global_uid()
+            parent_node = pair[0]
+            if parent_node is None:
+                parent_node_type = ADVNodeType.FRAGMENT
+            else:
+                parent_node_type = ADVNodeType(parent_node.nType)
             inline_flows = self._manager.collect_all_inline_flow_names(flow_gid)
             selects = [(n, n) for n in inline_flows]
             dynamic_enum_dict = {
                 "inline_flow_name": selects
             }
-            cfg, exclude_ids = ADVNodeCMConfig.from_node(node)
+            cfg, exclude_ids = ADVNodeCMConfig.from_node(node, parent_node_type)
             await self.node_configure_dialog.open_config_dialog(cfg, userdata={
                 "node_gid": node.get_global_uid(),
             }, dynamic_enum_dict=dynamic_enum_dict, root_exclude_ids=exclude_ids)
@@ -365,20 +370,27 @@ class ADVIdeApp:
     def _get_cur_flow_gid(self):
         cur_proj = self.dm.model.get_cur_adv_project()
         cur_path_val = cur_proj.cur_path
+        node: Optional[ADVNodeModel] = None
         if not cur_path_val:
             flow_gid = ""
+            
         else:
             pair = cur_proj.get_flow_node_by_fe_path(cur_proj.flow, cur_path_val)
             assert pair is not None 
             flow_gid = pair[1].get_global_uid()
-        return flow_gid
+            node = pair[1]
+        return flow_gid, node
 
     async def _handle_pane_context_menu(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
         
         # cur_model = self.dm.model.get_cur_adv_project().flow
         # node_ids = [n.id for n in cur_model.nodes.values()]
         # await self.graph.update_node_internals(node_ids)
-        cur_flow_gid = self._get_cur_flow_gid()
+        cur_flow_gid, cur_flow_node = self._get_cur_flow_gid()
+        if cur_flow_node is None:
+            flow_node_type = ADVNodeType.FRAGMENT
+        else:
+            flow_node_type = ADVNodeType(cur_flow_node.nType)
         add_node_items = [
             ADVPaneContextMenu.AddFragment.value, ADVPaneContextMenu.AddGlobalScript.value, 
             ADVPaneContextMenu.AddSymbolGroup.value, ADVPaneContextMenu.AddNestedFragment.value,
@@ -386,7 +398,7 @@ class ADVIdeApp:
             ADVPaneContextMenu.AddInlineFlowDesc.value, ADVPaneContextMenu.AddClass.value,
         ]
         if data.itemId in add_node_items:
-            cfg, nType, exc_fields = ADVNodeCMConfig.from_pane_action(ADVPaneContextMenu(data.itemId))
+            cfg, nType, exc_fields = ADVNodeCMConfig.from_pane_action(ADVPaneContextMenu(data.itemId), flow_node_type)
             flags = 0
             if data.itemId == ADVPaneContextMenu.AddInlineFlowDesc.value:
                 flags = int(ADVNodeFlags.IS_INLINE_FLOW_DESC)
@@ -465,12 +477,19 @@ class ADVIdeApp:
             change = self._manager.modify_code_impl(node_gid, new_md_value)
             await self._apply_flow_change(change)
 
-    async def _on_new_node_create(self, event: ConfigDialogEvent[ADVNewNodeConfig]):
+    async def _on_new_node_create(self, event: ConfigDialogEvent[ADVNodeCMConfig]):
         # TODO check name conflict
         flow_gid = event.userdata["flow_gid"]
         ntype = ADVNodeType(event.userdata["ntype"])
         is_subflow = event.userdata["is_subflow"]
         flags = event.userdata["flags"]
+        cfg = event.cfg
+        if cfg.func_base_type == "Class Method":
+            flags |= int(ADVNodeFlags.IS_CLASSMETHOD)
+        elif cfg.func_base_type == "Static Method":
+            flags |= int(ADVNodeFlags.IS_STATICMETHOD)
+        elif cfg.func_base_type == "Method":
+            flags |= int(ADVNodeFlags.IS_METHOD)
         node_id_base = event.cfg.name
         if ntype != ADVNodeType.OUT_INDICATOR and ntype != ADVNodeType.MARKDOWN:
             assert event.cfg.name.isidentifier()
@@ -485,18 +504,16 @@ class ADVIdeApp:
                 subflow = ADVFlowModel(nodes={}, edges={})
             else:
                 if not flags & ADVNodeFlags.IS_INLINE_FLOW_DESC:
-                    impl = InlineCode(f"ADV.mark_outputs() # mark output symbols here.")
+                    impl = InlineCode(f"ADV.mark_outputs() # mark output symbols here.\n"
+                                      "\n"
+                                      "return None\n")
         elif ntype == ADVNodeType.GLOBAL_SCRIPT:
             impl = InlineCode(f"")
         elif ntype == ADVNodeType.CLASS:
             subflow = ADVFlowModel(nodes={}, edges={})
 
         elif ntype == ADVNodeType.SYMBOLS:
-            impl = InlineCode(f"""
-@dataclasses.dataclass
-class {event.cfg.name}:
-    pass
-            """)
+            impl = InlineCode("pass")
         elif ntype == ADVNodeType.OUT_INDICATOR:
             node_id_base = "Out"
         elif ntype == ADVNodeType.MARKDOWN:
@@ -506,6 +523,9 @@ class {event.cfg.name}:
             """)
         else:
             raise NotImplementedError
+        inlinesf_name = None 
+        if cfg.inline_flow_name != "":
+            inlinesf_name = cfg.inline_flow_name
         node = ADVNodeModel(
             id=node_id_base,
             position=flowui.XYPosition(position[0], position[1]),
@@ -514,6 +534,7 @@ class {event.cfg.name}:
             impl=impl,
             flow=subflow,
             flags=flags,
+            inlinesf_name=inlinesf_name,
         )
         if ntype == ADVNodeType.MARKDOWN:
             node.width = TENSORPC_ADV_MD_MIN_SIZE[0]
@@ -522,7 +543,7 @@ class {event.cfg.name}:
         await self._apply_flow_change(change)
 
     async def _handle_new_ref_node(self, gid: str, position: tuple[mui.NumberType, mui.NumberType], inline_flow_name: Optional[str]):
-        cur_flow_gid = self._get_cur_flow_gid()
+        cur_flow_gid, _ = self._get_cur_flow_gid()
 
         import_path, node_id = ADVNodeModel.extract_path_and_id(gid)
         cache = self._manager._node_gid_to_cache[gid]
@@ -540,7 +561,7 @@ class {event.cfg.name}:
 
         # print("_handle_new_ref_node", gid)
     async def _handle_position_change(self, changed_nodes: dict[str, flowui.XYPosition]):
-        cur_flow_gid = self._get_cur_flow_gid()
+        cur_flow_gid, _ = self._get_cur_flow_gid()
         change = self._manager.flow_nodes_position_change(cur_flow_gid)
         await self._apply_flow_change(change)
 
@@ -552,7 +573,7 @@ class {event.cfg.name}:
         rich.print(change.get_short_repr()) 
 
     async def _handle_edge_change(self, changed_edges: list[str]):
-        cur_flow_gid = self._get_cur_flow_gid()
+        cur_flow_gid, _ = self._get_cur_flow_gid()
         change = self._manager.flow_edge_change(cur_flow_gid)
         await self._apply_flow_change(change)
 
