@@ -7,9 +7,10 @@ import inspect
 import sys
 import time
 import traceback
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Coroutine, Optional, Union
 from asyncssh import SSHClientConnection
 import humanize
+import psutil
 from typing_extensions import Literal
 from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_INIT_SUCCESS
 from tensorpc.autossh.core import CommandEvent, CommandEventType, EofEvent, ExceptionEvent, LineEvent, LineEventType, LineRawEvent, RawEvent, SSHClient, SSHConnDesc, SSHRequest, SSHRequestType, LOGGER, ShellInfo, remove_trivial_r_lines
@@ -354,12 +355,16 @@ class AsyncSSHTerminal(Terminal):
 
         self._backend_ssh_conn_inited_event_key = "__backend_ssh_conn_inited"
         self._backend_ssh_conn_close_event_key = "__backend_ssh_conn_close"
+        self._backend_ssh_cmd_start_event_key = "__backend_ssh_cmd_start"
+
         self._backend_ssh_cmd_complete_event_key = "__backend_ssh_cmd_complete"
 
         self.event_ssh_conn_close = self._create_emitter_event_slot_noarg(
             self._backend_ssh_conn_close_event_key)
         self.event_ssh_conn_inited = self._create_emitter_event_slot_noarg(
             self._backend_ssh_conn_inited_event_key)
+        self.event_ssh_cmd_start: EventSlotEmitter[str] = self._create_emitter_event_slot(
+            self._backend_ssh_cmd_start_event_key)
         self.event_ssh_cmd_complete: EventSlotEmitter[TerminalCmdCompleteEvent] = self._create_emitter_event_slot(
             self._backend_ssh_cmd_complete_event_key)
 
@@ -412,9 +417,9 @@ class AsyncSSHTerminal(Terminal):
     async def connect_with_new_desc(
             self,
             desc: SSHConnDesc,
-            event_callback: Optional[Callable[[SSHEvent], None]] = None,
+            event_callback: Optional[Union[Callable[[SSHEvent], None], Callable[[SSHEvent], Coroutine[Any, Any, None]]]] = None,
             init_cmds: Optional[list[str]] = None,
-            term_line_event_callback: Optional[Callable[[TerminalLineEvent], None]] = None,
+            term_line_event_callback: Optional[Union[Callable[[TerminalLineEvent], None], Callable[[TerminalLineEvent], Coroutine[Any, Any, None]]]] = None,
             exit_event: Optional[asyncio.Event] = None):
         assert self._ssh_state is None, "Cannot connect with new info while the current connection is still active."
         self._client = SSHClient(desc.url_with_port, desc.username, desc.password)
@@ -437,7 +442,7 @@ class AsyncSSHTerminal(Terminal):
                     cmd += "\n"
                 await cur_inp_queue.put(cmd)
         await cur_inp_queue.put(
-            f" echo \"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID=$TENSORPC_SSH_CURRENT_PID\"\n"
+            f" echo \"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID=$TENSORPC_SSH_CURRENT_PID \"\n"
         )
         base_ts = time.time_ns()
         if exit_event is None:
@@ -506,7 +511,7 @@ class AsyncSSHTerminal(Terminal):
 
     async def _handle_line_raw_event(self,
                                 event: LineRawEvent,
-                                term_line_event_callback: Optional[Callable[[TerminalLineEvent], None]] = None):
+                                term_line_event_callback: Optional[Union[Callable[[TerminalLineEvent], None], Callable[[TerminalLineEvent], Coroutine[Any, Any, None]]]] = None):
         if event.line_ev_type != LineEventType.EXCEPTION:
             if event.line_ev_type == LineEventType.RBUF_OVERFLOW or event.line_ev_type == LineEventType.INCOMPLETE_START:
                 if self._raw_data_buffer is not None:
@@ -548,7 +553,7 @@ class AsyncSSHTerminal(Terminal):
                     if not self._ssh_state.inited:
                         text = event.line.decode("utf-8").strip()
                         if text.startswith(f"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID="):
-                            pid = int(text.split("=")[1])
+                            pid = int(text.split("=")[1].split(" ")[0])
                             self._ssh_state.pid = pid
                             # self._ssh_state.inited = True
                             # self._init_event.set()
@@ -573,6 +578,9 @@ class AsyncSSHTerminal(Terminal):
                             self._ssh_state.current_cmd = ";".join(parts[:-1])
                     elif event.type == CommandEventType.COMMAND_OUTPUT_START:
                         self._ssh_state.current_cmd_buffer = deque(maxlen=self._line_raw_ev_max_length)
+                        await self.flow_event_emitter.emit_async(
+                            self._backend_ssh_cmd_start_event_key,
+                            Event(self._backend_ssh_cmd_start_event_key, self._ssh_state.current_cmd))
                     elif event.type == CommandEventType.COMMAND_COMPLETE:
                         return_code = 0
                         if event.arg is not None:
@@ -697,3 +705,40 @@ class AsyncSSHTerminal(Terminal):
     async def send_ctrl_c(self):
         if self._ssh_state is not None:
             await self._ssh_state.inp_queue.put("\x03")
+            return True 
+        return False 
+
+    def term_or_kill_all_ssh_child(self, is_term: bool) -> list[int]:
+        state = self.get_current_state()
+        if state is None:
+            return []
+        ssh_pid = state.pid
+        ssh_proc = psutil.Process(ssh_pid)
+        killed_pids: list[int] = []
+        for child in ssh_proc.children(recursive=True):
+            if child.pid != ssh_pid:
+                if is_term:
+                    child.terminate()
+                else:
+                    child.kill()
+                killed_pids.append(child.pid)
+        return killed_pids
+
+    async def command_graceful_shutdown(self, ctrl_c_timeout: int):
+        term_state = self.get_current_state()
+        if term_state is None:
+            return 
+        fut = term_state.current_cmd_rpc_future
+        if fut is None:
+            return 
+        # 1. send ctrl+c to ssh terminal
+        sent = await self.send_ctrl_c()
+        if not sent:
+            return
+        try:
+            await asyncio.wait_for(fut, timeout=ctrl_c_timeout)
+        except asyncio.TimeoutError:
+            # 2. if timeout, kill all child processes of ssh process to force shutdown command
+            killed_procs = self.term_or_kill_all_ssh_child(is_term=False)
+            LOGGER.warning("Command graceful shutdown timeout after sending Ctrl+C, killed %d child processes: %s", len(killed_procs), str(killed_procs))
+

@@ -48,7 +48,7 @@ def lenient_issubclass(cls: Any,
     return isinstance(cls, type) and issubclass(cls, class_or_tuple)
 
 
-def is_annotated(ann_type: Any) -> TypeGuard[Annotated]:
+def is_annotated(ann_type: Any):
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)
@@ -300,6 +300,9 @@ class AnnotatedType:
     def is_union_type(self) -> bool:
         return origin_is_union(self.origin_type)
 
+    def is_literal_type(self) -> bool:
+        return self.origin_type is Literal
+
     def is_number_type(self) -> bool:
         if inspect.isclass(self.origin_type) and issubclass(self.origin_type, (int, float)):
             return True
@@ -319,7 +322,7 @@ class AnnotatedType:
         return dataclasses.is_dataclass(self.origin_type)
 
     def _is_non_class_base_type(self):
-        return self.is_union_type() or self.is_any_type() or self.is_tuple_type() or self.is_type_var()
+        return self.is_union_type() or self.is_any_type() or self.is_tuple_type() or self.is_type_var() or self.is_literal_type()
 
     def is_dict_type(self) -> bool:
         if self._is_non_class_base_type():
@@ -757,6 +760,8 @@ def _main():
 
 def _main_test():
     print(parse_type_may_optional_undefined(tuple[int, ...]))
-    print(unparse_type_expr(Callable[[Union[list[int], str, Literal["wtf"]]], dict[str, int]]))
+    print(parse_type_may_optional_undefined(Literal["1", "2"]))
+
+    # print(unparse_type_expr(Callable[[Union[list[int], str, Literal["wtf"]]], dict[str, int]]))
 if __name__ == "__main__":
     _main_test()
