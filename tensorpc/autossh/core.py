@@ -1501,7 +1501,6 @@ async def enter_ssh_jumped_addr(addr: str, ssh_jumps: Optional[list[SSHConnDesc]
     assert len(url_port) == 2
     url, port = url_port[0], int(url_port[1])
     async with enter_ssh_jumps(ssh_jumps) as conn:
-        conn: Optional[asyncssh.SSHClientConnection] = None
         if conn is not None:
             # assume last jump host can access self._url:self._port.
             # forward remote url+port to a port in localhost.

@@ -23,7 +23,7 @@ from pydantic import (
 from tensorpc import compat
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId
-
+import typing_extensions
 
 class DataclassType(Protocol):
     # as already noted in comments, checking for this attribute is currently
@@ -48,10 +48,20 @@ def lenient_issubclass(cls: Any,
     return isinstance(cls, type) and issubclass(cls, class_or_tuple)
 
 
-def is_annotated(ann_type: Any):
-    # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
-    origin = get_origin(ann_type)
-    return origin is not None and lenient_issubclass(origin, Annotated)
+_t_annotated = typing.Annotated
+_te_annotated = typing_extensions.Annotated
+
+
+def is_annotated(tp: Any, /) -> bool:
+    """Return whether the provided argument is a `Annotated` special form.
+
+    ```python {test="skip" lint="skip"}
+    is_annotated(Annotated[int, ...])
+    #> True
+    ```
+    """
+    origin = get_origin(tp)
+    return origin is _t_annotated or origin is _te_annotated
 
 
 def is_not_required(ann_type: Any) -> bool:

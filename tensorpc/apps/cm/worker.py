@@ -154,7 +154,6 @@ class A2AStateMachine(StateMachine):
     def apply(self, command: UserCmd, log_index: int):
         # worker events are ignored.
         if command.type == UserCmdType.REGISTER_WORKER:
-            print("APPLY REGISTER WORKER!!!")
             assert command.worker_info is not None
             worker_info = command.worker_info
             # if worker_info.uid in self.raft_state["workers"]:

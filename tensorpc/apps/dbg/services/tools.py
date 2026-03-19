@@ -436,6 +436,18 @@ class BackgroundDebugTools:
         local_vars = self._get_filtered_local_vars(dm.model.bkpt.frame)
         return eval(expr, None, local_vars)
 
+    def run_script_in_current_frame(self, code: str, output_key: str = "SCRIPT_OUTPUT"):
+        dm, app = self._get_bkgd_panel_dm_and_app()
+        assert dm.model.bkpt is not None and dm.model.bkpt.frame is not None 
+        local_vars = self._get_filtered_local_vars(dm.model.bkpt.frame)
+        eval_output = {}
+        local_vars = {
+            **local_vars,
+            output_key: eval_output
+        }
+        exec(code, None, local_vars)
+        return eval_output
+
     async def set_vscode_breakpoints(self,
                                      bkpts: Dict[str, tuple[list[VscodeBreakpoint], int]]):
         self._bkpt_mgr.set_vscode_breakpoints(bkpts)

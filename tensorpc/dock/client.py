@@ -181,15 +181,17 @@ def list_all_running_apps_in_relay():
     assert meta.is_inside_devflow
     master_url = meta.grpc_url
 
+    return list_all_running_apps_from_local(meta.graph_id, master_url)
+
+def list_all_running_apps_from_local(graph_id: str, master_url: str):
     all_running_app_infos = simple_remote_call(master_url,
                                                serv_names.FLOW_QUERY_ALL_RUNNING_APPS,
-                                               meta.graph_id)
+                                               graph_id)
     res: list[AppInRelayMeta] = []
     for info in all_running_app_infos:
         info["master_url"] = master_url
         res.append(AppInRelayMeta(**info))
     return res
-
 
 def is_inside_devflow():
     meta = MasterMeta()

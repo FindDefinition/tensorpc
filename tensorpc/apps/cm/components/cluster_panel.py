@@ -238,7 +238,8 @@ class NodeRuntimeInfo:
         remain_cpu = self.node_spec.resource_spec.num_cpu - used_cpu
         remain_gpu = self.node_spec.resource_spec.num_gpu - used_gpu
         remain_mem_gb = self.node_spec.resource_spec.num_mem_gb - used_mem_gb
-        return ResourceInfo(num_cpu=remain_cpu, num_gpu=remain_gpu, num_mem_gb=remain_mem_gb)
+        return ResourceInfo(num_cpu=remain_cpu, num_gpu=remain_gpu, num_mem_gb=remain_mem_gb, 
+            gpu_type=self.node_spec.resource_spec.gpu_type)
 
 @dataclasses_plain.dataclass
 class ClusterSSHJumpConn:

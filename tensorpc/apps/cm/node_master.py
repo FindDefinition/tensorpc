@@ -180,8 +180,10 @@ class NodeMaster:
             raft_node_uids = set(node_info.uid for node_info in raft_node_infos)
             for raft_info in raft_node_infos:
                 rank = -1
+                rc: Optional[ResourceInfo] = None
                 if raft_info.uid in cnode_id_to_info:
                     rank = cnode_id_to_info[raft_info.uid].rank
+                    rc = cnode_id_to_info[raft_info.uid].resource
                 kwargs = {
                     "group_id": group_id,
                     "rank": rank,
@@ -189,6 +191,7 @@ class NodeMaster:
                     "raft_node_infos": raft_node_infos,
                     "worker_cfg": worker_cfg,
                     "world_size": world_size,
+                    "resource_info": rc,
                 }
 
                 if raft_info.uid == self_uid:

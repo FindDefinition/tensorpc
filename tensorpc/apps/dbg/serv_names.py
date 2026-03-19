@@ -112,6 +112,16 @@ class _ServiceNames:
     def DBG_TRACEVIEW_SET_VARIABLE_INSPECT(self):
         from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_traceview_variable_inspect.__name__)
+    
+    @property
+    def DBG_EVAL_EXPR_IN_CUR_FRAME(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.eval_expr_in_current_frame.__name__)
+
+    @property
+    def DBG_RUN_SCRIPT_IN_CUR_FRAME(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.run_script_in_current_frame.__name__)
 
     @property
     def RT_TRACE_SET_STORAGE(self):
