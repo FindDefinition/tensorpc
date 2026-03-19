@@ -118,7 +118,6 @@ class RemoteComponentService:
         return await self._ft_group.set_worker_state(state)
 
     async def remove_layout_object(self, key: str):
-        assert prim.is_loopback_call()
         return await self._remove_layout_object_internal(key)
 
     async def _remove_layout_object_internal(self, key: str):
@@ -136,7 +135,7 @@ class RemoteComponentService:
         return key in self._app_objs
 
     async def set_layout_object(self, key: str, obj: Union[str, FlexBox, Any], **app_create_kwargs):
-        assert prim.is_loopback_call()
+        # assert prim.is_loopback_call()
         return await self._set_layout_object_internal(key, obj, raise_on_fail=True, **app_create_kwargs)
     
     async def _set_layout_object_internal(self, key: str, obj: Union[str, FlexBox, Any], raise_on_fail: bool, **app_create_kwargs):
@@ -226,7 +225,7 @@ class RemoteComponentService:
             if app_obj.mounted_app_meta.remote_gen_queue is not None:
                 # mount app via remote generator (client -> remote comp server)
                 # server can't access client url.
-                raise ValueError("app is already mounted")
+                raise ValueError(f"app {key} is already mounted")
             # mount app that support server -> client connection
             # check is same
             if (url == app_obj.mounted_app_meta.url
@@ -314,16 +313,17 @@ class RemoteComponentService:
                 await asyncio.gather(client_coro, self.mount_app(key, url, port, prefixes, queue))
             else:
                 await self.mount_app(key, url, port, prefixes, queue)
-            shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name="shutdown")
+            shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name=f"RemoteComp-Shutdown-{key}")
+            global_shutdown_task = asyncio.create_task(prim.get_async_shutdown_event().wait(), name="RemoteComp-Global-shutdown")
             wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
             # REMOTE_APP_SERV_LOGGER.warning("Start remote comp %s (Generator) step 2", key)
             yield await self.get_layout_dict(key, prefixes)
             while True:
                 try:
                     (done,
-                    pending) = await asyncio.wait([shutdown_task, wait_queue_task],
+                    pending) = await asyncio.wait([shutdown_task, wait_queue_task, global_shutdown_task],
                                                 return_when=asyncio.FIRST_COMPLETED)
-                    if shutdown_task in done:
+                    if shutdown_task in done or global_shutdown_task in done:
                         for task in pending:
                             await cancel_task(task)
                         break

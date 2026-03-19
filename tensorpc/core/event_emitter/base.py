@@ -25,7 +25,7 @@ Handler = TypeVar("Handler", bound=Callable)
 
 @dataclasses.dataclass
 class ExceptionParam:
-    exc: Exception
+    exc: BaseException
 
 
 class EventEmitter(Generic[KT, Unpack[VTs]]):

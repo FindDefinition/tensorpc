@@ -4,7 +4,6 @@ import asyncio
 import bisect
 from collections.abc import Mapping, MutableMapping
 import contextlib
-import dataclasses
 import enum
 from functools import partial
 import io
@@ -30,7 +29,6 @@ from asyncssh import stream as asyncsshss
 from asyncssh.misc import SoftEOFReceived
 from asyncssh.scp import scp as asyncsshscp
 
-import tensorpc
 from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, TENSORPC_ASYNCSSH_PROXY
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.compat import InWindows
@@ -38,6 +36,7 @@ from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
 from tensorpc.core import prim
 from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id, import_dynamic_func
 from tensorpc.core.rprint_dispatch import rprint
+from tensorpc.core import dataclass_dispatch as dataclasses
 
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc.core.bgserver import BACKGROUND_SERVER
@@ -55,7 +54,13 @@ class SSHConnDesc:
     username: str 
     password: str
     init_cmd: str = ""
+    client_key_paths: Optional[list[Path]] = None
+    asyncssh_options: Optional[dict[str, Any]] = None
 
+    def get_url_port_pair(self) -> tuple[str, int]:
+        url = self.url_with_port.split(":")[0]
+        port = int(self.url_with_port.split(":")[1])
+        return url, port
 
 @dataclasses.dataclass
 class ShellInfo:
@@ -172,10 +177,17 @@ class OutData:
     def __init__(self) -> None:
         pass
 
+class SSHEventType(enum.Enum):
+    Line = "L"
+    Eof = "Eof"
+    Exception = "Exc"
+    Raw = "R"
+    Command = "C"
+    External = "Ex"
 
 class Event:
     name = "Event"
-
+    ev_type: SSHEventType = SSHEventType.Line
     def __init__(self, timestamp: int, is_stderr: bool, uid: str = ""):
         self.timestamp = timestamp
         self.is_stderr = is_stderr
@@ -231,17 +243,9 @@ class Event:
             return self.timestamp != other
         raise NotImplementedError
 
-class EventType(enum.Enum):
-    Line = "L"
-    Eof = "Eof"
-    Exception = "Exc"
-    Raw = "R"
-    Command = "C"
-    External = "Ex"
-
 class EofEvent(Event):
-    name = EventType.Eof.value
-
+    name = SSHEventType.Eof.value
+    ev_type = SSHEventType.Eof
     def __init__(self,
                  timestamp: int,
                  status: int = 0,
@@ -267,8 +271,8 @@ class EofEvent(Event):
         return cls(data["ts"], data["status"], data["is_stderr"], data["uid"])
 
 class ExternalEvent(Event):
-    name = EventType.External.value
-
+    name = SSHEventType.External.value
+    ev_type = SSHEventType.External
     def __init__(self,
                  timestamp: int,
                  data: Any,
@@ -289,8 +293,8 @@ class ExternalEvent(Event):
 
 
 class LineEvent(Event):
-    name = EventType.Line.value
-
+    name = SSHEventType.Line.value
+    ev_type = SSHEventType.Line
     def __init__(self,
                  timestamp: int,
                  line: bytes,
@@ -325,8 +329,8 @@ class LineEvent(Event):
 
 
 class RawEvent(Event):
-    name = EventType.Raw.value
-
+    name = SSHEventType.Raw.value
+    ev_type = SSHEventType.Raw
     def __init__(self,
                  timestamp: int,
                  raw: bytes,
@@ -352,8 +356,8 @@ class RawEvent(Event):
 
 
 class ExceptionEvent(Event):
-    name = EventType.Exception.value
-
+    name = SSHEventType.Exception.value
+    ev_type = SSHEventType.Exception
     def __init__(self,
                  timestamp: int,
                  data: Any,
@@ -377,8 +381,8 @@ class ExceptionEvent(Event):
 
 
 class CommandEvent(Event):
-    name = EventType.Command.value
-
+    name = SSHEventType.Command.value
+    ev_type = SSHEventType.Command
     def __init__(self,
                  timestamp: int,
                  type: str,
@@ -1465,3 +1469,46 @@ def remove_trivial_r_lines(buffer: bytes):
         if second_r_idx != -1:
             r_bytes = r_bytes[second_r_idx + 1:]
     return r_bytes
+
+@contextlib.asynccontextmanager
+async def enter_ssh_jumps(ssh_jumps: Optional[list[SSHConnDesc]] = None):
+    async with contextlib.AsyncExitStack() as stack:
+        conn: Optional[asyncssh.SSHClientConnection] = None
+        if ssh_jumps:
+            for desc in ssh_jumps:
+                opts = desc.asyncssh_options or {}
+                opts_final = {
+                    "keepalive_interval": 10,
+                    "login_timeout": 10,
+                    "known_hosts": None,
+                }
+                if desc.client_key_paths is not None:
+                    opts_final["client_keys"] = desc.client_key_paths
+                opts_final.update(opts)
+                url, port = desc.get_url_port_pair()
+                conn = await stack.enter_async_context(
+                    asyncssh.connect(url, port, username=desc.username,
+                                                tunnel=conn,
+                                                password=desc.password,
+                                                **opts_final)
+                )
+        yield conn
+
+
+@contextlib.asynccontextmanager
+async def enter_ssh_jumped_addr(addr: str, ssh_jumps: Optional[list[SSHConnDesc]] = None):
+    url_port = addr.split(":")
+    assert len(url_port) == 2
+    url, port = url_port[0], int(url_port[1])
+    async with enter_ssh_jumps(ssh_jumps) as conn:
+        conn: Optional[asyncssh.SSHClientConnection] = None
+        if conn is not None:
+            # assume last jump host can access self._url:self._port.
+            # forward remote url+port to a port in localhost.
+            async with conn.forward_local_port(
+                '', 0, url, port) as listener:
+                fwd_port = listener.get_port()
+                addr = f"localhost:{fwd_port}"
+                yield (addr, conn)
+        else:
+            yield (addr, conn)

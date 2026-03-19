@@ -13,7 +13,7 @@ import rich
 import re 
 import os 
 from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
-from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel, list_all_dbg_server_in_machine
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.asynctools import cancel_task
@@ -103,7 +103,7 @@ class FaultToleranceSSHServer:
             master_uuid="",
             master_ip=ip,
         )
-        LOGGER.warning(f"UUID {state.uuid} for rank {cfg.rank} Assigned")
+        LOGGER.warning(f"UUID {state.uuid} (IP: {ip}:{prim.get_server_grpc_port()}) for rank {cfg.rank} Assigned")
         self._is_master = cfg.rank == self._master_rank
         if self._is_master:
             state.master_uuid = state.uuid
@@ -943,3 +943,6 @@ class FaultToleranceSSHServer:
             return self._master_ui.dm.model.client_states[rank]
         else:
             return self._client_ui.dm.model
+
+    def list_all_debug_servers(self):
+        return list_all_dbg_server_in_machine()

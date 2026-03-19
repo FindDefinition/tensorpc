@@ -74,7 +74,7 @@ def lenient_issubclass(cls: Any, class_or_tuple: Any) -> bool:  # pragma: no cov
     return isinstance(cls, type) and issubclass(cls, class_or_tuple)
 
 
-def is_annotated(ann_type: Any) -> TypeGuard[Annotated]:
+def is_annotated(ann_type: Any):
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)

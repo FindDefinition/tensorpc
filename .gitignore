@@ -134,3 +134,5 @@ core
 __version__.py
 
 tensorpc/apps/adv/managed
+
+tensorpc/apps/private_apps

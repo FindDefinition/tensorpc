@@ -16,6 +16,7 @@ import abc
 import asyncio
 import builtins
 import collections.abc
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -190,7 +191,7 @@ class UIType(enum.IntEnum):
     VideoRTCStream = 0x43
     JsonEditor = 0x44
     JsonFastViewer = 0x45
-
+    NumberField = 0x46
     RANGE_CHART_START = 0x50
     Plotly = 0x51
 
@@ -1803,14 +1804,22 @@ class Component(Generic[T_base_props, T_child]):
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
         """set prop by keyword arguments
         this function is used to provide intellisense result for all props.
+        we also support basic draft exprs here, note that string expr isn't supported here.
+        you need to use `bind_fields` to bind string draft exprs.
         """
 
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             # do validation on changed props only
             # self.__prop_cls(**kwargs)
             # TypeAdapter(self.__prop_cls).validate_python(kwargs)
+            kwargs_draft: dict[str, Any] = {}
             for k, v in kwargs.items():
-                setattr(self.__props, k, v)
+                if isinstance(v, DraftBase):
+                    kwargs_draft[k] = v
+                else:
+                    setattr(self.__props, k, v)
+            if kwargs_draft:
+                self.bind_fields(**kwargs_draft)
             # do validation for all props (call model validator)
             self._prop_validator.validate_python(self.__props)
             return this
@@ -3534,6 +3543,12 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         ...
 
     @abc.abstractmethod
+    @contextlib.asynccontextmanager
+    async def enter_remote_object_ctx(self) -> AsyncGenerator[None, None]:
+        yield
+
+
+    @abc.abstractmethod
     async def health_check(self, timeout: Optional[int] = None) -> Any:
         ...
 
@@ -3570,81 +3585,77 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         async with self._mount_lock:
             if self._is_remote_mounted:
                 self._is_remote_mounted = False
-                try:
-                    # await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
-                    #                        2, self._key)
-                    await self._close_remote_loop()
-                finally:
-                    await self.shutdown_remote_object()
+                await self._close_remote_loop()
 
     async def _remote_msg_handle_loop(self, prefixes: list[str], url: str = "", port: int = -1):
         try:
-            aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
-                        self._key, prefixes, url, port)
-            res = await aiter_remote.__anext__()
-            layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
-            root_comp_uid = root_comp_uid_before
-            layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
-            self.set_cur_child_uids(list(layout.keys()))
-            for k, v in layout.items():
-                assert isinstance(v["uid"], UniqueTreeId), f"{layout}"
-            # first event: update layout from remote
-            update_comp_ev = self.create_update_comp_event(layout, [])
-            # second event: update childs prop in remote container
-            prop_upd_ev = self.create_update_event({"childs": [UniqueTreeIdForComp(root_comp_uid)]})
-            # WARNING: connect button remove container that contains itself,
-            # so the actual set_new_layout is delayed after current callback finish.
-            # so we can't update stuff here, we must ensure
-            # layout update done after set_new_layout.
-            # so we use post_ev_creator here.
-            await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
-            self._is_remote_mounted = True
-            next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
-            shutdown_task = asyncio.create_task(self._shutdown_ev.wait(), name="rcomp-shutdown-wait")
-            while True:
-                try:
-                    done, pending = await asyncio.wait(
-                        [next_item_task, shutdown_task],
-                        return_when=asyncio.FIRST_COMPLETED)
-                except asyncio.CancelledError:
-                    print("CANCEL")
-                    await cancel_task(shutdown_task)
-                    await cancel_task(next_item_task)
-                    break
-                if shutdown_task in done:
-                    # shutdown
-                    for task in pending:
-                        task.cancel()
-                    # close aiter_remote
-                    # await aiter_remote.aclose()
-                    break
-                if next_item_task in done:
-                    try:
-                        ev = next_item_task.result()
-                        self._cur_ts = time.time_ns()
-                        app = get_app()
-                        if isinstance(ev, RemoteCompEvent):
-                            key = ev.key
-                            await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
-                        else:
-                            app_event_dict = ev
-                            app_event = AppEvent.from_dict(app_event_dict)
-                            # ev._remote_prefixes = prefixes
-                            app_event.patch_keys_prefix_inplace(prefixes)
-                            for _, ui_ev in app_event.type_event_tuple:
-                                if isinstance(ui_ev, UpdateComponentsEvent):
-                                    assert ui_ev.remote_component_all_childs is not None
-                                    ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
-                                        ui_ev.remote_component_all_childs, prefixes)
-                                    self.set_cur_child_uids(ui_ev.remote_component_all_childs)
-                            app_event_dict = app_event.to_dict()
-                            app_event_dict = patch_unique_id(app_event_dict, prefixes)
+            async with self.enter_remote_object_ctx():
 
-                            app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
-                            await self.put_app_event(app_ev)
-                        next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
-                    except StopAsyncIteration:
+                aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
+                            self._key, prefixes, url, port)
+                res = await aiter_remote.__anext__()
+                layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
+                root_comp_uid = root_comp_uid_before
+                layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
+                self.set_cur_child_uids(list(layout.keys()))
+                for k, v in layout.items():
+                    assert isinstance(v["uid"], UniqueTreeId), f"{layout}"
+                # first event: update layout from remote
+                update_comp_ev = self.create_update_comp_event(layout, [])
+                # second event: update childs prop in remote container
+                prop_upd_ev = self.create_update_event({"childs": [UniqueTreeIdForComp(root_comp_uid)]})
+                # WARNING: connect button remove container that contains itself,
+                # so the actual set_new_layout is delayed after current callback finish.
+                # so we can't update stuff here, we must ensure
+                # layout update done after set_new_layout.
+                # so we use post_ev_creator here.
+                await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
+                self._is_remote_mounted = True
+                next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
+                shutdown_task = asyncio.create_task(self._shutdown_ev.wait(), name="rcomp-shutdown-wait")
+                while True:
+                    try:
+                        done, pending = await asyncio.wait(
+                            [next_item_task, shutdown_task],
+                            return_when=asyncio.FIRST_COMPLETED)
+                    except asyncio.CancelledError:
+                        await cancel_task(shutdown_task)
+                        await cancel_task(next_item_task)
                         break
+                    if shutdown_task in done:
+                        # shutdown
+                        for task in pending:
+                            task.cancel()
+                        # close aiter_remote
+                        # await aiter_remote.aclose()
+                        break
+                    if next_item_task in done:
+                        try:
+                            ev = next_item_task.result()
+                            self._cur_ts = time.time_ns()
+                            app = get_app()
+                            if isinstance(ev, RemoteCompEvent):
+                                key = ev.key
+                                await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
+                            else:
+                                app_event_dict = ev
+                                app_event = AppEvent.from_dict(app_event_dict)
+                                # ev._remote_prefixes = prefixes
+                                app_event.patch_keys_prefix_inplace(prefixes)
+                                for _, ui_ev in app_event.type_event_tuple:
+                                    if isinstance(ui_ev, UpdateComponentsEvent):
+                                        assert ui_ev.remote_component_all_childs is not None
+                                        ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
+                                            ui_ev.remote_component_all_childs, prefixes)
+                                        self.set_cur_child_uids(ui_ev.remote_component_all_childs)
+                                app_event_dict = app_event.to_dict()
+                                app_event_dict = patch_unique_id(app_event_dict, prefixes)
+
+                                app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
+                                await self.put_app_event(app_ev)
+                            next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
+                        except StopAsyncIteration:
+                            break
 
         except:
             traceback.print_exc()
@@ -3657,18 +3668,16 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             self._remote_task = None
             self._cur_ts = 0
 
+
     async def _reconnect_to_remote_comp(self):
         try:
-            await self.shutdown_remote_object()
+            # await self.shutdown_remote_object()
             await self._close_remote_loop()
             assert self._flow_uid is not None, "shouldn't happen"
-
-            # node_uid = get_unique_node_id(master_meta.graph_id,
-            #                     master_meta.node_id)
-            await self.setup_remote_object()
+            # await self.setup_remote_object()
             prefixes = self._flow_uid.parts
             self._shutdown_ev.clear()
-            await self.health_check(1)
+            # await self.health_check(1)
             self._remote_task = asyncio.create_task(
                 self._remote_msg_handle_loop(prefixes, "", -1), name="remote_msg_handle_loop")
             self._cur_ts = 0
@@ -3691,7 +3700,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._cur_ts = 0
         if close_remote_loop:
             await self._close_remote_loop()
-        await self.shutdown_remote_object()
+        # await self.shutdown_remote_object()
         self._is_remote_mounted = False 
         if self._fail_callback is not None:
             await self._fail_callback()

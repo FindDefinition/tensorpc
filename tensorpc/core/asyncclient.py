@@ -117,7 +117,7 @@ class AsyncRemoteObject(object):
     async def remote_call(self,
                           key: str,
                           *args,
-                          rpc_timeout: Optional[int] = None,
+                          rpc_timeout: Optional[Union[int, float]] = None,
                           rpc_callback="",
                           rpc_flags: int = rpc_message_pb2.PickleArray,
                           rpc_wait_for_ready: bool = False,
@@ -133,7 +133,7 @@ class AsyncRemoteObject(object):
     async def remote_json_call(self,
                                key: str,
                                *args,
-                               rpc_timeout: Optional[int] = None,
+                               rpc_timeout: Optional[Union[int, float]] = None,
                                rpc_callback="",
                                rpc_flags: int = rpc_message_pb2.JsonArray,
                                 rpc_wait_for_ready: bool = False,
@@ -171,7 +171,7 @@ class AsyncRemoteObject(object):
     async def remote_generator(self,
                                key: str,
                                *args,
-                               rpc_timeout: Optional[int] = None,
+                               rpc_timeout: Optional[Union[int, float]] = None,
                                rpc_callback="",
                                rpc_flags: int = rpc_message_pb2.PickleArray,
                                **kwargs) -> AsyncGenerator[Any, None]:
@@ -228,7 +228,7 @@ class AsyncRemoteObject(object):
                         key: str,
                         stream_iter,
                         *args,
-                        rpc_timeout: Optional[int] = None,
+                        rpc_timeout: Optional[Union[int, float]] = None,
                         rpc_flags: int = rpc_message_pb2.PickleArray,
                         **kwargs) -> AsyncGenerator[Any, None]:
         flags = rpc_flags
@@ -314,7 +314,7 @@ class AsyncRemoteObject(object):
         key: str,
         stream_iter,
         rpc_flags: int = rpc_message_pb2.PickleArray,
-        rpc_timeout: Optional[int] = None,
+        rpc_timeout: Optional[Union[int, float]] = None,
         rpc_chunk_size: int = 256 * 1024,
         rpc_wait_for_ready: bool = False,
         rpc_relay_urls: Optional[list[str]] = None,
@@ -403,7 +403,7 @@ class AsyncRemoteObject(object):
                                   key,
                                   *args,
                                   rpc_flags: int = rpc_message_pb2.PickleArray,
-                                  rpc_timeout: Optional[int] = None,
+                                  rpc_timeout: Optional[Union[int, float]] = None,
                                   rpc_chunk_size: int = 256 * 1024,
                                   rpc_relay_urls: Optional[list[str]] = None,
                                   rpc_wait_for_ready: bool = False,
@@ -449,7 +449,7 @@ class AsyncRemoteObject(object):
                                 key: str,
                                 stream_iter,
                                 *args,
-                                rpc_timeout: Optional[int] = None,
+                                rpc_timeout: Optional[Union[int, float]] = None,
                                 rpc_flags: int = rpc_message_pb2.PickleArray,
                                 rpc_chunk_size: int = 256 * 1024,
                                 rpc_relay_urls: Optional[list[str]] = None,
@@ -506,7 +506,7 @@ class AsyncRemoteObject(object):
             key: str,
             stream_iter,
             *args,
-            rpc_timeout: Optional[int] = None,
+            rpc_timeout: Optional[Union[int, float]] = None,
             rpc_flags: int = rpc_message_pb2.PickleArray,
             rpc_chunk_size: int = 256 * 1024,
             rpc_relay_urls: Optional[list[str]] = None,
@@ -563,7 +563,7 @@ class AsyncRemoteObject(object):
             key: str,
             *args,
             rpc_flags: int = rpc_message_pb2.PickleArray,
-            rpc_timeout: Optional[int] = None,
+            rpc_timeout: Optional[Union[int, float]] = None,
             rpc_chunk_size: int = 256 * 1024,
             rpc_relay_urls: Optional[list[str]] = None,
             **kwargs) -> AsyncGenerator[Any, None]:
@@ -591,7 +591,7 @@ class AsyncRemoteObject(object):
     def _prepare_relay_reqs(self,
                             urls: list[str],
                             type: RelayCallType,
-                            rpc_timeout: Optional[int] = None,
+                            rpc_timeout: Optional[Union[int, float]] = None,
                             rpc_flags: int = rpc_message_pb2.PickleArray):
         relay_data = {
             "urls": urls,
@@ -663,8 +663,7 @@ class AsyncRemoteManager(AsyncRemoteObject):
         await self.wait_for_remote_ready(timeout, max_retries)
 
     async def wait_for_channel_ready(self,
-                                     timeout: float = 10,
-                                     max_retries=20):
+                                     timeout: float = 10):
         # https://github.com/grpc/grpc/blob/master/examples/python/wait_for_ready/asyncio_wait_for_ready_example.py
         assert self._channel is not None
         wait_for_ready = True

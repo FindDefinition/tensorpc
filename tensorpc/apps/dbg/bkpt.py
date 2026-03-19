@@ -445,8 +445,8 @@ def breakpoint(name: Optional[str] = None,
             break
         elif isinstance(ev, BkptRunScriptEvent):
             fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-distributed-tmp>"
-            code_comp = compile(ev.code, fname, "exec")
             try:
+                code_comp = compile(ev.code, fname, "exec")
                 exec(code_comp, frame.f_globals, frame.f_locals)
             except:
                 traceback.print_exc()

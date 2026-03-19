@@ -22,6 +22,7 @@ import copy
 from functools import partial
 from typing_extensions import override
 
+from tensorpc.autossh.core import SSHConnDesc, enter_ssh_jumped_addr
 from tensorpc.core.annolib import DataclassType, is_undefined
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import simple_chunk_call
@@ -224,6 +225,7 @@ class FlexBoxProps(FlexComponentBaseProps):
     flexWrap: Union[Literal["nowrap", "wrap", "wrap-reverse"],
                     Undefined] = undefined
     flexFlow: Union[str, Undefined] = undefined
+    gap: Union[ValueType, Undefined] = undefined
     className: Union[str, Undefined] = undefined
 
 
@@ -1376,11 +1378,14 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
 
     def __init__(self, url: str, port: int, key: str, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None, 
                  enable_fallback_layout: bool = True, relay_urls: Optional[list[str]] = None,
-                 fastrpc_timeout: int = 5) -> None:
+                 fastrpc_timeout: int = 5,
+                 ssh_jumps: Optional[list[SSHConnDesc]] = None) -> None:
         super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps, fail_callback, enable_fallback_layout,
             fastrpc_timeout=fastrpc_timeout)
         self._robj: Optional[AsyncRemoteManager] = None
         self._relay_urls = relay_urls
+        self._ssh_jumps = ssh_jumps
+        
 
     def _get_addr(self):
         return f"{self._url}:{self._port}"
@@ -1393,6 +1398,19 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
         if self._robj is not None:
             await self._robj.close(close_channel=True)
             self._robj = None
+
+    @contextlib.asynccontextmanager
+    async def enter_remote_object_ctx(self) -> AsyncGenerator[None, None]:
+        async with enter_ssh_jumped_addr(self._get_addr(), self._ssh_jumps) as (addr, _):
+            async with AsyncRemoteManager(addr) as robj:
+                try:
+                    await robj.wait_for_channel_ready(4)
+                    self._robj = robj
+                    yield
+                finally:
+                    if self._robj is not None:
+                        await self._robj.close(close_channel=True)
+                        self._robj = None
 
     async def health_check(self, timeout: Optional[int] = None):
         assert self._robj is not None
@@ -2194,7 +2212,7 @@ class AutocompleteProps(AutocompletePropsBase):
             label_key = self.labelKey
         for op in self.options:
             assert label_key in op, f"each option must contains {label_key} as unique id."
-
+        return self
 
 class Autocomplete(MUIComponentBase[AutocompleteProps]):
 
@@ -2677,13 +2695,14 @@ class BlenderSlider(_SliderBase[BlenderSliderProps, NumberType]):
                  init_value: Optional[NumberType] = None) -> None:
         is_inf_slider = begin is None or end is None
         if is_inf_slider:
-            self.props.infSlider = True
             begin = 0 
             end = 0
         else:
             assert begin is not None and end is not None
         super().__init__(UIType.BlenderSlider, begin, end, step, BlenderSliderProps,
                          init_value)
+        if is_inf_slider:
+            self.props.infSlider = True
 
         self.callback = callback
         if callback is not None:
@@ -2741,6 +2760,65 @@ class BlenderSlider(_SliderBase[BlenderSliderProps, NumberType]):
                               Undefined), "must be controlled component"
         return self._bind_field_with_change_event("value", draft)
 
+@dataclasses.dataclass
+class NumberFieldProps(_SliderBaseProps[NumberType]):
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    disabled: Union[Undefined, bool] = undefined
+    error: Union[Undefined, bool] = undefined
+    debounce: Union[Undefined, NumberType] = undefined
+    label: Union[Undefined, str] = undefined
+
+
+class NumberField(_SliderBase[NumberFieldProps, NumberType]):
+
+    def __init__(self,
+                 begin: NumberType,
+                 end: NumberType,
+                 step: Optional[NumberType] = None,
+                 callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
+                 init_value: Optional[NumberType] = None) -> None:
+        super().__init__(UIType.NumberField, begin, end, step, NumberFieldProps,
+                         init_value)
+        self.callback = callback
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
+
+    @property
+    def value(self):
+        return self.props.value
+
+    def state_change_callback(
+            self,
+            value: NumberType,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.value = value
+
+    async def headless_change(self, value: NumberType):
+        uiev = UIEvent(
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
+        return await self.put_app_event(
+            AppEvent("", [(AppEventType.UIEvent, uiev)]))
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        assert not isinstance(self.value,
+                              Undefined), "must be controlled component"
+        return self._bind_field_with_change_event("value", draft)
 
 _T = TypeVar("_T")
 
@@ -3317,10 +3395,25 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 #     def prop(self):
 #         propcls = self.propcls
 #         return self._prop_base(propcls, self)
+@dataclasses.dataclass
+class ChipGroupItem:
+    id: Union[str, Undefined] = undefined
+    clickable: Union[bool, Undefined] = undefined
+    deletable: Union[bool, Undefined] = undefined
+    muiColor: Union[_StdColor, str, Undefined] = undefined
+    label: Union[str, Undefined] = undefined
+    deleteIcon: Union[IconType, Undefined] = undefined
+    icon: Union[IconType, Undefined] = undefined
 
+    @model_validator(mode="after")
+    def validate(self):
+        # id or label is required 
+        if is_undefined(self.id) and is_undefined(self.label):
+            raise ValueError("id or label is required for ChipGroupItem")
+        return self 
 
 @dataclasses.dataclass
-class ChipProps(MUIComponentBaseProps, IconBaseProps):
+class ChipProps(MUIComponentBaseProps):
     muiColor: Union[_StdColor, str, Undefined] = undefined
     clickable: Union[bool, Undefined] = undefined
     deletable: Union[bool, Undefined] = undefined
@@ -3328,7 +3421,14 @@ class ChipProps(MUIComponentBaseProps, IconBaseProps):
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
     label: str = ""
     deleteIcon: Union[IconType, Undefined] = undefined
-
+    # if items is provided, this component will render as a chip group, and label will be ignored. 
+    # otherwise it will render as a single chip.
+    items: Union[list[ChipGroupItem], Undefined] = undefined
+    containerProps: Union[FlexBoxProps, Undefined] = undefined
+    icon: Union[IconType, Undefined] = undefined
+    iconSize: Union[Literal["small", "medium", "large", "inherit"],
+                    Undefined] = undefined
+    iconFontSize: Union[ValueType, Undefined] = undefined
 
 class Chip(MUIComponentBase[ChipProps]):
 
@@ -3678,6 +3778,8 @@ class FlexLayoutProps(ContainerBaseProps):
     # model change save debounce.
     debounce: Union[NumberType, Undefined] = undefined
     font: Union[FlexLayoutFontProps, Undefined] = undefined
+    allowedDndTypes: Union[list[str], Undefined] = undefined
+    tabNameKey: Union[str, Undefined] = undefined
 
 
 class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
@@ -4839,6 +4941,7 @@ class DataListControlType(enum.IntEnum):
 
 @dataclasses.dataclass
 class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
+    # NOTE: dataList support None in frontend.
     dataList: List[Any] = dataclasses.field(default_factory=list)
     idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined

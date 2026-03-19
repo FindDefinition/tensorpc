@@ -614,6 +614,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         post_ev_creator: Optional[Callable[[], AppEvent]] = None,
         update_backend_after_send: bool = False,
         disable_handlers: Optional[list[DraftChangeEventHandler]] = None,
+        allow_unmounted: bool = False,
     ):
         """Do draft update immediately after this context.
         We won't perform real update during draft operation because we need to keep state same between
@@ -638,12 +639,23 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         with disable_handler_ctx:
             with capture_draft_update() as ctx:
                 yield draft
+        if not self.is_mounted():
+            if allow_unmounted:
+                apply_draft_update_ops(self.model, ctx._ops)
+                return 
+            else:
+                raise RuntimeError("DataModel must be mounted when you use draft_update context.")
         await self._update_with_jmes_ops(ctx._ops, is_json_only, need_freeze, post_ev_creator, 
             update_backend_after_send)
 
     @staticmethod
     def get_draft_external(model: T) -> T:
         return cast(T, create_draft(model, userdata=None))
+
+    @staticmethod
+    def get_draft_external_type(model_type: type[T]) -> T:
+        return cast(T, create_draft_type_only(model_type, userdata=None))
+
 
     def connect_draft_store(self,
                             path: str,

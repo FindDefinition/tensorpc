@@ -56,6 +56,7 @@ from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
 from .draftast import DraftASTFuncType, DraftASTNode, evaluate_draft_ast, evaluate_draft_ast_json, evaluate_draft_ast_with_obj_id_trace, evaluate_draft_ast_noexcept, DraftASTType
 from tensorpc.core.pfl import pflpath
+from mashumaro.codecs.basic import BasicDecoder
 
 T = TypeVar("T")
 
@@ -1490,12 +1491,41 @@ def draft_from_node_and_type(node: DraftASTNode, target_type: Any) -> Any:
         new_anno_type, node, None,
         prev_anno_state)
 
+def _build_dcls_object_if_needed(draft: DraftBase, value: Any):
+    """Convert dict to dataclass object if draft is a dataclass draft and value is a dict.
+    Currently used in mui.Select and mui.Autocomplete.
+    """
+    if not isinstance(value, dict):
+        return value 
+    if draft._tensorpc_draft_attr_anno_state.is_type_only:
+        anno_type = draft._tensorpc_draft_attr_anno_state.anno_type
+        assert anno_type is not None
+        # in anno mode, we don't modify or parse obj.
+        assert anno_type.is_dataclass_type()
+        dcls = anno_type.origin_type
+    else:
+        assert dataclasses.is_dataclass(
+            draft._tensorpc_draft_attr_real_obj), f"DraftClass only support dataclass, got {type(obj)}"
+        dcls = type(draft._tensorpc_draft_attr_real_obj)
+    # try to convert dict to dataclass if possible
+    if dataclasses.is_pydantic_dataclass(dcls):
+        value = dcls(**value)
+    else:
+        # use mashumaro
+        decoder = BasicDecoder(dcls)
+        value = decoder.decode(value)
+    return value 
+
 def insert_assign_draft_op(draft: Any, value: Any):
     """used to insert a assign op to ctx without explicit assignment.
     Usually used when user only provide a draft object and want to assign a value to it.
     """
     _assert_not_draft(value)
     assert isinstance(draft, DraftBase), "draft should be a Draft object"
+    # TODO add this to more place
+    if isinstance(draft, DraftClass):
+        value = _build_dcls_object_if_needed(draft, value)
+
     ctx = get_draft_update_context()
     cur_node = draft._tensorpc_draft_attr_cur_node
     assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getItem/getattr object"

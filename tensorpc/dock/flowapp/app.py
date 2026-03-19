@@ -71,7 +71,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_item
 from tensorpc.dock.client import MasterMeta
-from tensorpc.dock.constants import TENSORPC_APP_DND_SRC_KEY, TENSORPC_APP_ROOT_COMP, TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
+from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.dock.core.uitypes import RTCTrackInfo
 from tensorpc.dock.flowapp.appstorage import AppStorage
@@ -850,9 +850,9 @@ class App:
 
     @staticmethod
     async def __handle_dnd_event(handler: EventHandler,
-                                 src_handler: EventHandler, src_event: Event):
+                                 src_handler: EventHandler, src_event: Event, dst_event: Event):
         res = await src_handler.run_event_async(src_event)
-        ev_res = Event(FrontendEventType.Drop.value, res, src_event.keys, src_event.indexes)
+        ev_res = Event(FrontendEventType.Drop.value, res, dst_event.keys, dst_event.indexes)
         await handler.run_event_async(ev_res)
 
     def _is_editable_app(self):
@@ -862,35 +862,40 @@ class App:
         assert isinstance(self, EditableApp)
         return self
 
+    def _create_event_object(self, uid: str, ev_type: Any, ev_data: Any, indexes_raw: Optional[str] = None):
+        keys: Union[Undefined, List[str]] = undefined
+        if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
+            split_idx = uid.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+            keys_str = uid[split_idx + len(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT):]
+            uid = uid[:split_idx]
+            keys = UniqueTreeId(keys_str).parts
+        indexes = undefined
+        if indexes_raw is not None:
+            indexes = list(map(int, indexes_raw.split(".")))
+        event = Event(ev_type, ev_data, keys, indexes)
+        return uid, event 
+
     async def handle_event(self, ev: UIEvent, is_sync: bool = False):
         res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
-            keys: Union[Undefined, List[str]] = undefined
             uid_original = uid
-            if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
-                split_idx = uid.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
-                keys_str = uid[split_idx + len(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT):]
-                uid = uid[:split_idx]
-                keys = UniqueTreeId(keys_str).parts
-            indexes = undefined
-            indexes_raw = None
-            if len(data) == 3 and data[2] is not None:
-                indexes_raw = data[2]
-                assert indexes_raw is not None 
-                indexes = list(map(int, indexes_raw.split(".")))
-            event = Event(data[0], data[1], keys, indexes)
+            uid, event = self._create_event_object(uid, data[0], data[1], data[2] if len(data) > 2 else None)
             comps = self.root._get_comps_by_uid(uid)
             last_comp = comps[-1]
             if isinstance(last_comp, RemoteComponentBase) and last_comp.is_remote_mounted:
                 if event.type == FrontendEventType.Drop.value:
                     # we know drop component is remote, we need to check src component.
-                    src_data = data[1]
-                    src_uid = src_data[TENSORPC_APP_DND_SRC_KEY]
-                    src_comp = self.root._get_comp_by_uid(src_uid)
-                    src_event = Event(FrontendEventType.DragCollect.value,
-                                    src_data["data"], keys, indexes)
+                    drag_item = data[1]
+
+                    src_uid = drag_item["componentUid"]
+                    src_indexes_raw = drag_item.get("overrideIndexes", None)
+                    src_uid_base, src_event = self._create_event_object(src_uid, FrontendEventType.DragCollect.value, drag_item, src_indexes_raw)
+                    src_comp = self.root._get_comp_by_uid(src_uid_base)
+                    # src_event = Event(FrontendEventType.DragCollect.value,
+                    #                 src_data, keys, indexes)
                     uievent_for_remote = UIEvent({
-                        src_uid: (FrontendEventType.DragCollect.value, src_event, indexes_raw)
+                        src_uid: ((FrontendEventType.DragCollect.value, src_event) if src_indexes_raw is None 
+                                    else (FrontendEventType.DragCollect.value, src_event, src_indexes_raw))
                     })
                     # shortcut for internal dnd
                     if isinstance(src_comp, RemoteComponentBase):
@@ -910,12 +915,19 @@ class App:
                             # no need to call DragCollect
                             collect_res = None
                         else:
-                            collect_res = await src_comp.run_callback(partial(collect_handlers.handlers[0].run_event_async, event=src_event))
+                            run_funcs = collect_handlers.get_bind_event_handlers(src_event)
+                            collect_res_lst = await src_comp.run_callbacks(run_funcs[:1],
+                                                            sync_status_first=False,
+                                                            capture_draft=True,
+                                                            change_status=False)
+                            collect_res = collect_res_lst[0]
+                            # collect_res = await src_comp.run_callback(partial(collect_handlers.handlers[0].run_event_async, event=src_event))
                     if collect_res is None:
-                        src_data.pop(TENSORPC_APP_DND_SRC_KEY)
+                        drag_item["noCollect"] = True
+                        # src_data.pop(TENSORPC_APP_DND_SRC_KEY)
                         res[uid_original] = await last_comp.handle_remote_event((uid_original, data), is_sync)
                     else:
-                        ev_data = (FrontendEventType.DropFromRemoteComp.value, collect_res, indexes_raw)
+                        ev_data = (FrontendEventType.DropFromRemoteComp.value, collect_res, event.indexes)
                         res[uid_original] = await last_comp.handle_remote_event((uid_original, ev_data), is_sync)
                     continue 
                 else:
@@ -932,19 +944,24 @@ class App:
                 if event.type == FrontendEventType.DragCollect.value:
                     # WARNING: only used in remote comp dnd
                     # frontend shouldn't send this event.
-                    # print("WTF1", uid, data)
                     src_uid = uid 
                     src_event = data[1]
+                    assert isinstance(src_event, Event)
                     src_comp = self.root._get_comp_by_uid(src_uid)
                     collect_handlers = src_comp.get_event_handlers(
                         FrontendEventType.DragCollect.value)
                     if collect_handlers is not None:
-                        collect_res = await src_comp.run_callback(partial(collect_handlers.handlers[0].run_event_async, event=src_event))
+                        run_funcs = collect_handlers.get_bind_event_handlers(src_event)
+                        collect_res_lst = await src_comp.run_callbacks(run_funcs[:1],
+                                                        sync_status_first=False,
+                                                        capture_draft=True,
+                                                        change_status=False)
+                        collect_res = collect_res_lst[0]
                     else:
                         collect_res = None 
                     # print("WTF2", collect_res)
 
-                    res[uid] = collect_res
+                    res[uid_original] = collect_res
                 elif event.type == FrontendEventType.DropFromRemoteComp.value:
                     event = dataclasses.replace(event, type=FrontendEventType.Drop)
                     comp = comps[-1]
@@ -952,9 +969,10 @@ class App:
                         event, is_sync=is_sync)
                 elif event.type == FrontendEventType.Drop.value:
                     # for drop event, we only support contexts in drop component.
-                    src_data = data[1]
+                    drag_item = data[1]
                     comp = comps[-1]
-                    if TENSORPC_APP_DND_SRC_KEY not in src_data:
+
+                    if "noCollect" in drag_item:
                         # if uid not in data, means no drag collect needed.
                         # 'uid' field is included by default. but
                         # we may remove it for remote comp dnd.
@@ -963,14 +981,16 @@ class App:
                         res[uid_original] = await comp.handle_event(
                             event, is_sync=is_sync)
                         continue
-                    src_uid = src_data[TENSORPC_APP_DND_SRC_KEY]
-                    src_comp = self.root._get_comp_by_uid(src_uid)
-                    src_event = Event(FrontendEventType.DragCollect.value,
-                                    src_data["data"], keys, indexes)
+                    src_uid = drag_item["componentUid"]
+                    src_indexes_raw = drag_item.get("overrideIndexes", None)
+
+                    src_uid_base, src_event = self._create_event_object(src_uid, FrontendEventType.DragCollect.value, drag_item, src_indexes_raw)
+                    src_comp = self.root._get_comp_by_uid(src_uid_base)
+
                     if isinstance(src_comp, RemoteComponentBase):
                         # remote comp drop to local comp
                         uievent_for_remote = UIEvent({
-                            src_uid: (FrontendEventType.DragCollect.value, src_event, indexes_raw)
+                            src_uid: (FrontendEventType.DragCollect.value, src_event, src_indexes_raw)
                         })
                         collect_res = await src_comp.collect_drag_source_data(uievent_for_remote)
                         ev_res = event
@@ -991,7 +1011,8 @@ class App:
                                         # only first collect handler valid.
                                         # TODO limit number of collect handlers.
                                         src_handler=collect_handlers.handlers[0],
-                                        src_event=src_event)
+                                        src_event=src_event,
+                                        dst_event=event)
                             cbs.append(cb)
                         comp._task = asyncio.create_task(
                             comp.run_callbacks(cbs, sync_status_first=False))
@@ -1004,8 +1025,8 @@ class App:
                     # for file drop, we can't use regular drop above, so
                     # just convert it to drop event, no drag collect needed.
                     res[uid_original] = await comps[-1].handle_event(
-                        Event(FrontendEventType.FileDrop.value, data[1], keys,
-                            indexes),
+                        Event(FrontendEventType.FileDrop.value, data[1], event.keys,
+                            event.indexes),
                         is_sync=is_sync)
                 else:
                     res[uid_original] = await comps[-1].handle_event(

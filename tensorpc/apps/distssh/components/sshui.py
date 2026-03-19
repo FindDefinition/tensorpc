@@ -463,6 +463,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
         if selected_state_dict is not None:
             rank = selected_state_dict["rank"]
             ip = selected_state_dict["ip"]
+            port = selected_state_dict["port"]
             if ev.old_value is not None:
                 if ev.old_value["rank"] == rank:
                     return
@@ -473,11 +474,11 @@ class FaultToleranceUIMaster(mui.FlexBox):
                 ])
             else:
                 await self._remote_terminal_box.set_new_layout([
-                    mui.RemoteBoxGrpc(ip, self._port,
+                    mui.RemoteBoxGrpc(ip, port,
                                       TENSORPC_DISTSSH_UI_KEY).prop(flex=1)
                 ])
                 await self._child_control_panel.set_new_layout([
-                    mui.RemoteBoxGrpc(ip, self._port,
+                    mui.RemoteBoxGrpc(ip, port,
                                       TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY).prop(flex=1)
                 ])
             async with self.worker_status_box.draft_update(

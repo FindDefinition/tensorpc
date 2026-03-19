@@ -396,7 +396,7 @@ class BasicObjectTree(mui.FlexBox):
             self._cared_dnd_uids.pop(d)
 
     async def _on_drag_collect(self, data):
-        uid: str = data["id"]
+        uid: str = data["itemUid"]
         uid_obj = UniqueTreeIdForTree(uid)
         with enter_tree_context(TreeContext(self._tree_parser, self.tree,
                                             self)):

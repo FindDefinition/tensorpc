@@ -21,7 +21,7 @@ from tensorpc.autossh.constants import (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE,
                                         TENSORPC_ASYNCSSH_TASK_PORT,
                                         TENSORPC_SSH_TASK_NAME_PREFIX)
 from tensorpc.autossh.core import (LOGGER, CommandEvent, CommandEventType,
-                                   EofEvent, Event, EventType, ExceptionEvent, ExternalEvent,
+                                   EofEvent, Event, SSHEventType, ExceptionEvent, ExternalEvent,
                                    LineEvent, RawEvent, SSHClient, SSHRequest,
                                    SSHRequestType, SubprocessRpcClient)
 from tensorpc.autossh.coretypes import TaskWrapperArgs, TaskWrapperWorkerState
@@ -72,12 +72,12 @@ class SSHEventLogger:
 
 
 class ExtendSSHEventType(enum.Enum):
-    Command = EventType.Command.value
-    Raw = EventType.Raw.value
-    Line = EventType.Line.value
-    Eof = EventType.Eof.value
-    Exception = EventType.Exception.value
-    External = EventType.External.value
+    Command = SSHEventType.Command.value
+    Raw = SSHEventType.Raw.value
+    Line = SSHEventType.Line.value
+    Eof = SSHEventType.Eof.value
+    Exception = SSHEventType.Exception.value
+    External = SSHEventType.External.value
 
     Init = "I"
     InitInfo = "M"

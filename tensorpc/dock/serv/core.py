@@ -360,6 +360,20 @@ class DirectSSHNode(Node):
         cmds = self.node_data["initCommands"].strip()
         return cmds
 
+    @property
+    def proxy_jumps(self) -> str:
+        if "proxyJumps" not in self.node_data:
+            return ""
+        cmds = self.node_data["proxyJumps"].strip()
+        return cmds
+
+    @property
+    def client_key_paths(self) -> str:
+        if "clientKeyPaths" not in self.node_data:
+            return ""
+        cmds = self.node_data["clientKeyPaths"].strip()
+        return cmds
+
 
 @ALL_NODES.register
 class MarkdownNode(Node):
@@ -2255,8 +2269,7 @@ class Flow:
                                     driver: DirectSSHNode):
         assert isinstance(node, CommandNode)
         assert isinstance(driver, DirectSSHNode)
-        assert (driver.url != "" and driver.username != ""
-                and driver.password != "")
+        assert (driver.url != "" and driver.username != "")
         envs = self._get_node_envs(graph_id, node.id)
         rfports: List[Union[int, Tuple[int, int]]] = []
         if driver.enable_port_forward:

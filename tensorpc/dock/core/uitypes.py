@@ -101,6 +101,18 @@ class IconType(enum.IntEnum):
     Shortcut = 84
     Input = 85
     Output = 86
+    AddBox = 87
+    AddTask = 88
+    DomainAdd = 89
+    PlaylistAdd = 90
+    AssignmentAdd = 91
+    FormatListBulletedAdd = 92
+    Task = 93
+    Assignment = 94
+    TaskAlt = 95
+    DeviceHub = 96
+    Lan = 97
+
     # non-material icons
     Reactflow = 200
     Markdown = 201

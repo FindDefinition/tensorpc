@@ -1,0 +1,436 @@
+# agent manage local SSH connections and compute resources.
+import abc
+import asyncio
+import enum
+from functools import partial
+from typing import TYPE_CHECKING, Any, Coroutine, Generic, Optional, TypeVar, Union
+
+from tensorpc.apps.cm.worker import A2AStateMachine, NodeFlags, GroupNodeSpec, SSHA2AWorker, SSHWorkerConfig
+from tensorpc.autossh.core import SSHConnDesc
+from tensorpc.core import dataclass_dispatch as dataclasses, marker, prim
+from tensorpc.core.distributed.comm.grpcimpl import AsyncGRPCComm, AsyncGRPCCommConfig
+from tensorpc.core.distributed.raft import (
+    AppendEntriesRequest,
+    AppendEntriesResponse,
+    InstallSnapshotRequest,
+    InstallSnapshotResponse,
+    PeerInfo,
+    RaftRole,
+    RequestVoteRequest,
+    RequestVoteResponse,
+)
+from tensorpc.core.serviceunit import ServiceEventType
+from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.dock.serv_names import serv_names as app_serv_names
+from .coretypes import CMNodeManagerArgs, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, UserCmd, WorkerInfo, CM_LOGGER, WorkerSSHStatus
+from .serv_names import master_serv_names
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance as StandardDataclass
+
+
+@dataclasses.dataclass
+class GroupSpec:
+    id: str
+    leader_id: Optional[str]
+    raft_node_specs: list[GroupNodeSpec]
+    compute_node_specs: list[GroupNodeSpec]
+    # for ClusterManagePanel only, store frontend info index.
+    index: int = -1
+    status: int = int(GroupSSHStatus.UNKNOWN)
+
+
+class GroupInstance:
+
+    def __init__(self, group_id: str, worker: SSHA2AWorker):
+        self.group_id = group_id
+        self.worker = worker
+
+@dataclasses.dataclass
+class NodeMasterConfig:
+    resource: ResourceInfo
+    worker_cfg: SSHWorkerConfig
+
+@dataclasses.dataclass
+class NodeMasterUIState:
+    groups: list[Any]
+    pass 
+
+class NodeMaster:
+
+    def __init__(self, uid: str, config_dict: dict):
+        self._uid = uid
+        self._cfg = CMNodeManagerArgs(
+            **config_dict
+        )
+        self._groups: dict[str, GroupInstance] = {}
+        self._lock = asyncio.Lock()
+
+    async def internal_create_group(self, group_id: str, rank: int, world_size: int, peer_info: PeerInfo, raft_node_infos: list[PeerInfo], worker_cfg: Optional[SSHWorkerConfig] = None,
+            resource_info: Optional[ResourceInfo] = None,):
+        # TODO if group exists, check its newly created.
+        assert group_id not in self._groups, f"group {group_id} already exists"
+        comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        if worker_cfg is None:
+            worker_cfg = self._cfg.get_worker_cfg()
+        worker = SSHA2AWorker(
+            group_id,
+            rank=rank,
+            world_size=world_size,
+            peer_info=peer_info,
+            init_raft_infos=raft_node_infos,
+            comm=comm,
+            cfg=worker_cfg,
+            resource_info=resource_info,
+            propose_fn=partial(self.propose, group_id),
+        )
+        async with self._lock:
+            await worker.start()
+            set_layout_service = prim.get_service(
+                app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)
+            try:
+                for comp_name, comp in worker.get_components_dict().items():
+                    comp_uid = UniqueTreeId.from_parts([group_id, comp_name]).uid_encoded
+                    await set_layout_service(comp_uid, comp)
+            except:
+                CM_LOGGER.exception(f"Failed to set layout object for group {group_id}")
+                raise
+
+            group = GroupInstance(
+                group_id=group_id,
+                worker=worker,
+            )
+            self._groups[group_id] = group
+
+
+    async def internal_tree_create_group(
+        self, group_id: str, world_size: int, self_worker_info: Optional[WorkerInfo], 
+        compute_node_infos: list[WorkerInfo], raft_node_infos: list[PeerInfo],
+        num_partition: int, worker_cfg: Optional[SSHWorkerConfig] = None, 
+        scan_comm: Optional[AsyncGRPCComm] = None,
+    ):
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            self_uid: Optional[str] = None 
+            if self_worker_info is not None:
+                self_uid = self_worker_info.peer_info.uid
+                await self.internal_create_group(
+                    group_id, self_worker_info.rank, world_size, 
+                    self_worker_info.peer_info, raft_node_infos, worker_cfg, 
+                    self_worker_info.resource,
+                )
+            remain_worker_infos = [node_info for node_info in compute_node_infos if node_info.peer_info.uid != self_uid]
+            if not remain_worker_infos:
+                return 
+            # pick num_partition childs, call tree_scan on each child, and aggregate results.
+            next_scan_masters = remain_worker_infos[:num_partition]
+            next_scan_partitions = [[] for _ in range(num_partition)]
+            for i, info in enumerate(remain_worker_infos[num_partition:]):
+                next_scan_partitions[i % num_partition].append(info)
+            remote_call_coros: list[Coroutine[None, None, Any]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                kwargs = {
+                    "group_id": group_id,
+                    "world_size": world_size,
+                    "self_worker_info": scan_master,
+                    "compute_node_infos": scan_partition,
+                    "num_partition": num_partition,
+                    "worker_cfg": worker_cfg,
+                    "raft_node_infos": raft_node_infos,
+                }
+                remote_call_coros.append(scan_comm.remote_call(scan_master.peer_info.url, 
+                    master_serv_names.INTERNAL_GROUP_TREE_CREATE_GROUP, **kwargs))
+            await asyncio.gather(*remote_call_coros)
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
+
+    async def master_create_group(
+        self, group_id: str, self_uid: str, compute_node_infos: list[WorkerInfo], 
+        raft_node_infos: list[PeerInfo], num_partition: int, worker_cfg: Optional[SSHWorkerConfig] = None, 
+    ):
+        world_size = len(compute_node_infos)
+        # TODO validate uids is unique
+        cnode_id_to_info = {node_info.peer_info.uid: node_info for node_info in compute_node_infos}
+        # 1. run a scan to make sure all nodes are alive and get their peer info and resource info, and then we can decide how to partition the group.
+        cnode_urls = [node_info.peer_info.url for node_info in compute_node_infos if node_info.peer_info.uid != self_uid]
+        raft_node_urls = [node_info.url for node_info in raft_node_infos if node_info.uid != self_uid]
+        # extract possible self_url from all infos
+        self_url: Optional[str] = None
+        for node_info in compute_node_infos:
+            if node_info.peer_info.uid == self_uid:
+                self_url = node_info.peer_info.url
+                break
+        if self_url is None:
+            for node_info in raft_node_infos:
+                if node_info.uid == self_uid:
+                    self_url = node_info.url
+                    break
+        all_node_urls = list(set(cnode_urls) | set(raft_node_urls))
+        scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            group_spec = await self.tree_scan_groups(
+                self_url, all_node_urls, num_partition, scan_comm
+            )
+            assert group_id not in group_spec, f"group {group_id} already exists"
+            # TODO validate available resources here.
+            # 2. create raft groups
+            raft_node_uids = set(node_info.uid for node_info in raft_node_infos)
+            for raft_info in raft_node_infos:
+                rank = -1
+                if raft_info.uid in cnode_id_to_info:
+                    rank = cnode_id_to_info[raft_info.uid].rank
+                kwargs = {
+                    "group_id": group_id,
+                    "rank": rank,
+                    "peer_info": raft_info,
+                    "raft_node_infos": raft_node_infos,
+                    "worker_cfg": worker_cfg,
+                    "world_size": world_size,
+                }
+
+                if raft_info.uid == self_uid:
+                    await self.internal_create_group(**kwargs)
+                else: 
+                    await scan_comm.remote_call(raft_info.url, master_serv_names.INTERNAL_GROUP_CREATE_GROUP, **kwargs)
+
+            # 3. create remain groups
+            self_info: Optional[WorkerInfo] = None
+            remain_worker_infos: list[WorkerInfo] = []
+            for node_info in compute_node_infos:
+                if node_info.peer_info.uid not in raft_node_uids:
+                    if node_info.peer_info.uid != self_uid:
+                        remain_worker_infos.append(node_info)
+                    else:
+                        self_info = node_info
+            if not remain_worker_infos:
+                return 
+            await self.internal_tree_create_group(
+                group_id, world_size, self_info, remain_worker_infos, raft_node_infos, num_partition, worker_cfg, 
+                scan_comm
+            )
+        finally:
+            await scan_comm.close()
+    
+    async def _remove_group(self, group_id: str, remove_stopped_group: bool = True):
+        async with self._lock:
+            if group_id in self._groups:
+                if remove_stopped_group:
+                    group = self._groups.pop(group_id)
+                else:
+                    group = self._groups[group_id]
+                if group.worker.is_started():
+                    await group.worker.stop()
+                    remove_layout_service = prim.get_service(
+                        app_serv_names.REMOTE_COMP_REMOVE_LAYOUT_OBJECT)
+                    try:
+                        for comp_name, comp in group.worker.get_components_dict().items():
+                            comp_uid = UniqueTreeId.from_parts([group_id, comp_name]).uid_encoded
+                            await remove_layout_service(comp_uid)
+                    except:
+                        CM_LOGGER.exception(f"Failed to remove layout object for group {group_id}")
+
+    async def query_group_coarse_status(self, group_id: str) -> GroupCoarseStatus:
+        group = self._groups[group_id]
+        if group.worker._raft_node is None:
+            return GroupCoarseStatus(
+                id=group_id,
+                success=False,
+                is_raft_node=False,
+            )
+        if group.worker._raft_node.role != RaftRole.LEADER:
+            return GroupCoarseStatus(
+                id=group_id,
+                success=False,
+                is_raft_node=True,
+                leader_info=group.worker._raft_node.get_leader_peer_info(),
+            )
+        assert group.worker._raft_node.state_machine is not None
+        state_machine = group.worker._raft_node.state_machine
+        assert isinstance(state_machine, A2AStateMachine)
+        last_cmd = state_machine.raft_state["last_cmd"]
+        group_ssh_status = group.worker.ssh_dm.model.group_ssh_status
+        return GroupCoarseStatus(
+            id=group_id,
+            success=True,
+            is_raft_node=True,
+            group_ssh_status=group_ssh_status,
+            last_cmd=last_cmd,
+        )
+
+    async def tree_scan_groups(
+        self, self_url: Optional[str], all_node_urls: list[str], num_partition: int,
+        scan_comm: Optional[AsyncGRPCComm] = None,
+    ) -> dict[str, GroupSpec]:
+        # TODO support retry in comm
+        # we don't want to keep grpcs in whole cluster, so we create temp comm here.
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        res: dict[str, GroupSpec] = {}
+        # add local results
+        async with self._lock:
+            try:
+                for group_id, group_inst in self._groups.items():
+                    cur_spec = group_inst.worker.get_node_spec()
+                    res[group_id] = GroupSpec(group_id, None, [], [])
+                    if cur_spec.flags & NodeFlags.IS_RAFT_NODE:
+                        res[group_id].raft_node_specs.append(cur_spec)
+                    if cur_spec.flags & NodeFlags.IS_COMPUTE_NODE:
+                        res[group_id].compute_node_specs.append(cur_spec)
+                    if cur_spec.flags & NodeFlags.IS_RAFT_LEADER:
+                        res[group_id].leader_id = cur_spec.peer_info.uid
+                        res[group_id].status = group_inst.worker.ssh_dm.model.group_ssh_status
+                if not all_node_urls:
+                    return res
+                all_node_urls = [url for url in all_node_urls if url != self_url]
+                # remove self from all_node_urls
+                # pick num_partition childs, call tree_scan on each child, and aggregate results.
+                next_scan_masters = all_node_urls[:num_partition]
+                next_scan_partitions = [[] for _ in range(num_partition)]
+                for i, url in enumerate(all_node_urls[num_partition:]):
+                    next_scan_partitions[i % num_partition].append(url)
+                remote_call_coros: list[Coroutine[None, None, dict[str, GroupSpec]]] = []
+                for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                    remote_call_coros.append(scan_comm.remote_call(scan_master, 
+                        master_serv_names.GROUP_TREE_SCAN_GROUPS, scan_master, scan_partition,
+                        num_partition))
+                remote_call_results = await asyncio.gather(*remote_call_coros)
+                for res_next in remote_call_results:
+                    for group_id, group_spec in res_next.items():
+                        if group_id not in res:
+                            res[group_id] = group_spec
+                        else:
+                            # merge group spec
+                            master_spec = res[group_id]
+                            if master_spec.leader_id == "":
+                                master_spec.leader_id = group_spec.leader_id
+                            master_spec.raft_node_specs.extend(group_spec.raft_node_specs)
+                            master_spec.compute_node_specs.extend(group_spec.compute_node_specs)
+            finally:
+                if not is_ext_comm:
+                    await scan_comm.close()
+        return res
+
+    async def tree_remove_group(
+        self, group_id: str, self_url: Optional[str], all_node_urls: list[str], num_partition: int,
+        scan_comm: Optional[AsyncGRPCComm] = None,
+        remove_stopped_group: bool = True,
+    ) -> None:
+        # TODO support retry in comm
+        # we don't want to keep grpcs in whole cluster, so we create temp comm here.
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            if group_id in self._groups:
+                await self._remove_group(group_id, remove_stopped_group)
+            if not all_node_urls:
+                return
+            all_node_urls = [url for url in all_node_urls if url != self_url]
+            # remove self from all_node_urls
+            # pick num_partition childs, call tree_scan on each child, and aggregate results.
+            next_scan_masters = all_node_urls[:num_partition]
+            next_scan_partitions = [[] for _ in range(num_partition)]
+            for i, url in enumerate(all_node_urls[num_partition:]):
+                next_scan_partitions[i % num_partition].append(url)
+            remote_call_coros: list[Coroutine[None, None, dict[str, GroupSpec]]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                remote_call_coros.append(scan_comm.remote_call(scan_master, 
+                    master_serv_names.GROUP_TREE_REMOVE_GROUP,
+                    group_id, 
+                    scan_master, scan_partition,
+                    num_partition,
+                    remove_stopped_group=remove_stopped_group))
+            await asyncio.gather(*remote_call_coros)
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
+        return
+
+    async def tree_awake_worker(
+        self, group_id: str, self_worker_info: WorkerInfo, 
+        worker_infos: list[WorkerInfo], num_partition: int,
+        scan_comm: Optional[AsyncGRPCComm] = None,
+    ) -> None:
+        """tell all workers to awake and check if master changed."""
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        group = self._groups[group_id]
+        try:
+            group.worker.awake_leader_observe_loop()
+            if not worker_infos:
+                return
+            all_worker_infos = [x for x in worker_infos if x.uid != self_worker_info.uid]
+            # remove self from all_node_urls
+            # pick num_partition childs, call tree_scan on each child, and aggregate results.
+            next_scan_masters = all_worker_infos[:num_partition]
+            next_scan_partitions: list[list[WorkerInfo]] = [[] for _ in range(num_partition)]
+            for i, url in enumerate(all_worker_infos[num_partition:]):
+                next_scan_partitions[i % num_partition].append(url)
+            remote_call_coros: list[Coroutine[None, None, dict[str, GroupSpec]]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                remote_call_coros.append(scan_comm.remote_call(scan_master.peer_info.url, 
+                    master_serv_names.GROUP_TREE_AWAKE_WORKER, group_id, 
+                    scan_master, scan_partition, num_partition))
+            await asyncio.gather(*remote_call_coros)
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
+
+    async def request_vote(
+        self, group_id: str, req: RequestVoteRequest
+    ) -> RequestVoteResponse:
+        group = self._groups[group_id]
+        assert group.worker._raft_node is not None
+        return await group.worker._raft_node.handle_request_vote(req)
+
+    async def append_entries(
+        self, group_id: str, req: AppendEntriesRequest
+    ) -> AppendEntriesResponse:
+        group = self._groups[group_id]
+        assert group.worker._raft_node is not None
+        return await group.worker._raft_node.handle_append_entries(req)
+
+    async def install_snapshot(
+        self, group_id: str, req: InstallSnapshotRequest
+    ) -> InstallSnapshotResponse:
+        group = self._groups[group_id]
+        assert group.worker._raft_node is not None
+        return await group.worker._raft_node.handle_install_snapshot(req)
+
+    async def worker_heartbeat(
+        self, group_id: str, worker_peer_info: PeerInfo, rank: int, ssh_status: WorkerSSHStatus
+    ):
+        group = self._groups[group_id]
+        return await group.worker.handle_worker_heartbeat(worker_peer_info, rank, ssh_status)
+
+    async def propose(
+        self, group_id: str, cmd: UserCmd, sync_all_workers: bool = False,
+        run_iff_num_worker: Optional[int] = None,
+    ):
+        group = self._groups[group_id]
+        assert group.worker._raft_node is not None
+        worker_states = group.worker.get_all_worker_states()
+        connected_cnt = 0 
+        for worker_state in worker_states:
+            if worker_state["is_connected"]:
+                connected_cnt += 1
+        if run_iff_num_worker is not None and connected_cnt != run_iff_num_worker:
+            raise RuntimeError(f"Current connected worker num {connected_cnt} doesn't match required num {run_iff_num_worker}, won't run cmd {cmd}")
+        res = await group.worker._raft_node.propose(cmd)
+        if not res.success:
+            return res 
+        if sync_all_workers:
+            assert group.worker._raft_node.config.apply_sync, "sync_all_workers is only supported when apply_sync is True"
+            all_worker_infos = [w["worker_info"] for w in worker_states]
+            await self.tree_awake_worker(group_id, group.worker.get_worker_info(), all_worker_infos, 8)
+        return res
+
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
+    async def _on_exit(self):
+        for group in self._groups.values():
+            await group.worker.stop()

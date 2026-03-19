@@ -45,7 +45,6 @@ class MarkdownTutorialsTree:
             "points": np.random.uniform(-10, 10, size=[100, 3]),
             "wtf": False,
             "data": {'Name': ['a', 'b', None], 'Age': [10, 11, 12]},
-            "net": torch.nn.Transformer(),
         }
         self.panel = plus.InspectPanel(init_data, use_fast_tree=True)
         return self.panel.prop(width="100%", height="100%", overflow="hidden")

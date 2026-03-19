@@ -34,6 +34,7 @@ class BuiltinServiceKeys(enum.Enum):
     TaskWrapper = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskWrapper"
     TaskManager = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskManager"
     FaultToleranceSSHServer = f"tensorpc.apps.distssh.services.core{TENSORPC_SPLIT}FaultToleranceSSHServer"
+    ClusterNodeManager = f"tensorpc.apps.cm.node_master{TENSORPC_SPLIT}NodeMaster"
 
 BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.FileOps.value, {}),
