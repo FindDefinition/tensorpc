@@ -164,7 +164,7 @@ class UIType(enum.IntEnum):
     Allotment = 0x28
     # AllotmentPane = 0x29
     FlexLayout = 0x2a
-    DynamicControls = 0x2b
+    DockViewLayout = 0x2b
     MonacoEditor = 0x2c
     Icon = 0x2d
     Markdown = 0x2e
@@ -1959,6 +1959,7 @@ class Component(Generic[T_base_props, T_child]):
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
             "props": props,
+            # "status": self._flow_comp_status,
         }
         if self._flow_data_model_paths:
             dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)

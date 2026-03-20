@@ -4080,6 +4080,71 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
                                            sync_state_after_change=False,
                                            change_status=False)
 
+@dataclasses.dataclass
+class DockViewLayoutProps(ContainerBaseProps):
+    modelJson: Union[Any, Undefined] = undefined
+    # model change save debounce.
+    debounce: Union[NumberType, Undefined] = undefined
+    allowedDndTypes: Union[list[str], Undefined] = undefined
+    tabNameKey: Union[str, Undefined] = undefined
+
+
+class DockViewLayout(MUIContainerBase[DockViewLayoutProps, MUIComponentType]):
+    def __init__(
+        self,
+    ) -> None:
+        events = [
+            FrontendEventType.ComplexLayoutCloseTab,
+            FrontendEventType.ComplexLayoutSelectTab,
+            FrontendEventType.ComplexLayoutSelectTabSet,
+            FrontendEventType.ComplexLayoutTabReload,
+            FrontendEventType.ComplexLayoutStoreModel,
+            FrontendEventType.Drop,
+        ]
+        super().__init__(UIType.DockViewLayout,
+                         DockViewLayoutProps,
+                         {},
+                         False,
+                         allowed_events=[x.value for x in events])
+
+        self.register_event_handler(
+            FrontendEventType.ComplexLayoutStoreModel.value,
+            self._on_save_model)
+
+        self.event_close_tab = self._create_event_slot(
+            FrontendEventType.ComplexLayoutCloseTab)
+        self.event_select_tab = self._create_event_slot(
+            FrontendEventType.ComplexLayoutSelectTab)
+        self.event_select_tabset = self._create_event_slot(
+            FrontendEventType.ComplexLayoutSelectTabSet)
+        self.event_drop = self._create_event_slot(FrontendEventType.Drop)
+        self.event_reload = self._create_event_slot(
+            FrontendEventType.ComplexLayoutTabReload)
+
+    def _on_save_model(self, model):
+        self.props.modelJson = model
+
+    def get_props_dict(self):
+        res = super().get_props_dict()
+        return res
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           is_sync=is_sync,
+                                           sync_state_after_change=False,
+                                           change_status=False)
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):

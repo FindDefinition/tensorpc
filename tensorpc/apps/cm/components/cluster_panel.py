@@ -169,15 +169,19 @@ class GroupCard(mui.Paper):
         ])
         self.prop(display="flex", flexDirection="column", padding="5px", margin="5px", elevation=4, minWidth=0)
 
-class GroupRemoteLayout(mui.FlexLayout):
+class GroupRemoteLayout(mui.DockViewLayout):
 
     def __init__(self) -> None:
-        super().__init__([])
+        super().__init__()
         self.event_drop.on(self._on_drop)
         self.event_close_tab.on(self._on_tab_close)
-        self.prop(font=mui.FlexLayoutFontProps(size="14px"), 
+        # self.prop(font=mui.FlexLayoutFontProps(size="14px"), 
+        #     allowedDndTypes=["ClusterPanelTaskGroup"],
+        #     tabNameKey="name")
+        self.prop(
             allowedDndTypes=["ClusterPanelTaskGroup"],
             tabNameKey="name")
+
 
     async def _on_drop(self, ev: Any):
         tab_id = ev["complexLayoutTabNodeId"]
