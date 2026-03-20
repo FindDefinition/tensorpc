@@ -1,7 +1,7 @@
 # agent manage local SSH connections and compute resources.
 import abc
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Coroutine
 import enum
 import os
 from pathlib import Path
@@ -44,6 +44,7 @@ from tensorpc.apps.cm.coretypes import (
 )
 from tensorpc.apps.cm.lrucache import LRUCache
 from tensorpc.apps.cm.serv_names import master_serv_names
+from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.distributed.comm import AsyncGRPCComm
 from tensorpc.core.distributed.comm.grpcimpl import AsyncGRPCCommConfig
@@ -67,7 +68,9 @@ from tensorpc.core.distributed.raft import (
 )
 from tensorpc.apps.distssh.constants import (
     TENSORPC_ENV_DISTSSH_RANK,
+    TENSORPC_ENV_DISTSSH_WORLD_SIZE,
     TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
+    TENSORPC_ENV_DISTSSH_BACKEND
 )
 from tensorpc.dock.components import mui
 from tensorpc.autossh.core import (
@@ -82,6 +85,7 @@ import dataclasses as dataclasses_plain
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core import dataclass_dispatch as dataclasses, marker, prim
 from tensorpc.core.datamodel.draftstore import DraftSimpleFileStoreBackend
+from tensorpc.utils.pyspyutil import PyspyTraceMode
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance as StandardDataclass
@@ -306,6 +310,8 @@ class SSHA2AWorker:
         cfg: SSHWorkerConfig,
         comm: AsyncGRPCComm,
         propose_fn: Callable[[UserCmd, bool, Optional[int]], Coroutine[None, None, ProposeResult]],
+        debug_panel_fn: Callable[..., Awaitable[None]],
+        fetch_pyspy_info_fn: Callable[[PyspyTraceMode, bool], Awaitable[Any]],
         resource_info: Optional[ResourceInfo] = None,
     ):
         # super().__init__(group_id, peer_info.uid, cfg.log_to_stdout)
@@ -340,6 +346,8 @@ class SSHA2AWorker:
         self._cmd_task: Optional[CmdTaskState] = None
 
         self._sync_lock = asyncio.Lock()
+        self._debug_panel_fn = debug_panel_fn
+        self._fetch_pyspy_info_fn = fetch_pyspy_info_fn
         self._local_shutdown_event: Optional[asyncio.Event] = None
 
         self.setup_ui()
@@ -354,30 +362,26 @@ class SSHA2AWorker:
             num_connected=0,
             ssh_status=WorkerSSHStatus(status="idle", last_ts=0),
         )
-
         self.ssh_dm = mui.DataModel(ui_state, [])
         draft = self.ssh_dm.get_draft()
-        if self._is_raft_worker:
-            panel = RaftManagerPanel(
-                self._group_id,
-                self._peer_info.uid,
-                self.ssh_dm,
-                self._raft_manager_act,
-                draft,
-                self._terminal,
-            )
-            self.ssh_dm.init_add_layout([
-                panel,
-            ])
-        else:
-            terminal_box = _get_terminal_menus(self._terminal)
-            terminal_box.event_contextmenu_select.on(self._on_term_menu)
-            self.ssh_dm.init_add_layout(
-                [
-                    mui.HBox([mui.Typography("").prop(value=draft.ssh_status.status)]),
-                    terminal_box.prop(flex=1),
-                ]
-            )
+        panel = RaftManagerPanel(
+            self._is_raft_worker,
+            self._group_id,
+            self._peer_info.uid,
+            self.ssh_dm,
+            self._raft_manager_act,
+            self._debug_panel_fn if self._cfg.enable_debug_panel else None,
+            self._fetch_pyspy_info_fn if self._is_raft_worker else None,
+            draft,
+            self._terminal,
+        )
+        if panel.debug_panel is not None:
+            panel.debug_panel.event_breakpoint_process_change.on(self._on_has_bkpt_change)
+
+        self._raft_mgr_panel = panel
+        self.ssh_dm.init_add_layout([
+            panel,
+        ])
         layout_res = mui.VBox(
             [
                 self.ssh_dm,
@@ -393,9 +397,80 @@ class SSHA2AWorker:
             await self._terminal.clear()
         else:
             raise ValueError(f"Unknown menu item {item_id}")
+    
+    async def _on_has_bkpt_change(self, num_bkpt_proc):
+        prev_is_paused = self.ssh_dm.model.ssh_status.is_paused
+        if num_bkpt_proc > 0:
+            cur_is_paused = True 
+        else:
+            cur_is_paused = False
+        if prev_is_paused != cur_is_paused:
+            async with self.ssh_dm.draft_update(allow_unmounted=True) as draft:
+                draft.ssh_status.is_paused = cur_is_paused
+            # sync to leader immediately.
+            self.awake_leader_observe_loop()
 
     def get_terminal(self) -> terminal.AsyncSSHTerminal:
         return self._terminal
+
+    async def start(self):
+        assert not self.is_started(), "Worker already started"
+        self._local_shutdown_event = asyncio.Event()
+        if self._is_compute_worker:
+            # connect to ssh
+            # raft-only node don't run user cmd, so no need to connect ssh.
+            await self._connect_ssh()
+        if self._is_raft_worker:
+            raft_peers = [
+                peer for peer in self._cur_raft_infos if peer.uid != self._peer_info.uid
+            ]
+            self._raft_node = ExtendedRaftNode(
+                self_peer=self._peer_info,
+                peers=raft_peers,
+                comm=AsyncGrpcRaftComm(self._group_id, self._cfg.comm_cfg),
+                config=self._cfg.raft_cfg,
+                state_machine=A2AStateMachine(world_size=len(self._cur_raft_infos)),
+            )
+            self._raft_node.events.on(RaftEventType.COMMIT_APPLIED, self._sync_status_to_ui)
+            await self._raft_node.start()
+            self._workers_observe_task = asyncio.create_task(
+                self._worker_observe_loop(self._local_shutdown_event)
+            )
+            if self._cfg.workdir.strip() != "":
+                workdir = Path(self._cfg.workdir) 
+                fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False, with_bak=True)
+                self.ssh_dm.connect_draft_store(f"_cm_raft_group_store_{self._peer_info.uid}_{self._group_id}", fs_backend)
+        if self._is_compute_worker:
+            self._leader_observe_task = asyncio.create_task(
+                self._raft_leader_observe_loop(self._awake_event, self._local_shutdown_event)
+            )
+
+    def awake_leader_observe_loop(self):
+        if self._leader_observe_task is not None:
+            self._awake_event.set()
+
+    async def stop(self):
+        if self._local_shutdown_event is None:
+            return 
+        self._local_shutdown_event.set()
+        await self._debouncer.cancel()
+        if self._is_compute_worker:
+            self._terminal.term_or_kill_all_ssh_child(is_term=False)
+            await self._terminal.disconnect()
+        if self._raft_node is not None:
+            await self._raft_node.stop()
+            self._raft_node = None
+            if self._workers_observe_task is not None:
+                await self._workers_observe_task
+                self._workers_observe_task = None
+        if self._leader_observe_task is not None:
+            await self._leader_observe_task
+            self._leader_observe_task = None
+        if self._cmd_task is not None:
+            self._cmd_task.event.set()
+            await self._cmd_task.task
+            self._cmd_task = None
+        self._local_shutdown_event = None
 
     async def _raft_manager_act(self, act: RaftMgrActions):
         assert self._raft_node is not None
@@ -423,7 +498,13 @@ class SSHA2AWorker:
                 type=UserCmdType.KILL_TO_IDLE,
                 content="",
             )
+        elif act == RaftMgrActions.RECONNECT_ALL_CLIENT:
+            cmd = UserCmd(
+                type=UserCmdType.RECONNECT_SSH,
+                content="",
+            )
         if cmd is None:
+            CM_LOGGER.error(f"Unimplemented raft manager action {act}")
             return 
         sync_all_workers = self._world_size <= 8 # TODO avoid hardcode
         run_iff_num_worker = None
@@ -498,6 +579,9 @@ class SSHA2AWorker:
             worker_states.append(worker_state)
         return worker_states
 
+    def get_all_raft_infos(self) -> list[PeerInfo]:
+        return self._cur_raft_infos
+
     def get_worker_info(self) -> WorkerInfo:
         return WorkerInfo(
             peer_info=self._peer_info, rank=self._rank, resource=self._resource_info
@@ -519,6 +603,8 @@ class SSHA2AWorker:
         init_cmds = [
             f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
             f" export {TENSORPC_ENV_DISTSSH_RANK}={self._rank}\n",
+            f" export {TENSORPC_ENV_DISTSSH_WORLD_SIZE}={self._world_size}\n",
+            f" export {TENSORPC_ENV_DISTSSH_BACKEND}=clustermgr\n",
         ]
         if self._cfg.env_fwd_re != "":
             # use re to capture env thatt need to forward to ssh
@@ -546,18 +632,21 @@ class SSHA2AWorker:
             "error": [],
             "running": [],
             "idle": [],
+            "paused": []
         }
         uid_to_item: dict[str, WorkerSelectItem] = {}
 
         for worker_id, worker_info in workers.items():
             worker_status = worker_status_dict[worker_id]
             ssh_status = worker_status.status
+            if worker_status.is_paused and worker_status.status == "running":
+                ssh_status = "paused"
             if ssh_status not in cur_items:
                 cur_items[ssh_status] = []
             select_item = WorkerSelectItem(
                 id=worker_id,
                 label=f"{worker_info['worker_info'].rank} ({worker_info['worker_info'].peer_info.url})",
-                ssh_status=worker_status.status,
+                ssh_status=ssh_status,
                 url=worker_info["worker_info"].peer_info.url,
                 rank=worker_info["worker_info"].rank,
             )
@@ -566,7 +655,7 @@ class SSHA2AWorker:
         for items in cur_items.values():
             # sort workers by (rank, url) in ascending order.
             items.sort(key=lambda x: (x.rank, x.url))
-        ssh_status_order = ["disconnected", "error", "running", "idle"]
+        ssh_status_order = ["paused", "disconnected", "error", "running", "idle"]
         final_list: list[WorkerSelectItem] = []
         for status in ssh_status_order:
             if status in cur_items:
@@ -584,13 +673,16 @@ class SSHA2AWorker:
                         draft.cur_worker = None
                 # TODO we should use is_connected in raft state
                 draft.num_connected = len(final_list)
+                draft.num_paused = len(cur_items["paused"])
                 draft.can_workers_run_cmd = num_idle_or_err == self._world_size
                 if self._raft_node is not None:
                     leader_info = self._raft_node.get_leader_peer_info()
                     if leader_info is not None:
                         draft.cur_leader_id = leader_info.uid
                         draft.cur_leader_url = leader_info.url
-                if len(final_list) != self._world_size:
+                if len(cur_items["paused"]) > 0:
+                    group_status = GroupSSHStatus.HAS_PAUSED_PROCESS
+                elif len(final_list) != self._world_size:
                     group_status = GroupSSHStatus.HAS_DISCONNECTED
                 elif len(cur_items["running"]) > 0:
                     if len(cur_items["running"]) != self._world_size:
@@ -624,6 +716,7 @@ class SSHA2AWorker:
                         draft.ssh_status.exit_code = return_code
                     else:
                         draft.ssh_status.status = "idle"
+                    draft.ssh_status.is_paused = False
                 # sync to leader immediately.
                 self.awake_leader_observe_loop()
 
@@ -631,6 +724,7 @@ class SSHA2AWorker:
                 async with self.ssh_dm.draft_update(allow_unmounted=True) as draft:
                     draft.ssh_status.status = "idle"
                     draft.ssh_status.exit_code = None
+                    draft.ssh_status.is_paused = False
 
         elif (
             event.ev_type == SSHEventType.Eof or event.ev_type == SSHEventType.Exception
@@ -638,6 +732,7 @@ class SSHA2AWorker:
             async with self.ssh_dm.draft_update(allow_unmounted=True) as draft:
                 draft.ssh_status.status = "disconnected"
                 draft.ssh_status.exit_code = None
+                draft.ssh_status.is_paused = False
             # sync to leader immediately.
             self.awake_leader_observe_loop()
 
@@ -648,70 +743,15 @@ class SSHA2AWorker:
             init_cmds=init_cmds,
             event_callback=self._ssh_event_cb,
         )
+        term_state = self._terminal.get_current_state()
+        assert term_state is not None 
+        if self._raft_mgr_panel.debug_panel is not None:
+            self._raft_mgr_panel.debug_panel.set_parent_pid(term_state.pid)
 
     def get_components_dict(self) -> dict[str, mui.FlexBox]:
         return {
             WorkerUIType.TERMINAL.value: self._ssh_ui,
         }
-
-    async def start(self):
-        assert not self.is_started(), "Worker already started"
-        self._local_shutdown_event = asyncio.Event()
-        if self._is_compute_worker:
-            # connect to ssh
-            # raft-only node don't run user cmd, so no need to connect ssh.
-            await self._connect_ssh()
-        if self._is_raft_worker:
-            raft_peers = [
-                peer for peer in self._cur_raft_infos if peer.uid != self._peer_info.uid
-            ]
-            self._raft_node = ExtendedRaftNode(
-                self_peer=self._peer_info,
-                peers=raft_peers,
-                comm=AsyncGrpcRaftComm(self._group_id, self._cfg.comm_cfg),
-                config=self._cfg.raft_cfg,
-                state_machine=A2AStateMachine(world_size=len(self._cur_raft_infos)),
-            )
-            self._raft_node.events.on(RaftEventType.COMMIT_APPLIED, self._sync_status_to_ui)
-            await self._raft_node.start()
-            self._workers_observe_task = asyncio.create_task(
-                self._worker_observe_loop(self._local_shutdown_event)
-            )
-            if self._cfg.workdir.strip() != "":
-                workdir = Path(self._cfg.workdir) 
-                fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False, with_bak=True)
-                self.ssh_dm.connect_draft_store(f"_cm_raft_group_store_{self._peer_info.uid}_{self._group_id}", fs_backend)
-        if self._is_compute_worker:
-            self._leader_observe_task = asyncio.create_task(
-                self._raft_leader_observe_loop(self._awake_event, self._local_shutdown_event)
-            )
-
-    def awake_leader_observe_loop(self):
-        if self._leader_observe_task is not None:
-            self._awake_event.set()
-
-    async def stop(self):
-        if self._local_shutdown_event is None:
-            return 
-        self._local_shutdown_event.set()
-        await self._debouncer.cancel()
-        if self._is_compute_worker:
-            self._terminal.term_or_kill_all_ssh_child(is_term=False)
-            await self._terminal.disconnect()
-        if self._raft_node is not None:
-            await self._raft_node.stop()
-            self._raft_node = None
-            if self._workers_observe_task is not None:
-                await self._workers_observe_task
-                self._workers_observe_task = None
-        if self._leader_observe_task is not None:
-            await self._leader_observe_task
-            self._leader_observe_task = None
-        if self._cmd_task is not None:
-            self._cmd_task.event.set()
-            await self._cmd_task.task
-            self._cmd_task = None
-        self._local_shutdown_event = None
 
     async def _worker_observe_loop(self, shutdown_ev: asyncio.Event):
         # only raft group watch workers.
@@ -1058,7 +1098,8 @@ class SSHA2AWorker:
         worker_status_dict = self._raft_node.state_machine.worker_status_dict
         if worker_uid not in worker_status_dict:
             worker_status_dict[worker_uid] = WorkerSSHStatus(
-                status=ssh_status.status, last_ts=time.time_ns(), exit_code=ssh_status.exit_code
+                status=ssh_status.status, last_ts=time.time_ns(), exit_code=ssh_status.exit_code,
+                is_paused=ssh_status.is_paused
             )
         else:
             worker_status = self._raft_node.state_machine.worker_status_dict[
@@ -1067,6 +1108,7 @@ class SSHA2AWorker:
             worker_status.last_ts = time.time_ns()
             worker_status.status = ssh_status.status
             worker_status.exit_code = ssh_status.exit_code
+            worker_status.is_paused = ssh_status.is_paused
         await self._debouncer.call(self._sync_status_to_ui)
         # print("!!!", worker_uid, self._peer_info.uid, ssh_status.status)
         return {
@@ -1077,3 +1119,4 @@ class SSHA2AWorker:
             "runtime_cmd_uid": state["runtime_cmd_uid"],
             "is_leader": True,
         }
+

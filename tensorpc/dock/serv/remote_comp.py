@@ -212,6 +212,14 @@ class RemoteComponentService:
         app_obj.send_loop_task = send_loop_task
         self._app_objs[key] = app_obj
 
+    def has_app(self, key: str):
+        return key in self._app_objs
+
+    def has_mounted_app(self, key: str):
+        if key not in self._app_objs:
+            return False
+        return self._app_objs[key].mounted_app_meta is not None
+
     def get_layout_root_and_app_by_key(self, key: str):
         if key not in self._app_objs:
             raise KeyError(f"key {key} not found, available keys: {list(self._app_objs.keys())}")

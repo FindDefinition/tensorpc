@@ -162,11 +162,3 @@ class CheckpointActions(enum.Enum):
     LOAD_ITEM = "LOAD_ITEM"
     # DELETE_ITEM = "Delete Item"
     SAVE = "SAVE"
-
-
-class PyspyTraceMode(enum.IntEnum):
-    PYTORCH_DISTRIBUTED = 0
-    ALL_SUBPROCESS = 1
-    LOCAL_AIO_TASKS = 2
-    SERVER_PROCESS = 3
-    PYTORCH_LOCAL = 4

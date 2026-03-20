@@ -153,7 +153,6 @@ class ManagerApp(LocalClusterBase):
         cluster_spec = ClusterSpec(
             id="local-cluster",
             name="Local Cluster",
-            cluster_info=ClusterBaseInfo(id="local-cluster", name="Local Cluster", provider="local"),
             nodes=node_specs,
         )
         self._provider._cluster_specs = [cluster_spec]

@@ -41,7 +41,7 @@ from .pfl_ast import (BinOpType, BoolOpType, CompareType, PFLAnnAssign, PFLArg,
                       PFLAstStmt, PFLASTType, PFLAttribute, PFLAugAssign,
                       PFLBinOp, PFLBoolOp, PFLBreak, PFLCall, PFLClass, PFLCompare,
                       PFLConstant, PFLContinue, PFLDict, PFLEvalError, PFLExpr,
-                      PFLExprStmt, PFLFor, PFLFunc, PFLIf, PFLIfExp, PFLModule,
+                      PFLExprStmt, PFLFor, PFLFormattedValue, PFLFunc, PFLIf, PFLIfExp, PFLJoinedStr, PFLModule,
                       PFLName, PFLReturn, PFLSlice, PFLStaticVar, PFLSubscript,
                       PFLTreeNodeFinder, PFLTuple, PFLUnaryOp, PFLWhile,
                       UnaryOpType, iter_child_nodes, unparse_pfl_expr, walk)
@@ -720,6 +720,28 @@ class PFLParser:
                 ]
                 res = PFLTuple(PFLASTType.TUPLE, source_loc, elts=elts)
                 res.check_and_infer_type()
+            elif isinstance(expr, ast.JoinedStr):
+                values = [
+                    self._parse_expr_to_pfl(value, scope)
+                    for value in expr.values
+                ]
+                res = PFLJoinedStr(PFLASTType.JOINED_STR,
+                              source_loc,
+                              values=values)
+                res.check_and_infer_type()
+            elif isinstance(expr, ast.FormattedValue):
+                value = self._parse_expr_to_pfl(expr.value, scope)
+                format_spec = undefined
+                if expr.format_spec is not None:
+                    format_spec = self._parse_expr_to_pfl(expr.format_spec, scope)
+                    assert isinstance(format_spec, PFLJoinedStr)
+                res = PFLFormattedValue(PFLASTType.FORMATTED_VALUE,
+                              source_loc,
+                              value=value,
+                              format_spec=format_spec,
+                              conversion=expr.conversion)
+                res.check_and_infer_type()
+
             elif isinstance(expr, ast.BoolOp):
                 op = BoolOpType.AND if isinstance(expr.op,
                                                   ast.And) else BoolOpType.OR

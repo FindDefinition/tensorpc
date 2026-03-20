@@ -17,10 +17,11 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
                                              TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
                                              )
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
-from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, PyspyTraceMode, UILocalActions
+from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
 from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel
 from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
+from tensorpc.utils.pyspyutil import PyspyTraceMode
 
 class WorkersStatusBox(mui.DataFlexBox):
 

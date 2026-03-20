@@ -1,4 +1,6 @@
 import asyncio
+import enum
+import os
 from pathlib import Path
 import psutil 
 import json 
@@ -25,6 +27,14 @@ class PyspyTrace:
     thread_id: int 
     thread_name: str
     frames: list[PyspyFrame]
+
+
+class PyspyTraceMode(enum.IntEnum):
+    PYTORCH_DISTRIBUTED = 0
+    ALL_SUBPROCESS = 1
+    LOCAL_AIO_TASKS = 2
+    SERVER_PROCESS = 3
+    PYTORCH_LOCAL = 4
 
 
 async def get_process_traceback_by_pyspy(pid: int, with_locals: bool = False) -> Any:
@@ -227,12 +237,36 @@ def get_pyspy_style_asyncio_task_traceback():
         res_traces[i] = [dataclasses.asdict(trace)]
     return res_traces
 
+async def fetch_pyspy_info(mode: PyspyTraceMode, parent_pid: Optional[int] = None):
+    if mode == PyspyTraceMode.SERVER_PROCESS:
+        pid = os.getpid()
+        res = await get_process_traceback_by_pyspy(pid)
+        res_dict = {}
+        for thread_info in res:
+            tid = thread_info["thread_id"]
+            res_dict[tid] = [
+                thread_info
+            ]
+        return {"" : res_dict}
+    if mode == PyspyTraceMode.LOCAL_AIO_TASKS:
+        res = get_pyspy_style_asyncio_task_traceback()
+        # import rich 
+        # rich.print(res)
+        return {"" : res}
+    assert parent_pid is not None, "parent_pid must be provided for subprocess traceback fetching"
+    pid = parent_pid
+    if mode == PyspyTraceMode.PYTORCH_DISTRIBUTED or mode == PyspyTraceMode.PYTORCH_LOCAL:
+        return await get_torchrun_traceback_by_pyspy(root_pid=pid, ignore_error=True)
+    else:
+        return await get_all_subprocess_traceback_by_pyspy(pid=pid)
+
+
 def _main():
     import rich 
     # res = asyncio.run(get_torchrun_traceback_by_pyspy(main_thread_only=True))
     res = asyncio.run(get_process_traceback_by_pyspy(185137))
 
     rich.print(res)
-    
+
 if __name__ == "__main__":
     _main()

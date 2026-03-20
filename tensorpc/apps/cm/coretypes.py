@@ -82,6 +82,7 @@ class SSHWorkerConfig:
     log_to_stdout: bool = False 
     env_fwd_re: str = ""
     workdir: str = ""
+    enable_debug_panel: bool = True
 
 
 @dataclasses.dataclass
@@ -138,14 +139,6 @@ class ClusterBaseInfo:
     name: str 
     provider: str
 
-@dataclasses.dataclass
-class ClusterInfo(ClusterBaseInfo):
-    num_nodes: int 
-    num_cpu: int 
-    num_gpu: int 
-    # tags from provider.
-    tags: list[str]
-
 class NodeFlags(enum.IntFlag):
     IS_RAFT_NODE = enum.auto()
     IS_COMPUTE_NODE = enum.auto()
@@ -191,6 +184,10 @@ class RaftMgrActions(enum.Enum):
     KILL_ALL = "KILL ALL"
     START_OR_CANCEL = "Start/Cancel"
 
+    PYTORCH_SPY = "PYTORCH_SPY"
+    INTERNAL_DEBUG = "INTERNAL_DEBUG"
+
+
 class GroupSSHStatus(enum.IntEnum):
     HAS_DISCONNECTED = 0
     HAS_RUNNING = 1
@@ -207,6 +204,7 @@ class WorkerSSHStatus:
     status: Literal["running", "idle", "error", "disconnected"]
     last_ts: int 
     exit_code: Optional[int] = None
+    is_paused: bool = False
 
 @dataclasses.dataclass
 class WorkerSelectItem:
@@ -232,6 +230,7 @@ class WorkerUISSHState:
     group_ssh_status: int = int(GroupSSHStatus.HAS_DISCONNECTED)
 
     user_cmd: str = "echo $HOME"
+    num_paused: int = 0
 
 
     @mui.DataModel.mark_pfl_query_func
@@ -255,6 +254,17 @@ class WorkerUISSHState:
         if cur_worker is not None:
             if cur_worker.id != self.id:
                 terminal_is_local = False 
+        worker_select_label = "Workers"
+        if self.num_paused > 0:
+            worker_select_label += " (" + str(self.num_paused) + " paused) "
+        elif self.group_ssh_status == GroupSSHStatus.HAS_DISCONNECTED:
+            worker_select_label += " (disconnected)"
+        elif self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITHOUT_ERROR or self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITH_LAST_ERROR:
+            worker_select_label += " (idle)"
+        elif self.group_ssh_status == GroupSSHStatus.HAS_PARTIAL_RUNNING:
+            worker_select_label += " (running partial)"
+        else:
+            worker_select_label += " (running)"
         return {
             "header": header,
             "connect_info": connect_info,
@@ -263,6 +273,7 @@ class WorkerUISSHState:
             "not_leader_disabled": not is_leader,
             "stop_btn_disabled": is_stop_btn_disabled or not is_leader,
             "terminal_is_local": terminal_is_local,
+            "worker_select_label": worker_select_label
         } 
 
 @dataclasses.dataclass

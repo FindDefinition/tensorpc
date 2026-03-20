@@ -3615,16 +3615,17 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 self._is_remote_mounted = True
                 next_item_task = asyncio.create_task(aiter_remote.__anext__(), name="rcomp-loop-next")
                 shutdown_task = asyncio.create_task(self._shutdown_ev.wait(), name="rcomp-shutdown-wait")
+                global_shutdown_task = asyncio.create_task(prim.get_async_shutdown_event().wait(), name="rcomp-global-shutdown-wait")
                 while True:
                     try:
                         done, pending = await asyncio.wait(
-                            [next_item_task, shutdown_task],
+                            [next_item_task, shutdown_task, global_shutdown_task],
                             return_when=asyncio.FIRST_COMPLETED)
                     except asyncio.CancelledError:
                         await cancel_task(shutdown_task)
                         await cancel_task(next_item_task)
                         break
-                    if shutdown_task in done:
+                    if shutdown_task in done or global_shutdown_task in done:
                         # shutdown
                         for task in pending:
                             task.cancel()

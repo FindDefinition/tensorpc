@@ -55,6 +55,16 @@ class AgentServNames:
         return get_service_key_by_type(NodeMaster, NodeMaster.master_create_group.__name__)
     
     @property
+    def GROUP_TREE_FETCH_PYSPY_INFO(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.tree_fetch_pyspy_info.__name__)
+
+    @property
+    def GROUP_TREE_DO_DEBUG_PANEL_ACTION(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.tree_do_debug_panel_action.__name__)
+
+    @property
     def INTERNAL_GROUP_TREE_CREATE_GROUP(self):
         from tensorpc.apps.cm.node_master import NodeMaster
         return get_service_key_by_type(NodeMaster, NodeMaster.internal_tree_create_group.__name__)

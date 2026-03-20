@@ -159,6 +159,8 @@ class PFLASTType(enum.IntEnum):
     IF_EXP = 0x2C
     SLICE = 0x2D
     TUPLE = 0x2E
+    JOINED_STR = 0x2F
+    FORMATTED_VALUE = 0x30
 
     def __repr__(self):
         if self in _PFLAST_TYPE_TO_STR:
@@ -1966,6 +1968,23 @@ class PFLDict(PFLExpr):
                     return False
         self.st.metadata = res
         return True
+
+@dataclasses.dataclass(kw_only=True)
+class PFLJoinedStr(PFLExpr):
+    values: list[PFLExpr]
+
+    def check_and_infer_type(self):
+        self.st = PFLExprInfo(PFLExprType.STRING)
+
+@dataclasses.dataclass(kw_only=True)
+class PFLFormattedValue(PFLExpr):
+    value: PFLExpr
+    conversion: int
+    format_spec: Union[Undefined, PFLJoinedStr] = undefined
+
+    def check_and_infer_type(self):
+        self.st = PFLExprInfo(PFLExprType.STRING)
+
 
 @dataclasses.dataclass
 class _FuncCompileInfo:

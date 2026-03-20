@@ -31,10 +31,12 @@ import humanize
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
-from ..typedefs import FTState, FTSSHServerArgs, FTStatus, PyspyTraceMode, SSHStatus, CmdStatus, MasterUIState, MasterActions
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_BACKEND, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
+from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState, MasterActions
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 import shlex
+from tensorpc.utils.pyspyutil import PyspyTraceMode
+
 from tensorpc.utils.pyspyutil import get_all_subprocess_traceback_by_pyspy, get_process_traceback_by_pyspy, get_pyspy_style_asyncio_task_traceback, get_torchrun_traceback_by_pyspy
 
 LOGGER = rich_logging.get_logger("distssh")
@@ -171,6 +173,8 @@ class FaultToleranceSSHServer:
             f" export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
             f" export {TENSORPC_ENV_DISTSSH_RANK}={self._cfg.rank}\n",
             f" export {TENSORPC_ENV_DISTSSH_WORLD_SIZE}={self._cfg.world_size}\n",
+            f" export {TENSORPC_ENV_DISTSSH_BACKEND}=distssh\n",
+
         ]
         if self._cfg.env_fwd_re != "":
             # use re to capture env thatt need to forward to ssh

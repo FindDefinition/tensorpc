@@ -28,7 +28,6 @@ class NodeSpec:
 class ClusterSpec:
     id: str 
     name: str 
-    cluster_info: ClusterBaseInfo
     nodes: list[NodeSpec]
     # ssh jumps, we will create ssh tunnels before apply remote object
     # and tensorpc_jump_urls

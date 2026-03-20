@@ -86,7 +86,41 @@ class AsyncGRPCComm(AsyncRPCCommBase):
             else:
                 LOGGER.error(f"RPC to {target_addr} failed with error: {e}")
                 raise
-        
+
+    async def chunked_remote_call(self,
+                          target_addr: str,
+                          key: str,
+                          *args: Any,
+                          rpc_timeout: Optional[int] = None,
+                          rpc_wait_for_ready: bool = False,
+                          **kwargs: Any) -> Any:
+        """Make an asynchronous remote call to the target."""
+        rm_state = await self._get_or_create_remote(target_addr)
+        timeout = rpc_timeout or self._cfg.common_timeout
+        if rm_state.is_down:
+            LOGGER.warning(f"Node {target_addr} is marked as down, skip sending RPC and return TimeoutError immediately.")
+            raise GrpcCommDownError(f"Node {target_addr} is marked as down.")
+        try:
+            ret = await rm_state.robj.chunked_remote_call(key, *args, rpc_timeout=timeout, rpc_wait_for_ready=rpc_wait_for_ready, **kwargs)
+            # reset down count after successful call
+            rm_state.down_count_remain = self._cfg.max_fail_before_mark_down
+            return ret
+        except grpc.aio.AioRpcError as e:
+            if self._cfg.max_fail_before_mark_down > 0:
+
+                if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                    rm_state.down_count_remain -= 1
+                    LOGGER.warning(f"RPC to {target_addr} timed out. Remaining retries before marking down: {rm_state.down_count_remain}")
+                    raise GrpcCommDownError(f"RPC to {target_addr} timed out.") from e
+                else:
+                    # for other types of gRPC errors, we can choose to not mark the node as down, since it might be a transient error.
+                    LOGGER.error(f"RPC to {target_addr} failed with error: {e}")
+                    # rm_state.down_count_remain -= 1
+                    raise
+            else:
+                LOGGER.error(f"RPC to {target_addr} failed with error: {e}")
+                raise
+
     async def remote_generator(self,
                           target_addr: str,
                           key: str,

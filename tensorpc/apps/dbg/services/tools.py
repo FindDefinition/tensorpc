@@ -394,6 +394,11 @@ class BackgroundDebugTools:
         assert dm.model.bkpt is not None 
         return dm.model.bkpt.frame
 
+    def _has_bkgd_panel_dm_and_app(self):
+        return prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+
     def _get_bkgd_panel_dm_and_app(self):
         obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
@@ -402,6 +407,8 @@ class BackgroundDebugTools:
         return obj.dm, app
 
     def get_cur_debug_info(self):
+        if not self._has_bkgd_panel_dm_and_app():
+            return DebugInfo(self._debug_metric, None, None, self._distributed_meta)
         dm, app = self._get_bkgd_panel_dm_and_app()
         model = dm.model
         frame_info: Optional[DebugFrameInfo] = None

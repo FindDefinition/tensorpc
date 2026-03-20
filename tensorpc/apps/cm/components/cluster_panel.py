@@ -7,7 +7,7 @@ import asyncssh
 import grpc
 
 from tensorpc.apps.cm.manager import ClusterProviderBase, ClusterSpec, NodeSpec
-from tensorpc.apps.cm.coretypes import CM_LOGGER, ClusterBaseInfo, ClusterInfo, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, TaskGroupInfo, WorkerInfo, WorkerUIType
+from tensorpc.apps.cm.coretypes import CM_LOGGER, ClusterBaseInfo, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, TaskGroupInfo, WorkerInfo, WorkerUIType
 from tensorpc.apps.cm.node_master import GroupSpec
 from tensorpc.autossh.core import SSHConnDesc, enter_ssh_jumps
 from tensorpc.core.annolib import Undefined
@@ -23,9 +23,36 @@ import dataclasses as dataclasses_plain
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal
 
 @dataclasses.dataclass
+class NodeInfoInCreate:
+    id: str 
+    name: str
+    num_cpu: int 
+    num_mem_gb: int
+    num_gpu: int
+    num_cpu_remaining: int 
+    num_gpu_remaining: int 
+    num_mem_gb_remaining: int
+    gpu_type: Optional[str] = None
+
+@dataclasses.dataclass
+class GPUInfo:
+    id: str 
+    label: str
+
+@dataclasses.dataclass
+class ClusterInfo(ClusterBaseInfo):
+    num_nodes: int 
+    num_cpu: int 
+    num_gpu: int 
+    # tags from provider.
+    tags: list[mui.ChipGroupItem]
+    all_gpu_infos: list[GPUInfo]
+
+@dataclasses.dataclass
 class ClusterRuntimeInfo(ClusterInfo):
     num_cpu_remaining: int 
     num_gpu_remaining: int 
+    node_create_infos: list[NodeInfoInCreate]
 
 @dataclasses.dataclass
 class ClusterPanelState:
@@ -39,14 +66,78 @@ class GroupCreateModel:
     num_cpus_per_node: int
     num_gpus_per_node: int
 
+class GroupCard(mui.Paper):
+    def __init__(self, group_info_draft: TaskGroupInfo, on_delete_group: Callable[[mui.Event], mui.CORO_ANY]):
+        header_draft = D.literal_val("%s @ %s") % (group_info_draft.group_name, group_info_draft.cluster_name)
+        self.header = mui.HBox([
+            mui.FlexBox([
+                mui.Typography().prop(variant="body2", value=header_draft, 
+                    textOverflow="ellipsis", overflow="hidden", 
+                    whiteSpace="nowrap"),
+            ]).prop(flex=1, minWidth=0),
+            mui.Typography().prop(variant="caption", value=group_info_draft.status, muiColor=group_info_draft.color),
+        ]).prop(takeDragRef=True, cursor="move", alignItems="baseline", minWidth=0)
+        cluster_info_draft = (group_info_draft.num_nodes, group_info_draft.num_cpu, group_info_draft.num_gpu)
+        # card get bigger when hover
+        tags_chip = mui.Chip("tag").prop(muiColor="success",
+                                        size="small",
+                                        clickable=False,
+                                        items=group_info_draft.tags)
+        delete_btn = mui.IconButton(mui.IconType.Delete)
+        delete_btn.prop(size="small", tooltip="Delete Task Group", 
+                confirmTitle="Are you sure to delete this task group?", confirmMessage="This action cannot be undone.")
+        delete_btn.event_click.on_standard(on_delete_group)
+        self.dragable_box = mui.HBox([
+            mui.VBox([
+                self.header,
+                mui.HDivider(),
+                mui.Markdown("").prop(value=D.literal_val("`%s` Nodes, `%d` CPUs, `%d` GPUs") % cluster_info_draft),
+                mui.HDivider(),
+                tags_chip,
+            ]).prop(flex=1, minWidth=0),
+            mui.VDivider(),
+            delete_btn,
+        ])
+        self.dragable_box.prop(draggable=True, flex=1, dragInChild=True, dragType="ClusterPanelTaskGroup", 
+            dragData=group_info_draft.dragData, minWidth=0)
+        super().__init__([
+            self.dragable_box,
+        ])
+        self.prop(display="flex", flexDirection="column", padding="5px", margin="5px", elevation=4, minWidth=0)
+
+class ClusterCard(mui.Paper):
+    def __init__(self, cluster_draft: ClusterRuntimeInfo):
+        header_draft = D.literal_val("%s @ %s") % (cluster_draft.name, cluster_draft.provider)
+        cluster_info_draft = (
+            cluster_draft.num_nodes, 
+            cluster_draft.num_cpu_remaining, cluster_draft.num_cpu,
+            cluster_draft.num_gpu_remaining, cluster_draft.num_gpu,
+        )
+        # card get bigger when hover
+        tags_chip = mui.Chip("tag").prop(muiColor="success",
+                                        size="small",
+                                        clickable=False,
+                                        items=cluster_draft.tags)
+        super().__init__([
+            mui.FlexBox([
+                mui.Typography().prop(variant="body2", value=header_draft, 
+                    textOverflow="ellipsis", 
+                    overflow="hidden", 
+                    whiteSpace="nowrap"),
+            ]).prop(flex=1, minWidth=0),
+            mui.HDivider(),
+            mui.Markdown("").prop(value=D.literal_val("`%d` Nodes, `%d/%d` CPUs, `%d/%d` GPUs") % cluster_info_draft),
+            mui.HDivider(),
+            tags_chip,
+        ])
+        self.prop(display="flex", flexDirection="column", padding="5px", margin="5px", elevation=4, minWidth=0)
+
 
 class GroupCreateDialog(mui.Dialog):
     def __init__(self, draft: ClusterPanelState, callback: Optional[Callable[[mui.DialogCloseEvent], mui.CORO_NONE]] = None):
         cluster = mui.Autocomplete("Clusters", []).prop(textFieldProps=mui.TextFieldProps(muiMargin="dense"),
                                                            size="small", labelKey="id")
         self._cluster_select = cluster
-        cluster_info_draft = (draft.cur_cluster.num_cpu_remaining, draft.cur_cluster.num_cpu, draft.cur_cluster.num_gpu_remaining, draft.cur_cluster.num_gpu)
-
         cluster.bind_draft_change(draft.cur_cluster)
         cluster.bind_fields(options=draft.clusters)
         # cluster_name_draft = D.literal_val("Create Group in %s (%s)") % (draft.cur_cluster.name, draft.cur_cluster.provider)
@@ -55,19 +146,18 @@ class GroupCreateDialog(mui.Dialog):
         num_gpu_per_node = mui.NumberField(0, 8, 1, init_value=0).prop(label="Num GPUs", size="small")
         group_name = mui.TextField("Group Name").prop(size="small")
         workdir = mui.TextField("Work Dir").prop(size="small")
-
+        gpu_select = mui.MultipleAutocomplete("GPU Types", []).prop(options=draft.cur_cluster.all_gpu_infos)
         self.num_nodes_field = num_nodes_field
         self.num_gpu_per_node = num_gpu_per_node
         self.group_name = group_name
+        self.gpu_select = gpu_select
 
         super().__init__([
+            mui.Typography("Create Task Group").prop(variant="h5", alignSelf="center"),
             mui.VBox([
                 mui.Markdown(":red[*]Select Cluster"),
                 self._cluster_select.prop(flex=1),
-                mui.Typography("").prop(variant="body2", value=D.not_null(draft.cur_cluster.provider, "Select one cluster"), muiColor=D.where(draft.cur_cluster.provider == None, "error", "inherit")),
-                mui.Markdown("").prop(value=D.literal_val("`%d/%d` CPUs, `%d/%d` GPUs") % cluster_info_draft),
-            
-
+                mui.MatchCase.binary_selection(True, ClusterCard(draft.cur_cluster)).prop(condition=draft.cur_cluster != None),
             ]),
             mui.VBox([
                 mui.Markdown(":red[*]Group Name"),
@@ -79,8 +169,8 @@ class GroupCreateDialog(mui.Dialog):
                 mui.HBox([
                     num_nodes_field.prop(flex=1),
                     num_gpu_per_node.prop(flex=1),
+                    gpu_select.prop(flex=1)
                 ]).prop(margin="10px 0")
-
             ]),
             mui.VBox([
                 mui.HBox([
@@ -132,42 +222,6 @@ class NodeCreateDialog(mui.Dialog):
         await self.provider_ui_box.set_new_layout([])
         return provider_ui
 
-class GroupCard(mui.Paper):
-    def __init__(self, group_info_draft: TaskGroupInfo, on_delete_group: Callable[[mui.Event], mui.CORO_ANY]):
-        header_draft = D.literal_val("%s @ %s") % (group_info_draft.group_name, group_info_draft.cluster_name)
-        self.header = mui.HBox([
-            mui.FlexBox([
-                mui.Typography().prop(variant="body1", value=header_draft, textOverflow="ellipsis", overflow="hidden", whiteSpace="nowrap", ),
-            ]).prop(flex=1, minWidth=0),
-            mui.Typography().prop(variant="caption", value=group_info_draft.status, muiColor=group_info_draft.color),
-        ]).prop(takeDragRef=True, cursor="move", alignItems="baseline", minWidth=0)
-        cluster_info_draft = (group_info_draft.num_nodes, group_info_draft.num_cpu, group_info_draft.num_gpu)
-        # card get bigger when hover
-        tags_chip = mui.Chip("tag").prop(muiColor="success",
-                                        size="small",
-                                        clickable=False,
-                                        items=group_info_draft.tags)
-        delete_btn = mui.IconButton(mui.IconType.Delete)
-        delete_btn.prop(size="small", tooltip="Delete Task Group", 
-                confirmTitle="Are you sure to delete this task group?", confirmMessage="This action cannot be undone.")
-        delete_btn.event_click.on_standard(on_delete_group)
-        self.dragable_box = mui.HBox([
-            mui.VBox([
-                self.header,
-                mui.HDivider(),
-                mui.Markdown("").prop(value=D.literal_val("`%s` Nodes, `%d` CPUs, `%d` GPUs") % cluster_info_draft),
-                mui.HDivider(),
-                tags_chip,
-            ]).prop(flex=1, minWidth=0),
-            mui.VDivider(),
-            delete_btn,
-        ])
-        self.dragable_box.prop(draggable=True, flex=1, dragInChild=True, dragType="ClusterPanelTaskGroup", 
-            dragData=group_info_draft.dragData, minWidth=0)
-        super().__init__([
-            self.dragable_box,
-        ])
-        self.prop(display="flex", flexDirection="column", padding="5px", margin="5px", elevation=4, minWidth=0)
 
 class GroupRemoteLayout(mui.DockViewLayout):
 
@@ -302,15 +356,47 @@ class ClusterBackendState:
     def get_cluster_runtime_info(self):
         num_cpus = 0
         num_gpus = 0
+        tags: list[mui.ChipGroupItem] = []
+        all_gpu_types: dict[str, int] = {}
+        gpu_tags: list[mui.ChipGroupItem] = []
+        # original_tags = self.cluster_spec.cluster_info
+        node_create_infos: list[NodeInfoInCreate] = []
         for node in self.nodes.values():
             num_cpus += node.node_spec.resource_spec.num_cpu
             num_gpus += node.node_spec.resource_spec.num_gpu
+            gpu_type = node.node_spec.resource_spec.gpu_type
+
+            if gpu_type is not None:
+                if gpu_type not in all_gpu_types:
+                    all_gpu_types[gpu_type] = 0
+                all_gpu_types[gpu_type] += 1
+                # gpu_tags.append(mui.ChipGroupItem(label=gpu_type))
+            node_create_infos.append(NodeInfoInCreate(
+                id=node.node_spec.id,
+                name=node.node_spec.local_url_with_port,
+                num_cpu=node.node_spec.resource_spec.num_cpu,
+                num_gpu=node.node_spec.resource_spec.num_gpu,
+                num_mem_gb=node.node_spec.resource_spec.num_mem_gb,
+                num_cpu_remaining=node.get_remain_resource().num_cpu,
+                num_gpu_remaining=node.get_remain_resource().num_gpu,
+                num_mem_gb_remaining=node.get_remain_resource().num_mem_gb,
+                gpu_type=node.node_spec.resource_spec.gpu_type,
+            ))
+        if not all_gpu_types:
+            tags.append(mui.ChipGroupItem(label="CPU Only"))
+        else:
+            for gpu_type, cnt in all_gpu_types.items():
+                gpu_tags.append(mui.ChipGroupItem(label=f"{cnt} * {gpu_type}"))
+            tags.extend(gpu_tags)
+        # unique tags by label
+        tags = list({tag.label: tag for tag in tags}.values())
         num_cpus_remaining = num_cpus
         num_gpus_remaining = num_gpus
         for node in self.nodes.values():
             for group_info in node.group_infos.values():
                 num_cpus_remaining -= group_info.info.num_cpu
                 num_gpus_remaining -= group_info.info.num_gpu
+        gpu_infos = [GPUInfo(id=gpu_type, label=gpu_type) for gpu_type in all_gpu_types]
         return ClusterRuntimeInfo(
             id=self.info.id,
             provider=self.info.provider,
@@ -320,7 +406,9 @@ class ClusterBackendState:
             num_gpu=num_gpus,
             num_cpu_remaining=num_cpus_remaining,
             num_gpu_remaining=num_gpus_remaining,
-            tags=[],
+            tags=tags,
+            node_create_infos=node_create_infos,
+            all_gpu_infos=gpu_infos,
         )
 
 
@@ -359,14 +447,15 @@ class ClusterManagePanel(mui.FlexBox):
         self.dm = mui.DataModel(state, [])
         draft = self.dm.get_draft()
         draft_for_group = mui.DataModel.get_draft_external_type(TaskGroupInfo)
+        draft_for_cluster = mui.DataModel.get_draft_external_type(ClusterRuntimeInfo)
         self._remote_layout = GroupRemoteLayout()
         group_panel = mui.VBox([
-            self._group_dialog_container,
-            self._create_dialog,
             mui.DataFlexBox(GroupCard(draft_for_group, self._handle_delete_task_group))
                 .prop(flex=1, overflowY="auto", minWidth=0, dataList=draft.task_groups, flexDirection="column")
         ]).prop(width="100%", height="100%", overflow="hidden", minWidth=0)
         cluster_info_panel = mui.VBox([
+            mui.DataFlexBox(ClusterCard(draft_for_cluster))
+                .prop(flex=1, overflowY="auto", minWidth=0, dataList=draft.clusters, flexDirection="column")
         ]).prop(width="100%", height="100%", overflow="hidden")
         tab_defs = [
             mui.TabDef("",
@@ -382,15 +471,22 @@ class ClusterManagePanel(mui.FlexBox):
 
         ]
 
-        self._tabs = mui.Tabs(tab_defs, init_value="group").prop(panelProps=mui.FlexBoxProps(
-                                  height="100%", padding=0, minWidth=0,),
-                                                  orientation="horizontal",
-                                                  borderBottom=1,
-                                                  flex=1,
-                                                  borderColor='divider',
-                                                  # overflow="hidden",
-                                                  tooltipPlacement="top")
+        self._tabs = mui.Tabs(tab_defs, init_value="group", after=[
+            mui.HBox([]).prop(flex=1),
+            mui.Markdown().prop(alignSelf="flex-end", value=D.literal_val("`%s` Clusters") % (D.length(draft.clusters)))
+        ])
+        self._tabs.prop(panelProps=mui.FlexBoxProps(height="100%", padding=0, minWidth=0,),
+                        orientation="horizontal",
+                        borderBottom=1,
+                        flex=1,
+                        borderColor='divider',
+                        # overflow="hidden",
+                        display="flex",
+                        tooltipPlacement="top")
         ctrl_panel = mui.ThemeProvider([
+            self._group_dialog_container,
+            self._create_dialog,
+
             mui.VBox([
 
                 mui.HBox([
@@ -554,7 +650,12 @@ class ClusterManagePanel(mui.FlexBox):
         cluster_states: dict[str, ClusterBackendState] = {}
         for provider_key, cspecs in self._provider_to_clusters.items():
             for cspec in cspecs:
-                state = ClusterBackendState(cspec.cluster_info, nodes={}, groups={}, cluster_spec=cspec)
+                cluster_info = ClusterBaseInfo(
+                    id=cspec.id,
+                    provider=provider_key,
+                    name=cspec.name,
+                )
+                state = ClusterBackendState(cluster_info, nodes={}, groups={}, cluster_spec=cspec)
                 for node in cspec.nodes:
                     state.nodes[node.id] = NodeRuntimeInfo(node_spec=node, group_infos={})
                 cluster_states[cspec.id] = state
@@ -770,6 +871,7 @@ class ClusterManagePanel(mui.FlexBox):
         num_nodes = int(num_nodes)
         cur_cluster_state = self._cluster_states[cur_cluster.id]
         group_name = dialog.group_name.value
+        gpu_select = dialog.gpu_select.value
         assert group_name not in cur_cluster_state.groups, f"group name {group_name} already exists in cluster {cur_cluster.name}"
         assert num_nodes <= len(cur_cluster_state.nodes), f"num nodes exceed cluster capacity {len(cur_cluster_state.nodes)}"
         rank_cnt = 0
@@ -777,11 +879,16 @@ class ClusterManagePanel(mui.FlexBox):
         # TODO currently we use compute nodes as raft nodes.
         first_raft_info: Optional[NodeRuntimeInfo] = None
         raft_peer_infos: list[PeerInfo] = []
+        allowed_gpu_types = set()
+        for gpu_type in gpu_select:
+            allowed_gpu_types.add(gpu_type["id"])
         for node_info in cur_cluster_state.nodes.values():
             if len(compute_node_infos) >= num_nodes:
                 break 
             remain_rc = node_info.get_remain_resource()
             if not remain_rc.is_sufficient_for(cur_rc):
+                continue
+            if remain_rc.gpu_type is not None and allowed_gpu_types and remain_rc.gpu_type not in allowed_gpu_types:
                 continue
             worker_info = node_info.get_worker_info(rank_cnt, cur_rc)
             compute_node_infos.append(worker_info)
@@ -792,7 +899,9 @@ class ClusterManagePanel(mui.FlexBox):
                 raft_peer_infos.append(worker_info.peer_info)
         assert first_raft_info is not None
         if len(compute_node_infos) < num_nodes:
-            CM_LOGGER.error(f"not enough resource to create group, required {num_nodes} nodes with {cur_rc}, but only found {len(compute_node_infos)}")
+            CM_LOGGER.error("not enough resource to create group, "
+                f"required {num_nodes} nodes with {cur_rc} and GPU {allowed_gpu_types}, "
+                f"but only found {len(compute_node_infos)}")
             return
         self_uid = raft_peer_infos[0].uid
         kwargs = {

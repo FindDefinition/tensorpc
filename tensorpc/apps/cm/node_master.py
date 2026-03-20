@@ -3,6 +3,7 @@ import abc
 import asyncio
 import enum
 from functools import partial
+import os
 from typing import TYPE_CHECKING, Any, Coroutine, Generic, Optional, TypeVar, Union
 
 from tensorpc.apps.cm.worker import A2AStateMachine, NodeFlags, GroupNodeSpec, SSHA2AWorker, SSHWorkerConfig
@@ -22,8 +23,10 @@ from tensorpc.core.distributed.raft import (
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.dock.serv_names import serv_names as app_serv_names
+from tensorpc.utils.pyspyutil import PyspyTraceMode
 from .coretypes import CMNodeManagerArgs, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, UserCmd, WorkerInfo, CM_LOGGER, WorkerSSHStatus
 from .serv_names import master_serv_names
+from tensorpc.utils.pyspyutil import fetch_pyspy_info, get_all_subprocess_traceback_by_pyspy, get_process_traceback_by_pyspy, get_pyspy_style_asyncio_task_traceback, get_torchrun_traceback_by_pyspy
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance as StandardDataclass
@@ -38,7 +41,6 @@ class GroupSpec:
     # for ClusterManagePanel only, store frontend info index.
     index: int = -1
     status: int = int(GroupSSHStatus.UNKNOWN)
-
 
 class GroupInstance:
 
@@ -83,6 +85,8 @@ class NodeMaster:
             cfg=worker_cfg,
             resource_info=resource_info,
             propose_fn=partial(self.propose, group_id),
+            debug_panel_fn=partial(self.master_debug_panel_action, group_id),
+            fetch_pyspy_info_fn=partial(self.master_fetch_pyspy_info, group_id),
         )
         async with self._lock:
             await worker.start()
@@ -102,6 +106,18 @@ class NodeMaster:
             )
             self._groups[group_id] = group
 
+    def _next_scan_partition(self, self_worker_info: Optional[WorkerInfo], all_worker_infos: list[WorkerInfo], num_partition: int) -> tuple[list[WorkerInfo], list[list[WorkerInfo]]]:
+        if self_worker_info is not None:
+            all_worker_infos = [w for w in all_worker_infos if w.peer_info.uid != self_worker_info.peer_info.uid]
+        if not all_worker_infos:
+            return [], []
+        # remove self from all_node_urls
+        # pick num_partition childs, call tree_scan on each child, and aggregate results.
+        next_scan_masters = all_worker_infos[:num_partition]
+        next_scan_partitions: list[list[WorkerInfo]] = [[] for _ in range(num_partition)]
+        for i, url in enumerate(all_worker_infos[num_partition:]):
+            next_scan_partitions[i % num_partition].append(url)
+        return next_scan_masters, next_scan_partitions
 
     async def internal_tree_create_group(
         self, group_id: str, world_size: int, self_worker_info: Optional[WorkerInfo], 
@@ -113,22 +129,15 @@ class NodeMaster:
         if scan_comm is None:
             scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
         try:
-            self_uid: Optional[str] = None 
             if self_worker_info is not None:
-                self_uid = self_worker_info.peer_info.uid
                 await self.internal_create_group(
                     group_id, self_worker_info.rank, world_size, 
                     self_worker_info.peer_info, raft_node_infos, worker_cfg, 
                     self_worker_info.resource,
                 )
-            remain_worker_infos = [node_info for node_info in compute_node_infos if node_info.peer_info.uid != self_uid]
-            if not remain_worker_infos:
-                return 
-            # pick num_partition childs, call tree_scan on each child, and aggregate results.
-            next_scan_masters = remain_worker_infos[:num_partition]
-            next_scan_partitions = [[] for _ in range(num_partition)]
-            for i, info in enumerate(remain_worker_infos[num_partition:]):
-                next_scan_partitions[i % num_partition].append(info)
+            next_scan_masters, next_scan_partitions = self._next_scan_partition(self_worker_info, compute_node_infos, num_partition)
+            if not next_scan_masters:
+                return
             remote_call_coros: list[Coroutine[None, None, Any]] = []
             for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
                 kwargs = {
@@ -365,15 +374,10 @@ class NodeMaster:
         group = self._groups[group_id]
         try:
             group.worker.awake_leader_observe_loop()
-            if not worker_infos:
+            next_scan_masters, next_scan_partitions = self._next_scan_partition(self_worker_info, worker_infos, num_partition)
+            if not next_scan_masters:
                 return
-            all_worker_infos = [x for x in worker_infos if x.uid != self_worker_info.uid]
-            # remove self from all_node_urls
-            # pick num_partition childs, call tree_scan on each child, and aggregate results.
-            next_scan_masters = all_worker_infos[:num_partition]
-            next_scan_partitions: list[list[WorkerInfo]] = [[] for _ in range(num_partition)]
-            for i, url in enumerate(all_worker_infos[num_partition:]):
-                next_scan_partitions[i % num_partition].append(url)
+
             remote_call_coros: list[Coroutine[None, None, dict[str, GroupSpec]]] = []
             for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
                 remote_call_coros.append(scan_comm.remote_call(scan_master.peer_info.url, 
@@ -411,6 +415,15 @@ class NodeMaster:
         group = self._groups[group_id]
         return await group.worker.handle_worker_heartbeat(worker_peer_info, rank, ssh_status)
 
+    def _get_group_compute_worker_infos(self, group_id: str) -> list[WorkerInfo]:
+        group = self._groups[group_id]
+        worker_states = group.worker.get_all_worker_states()
+        return [w["worker_info"] for w in worker_states]
+
+    def _get_group_raft_worker_infos(self, group_id: str) -> list[WorkerInfo]:
+        group = self._groups[group_id]
+        return [WorkerInfo(p, -1) for p in group.worker.get_all_raft_infos()]
+
     async def propose(
         self, group_id: str, cmd: UserCmd, sync_all_workers: bool = False,
         run_iff_num_worker: Optional[int] = None,
@@ -437,3 +450,103 @@ class NodeMaster:
     async def _on_exit(self):
         for group in self._groups.values():
             await group.worker.stop()
+    
+    async def tree_fetch_pyspy_info(self, group_id: str, mode: PyspyTraceMode, 
+        self_worker_info: Optional[WorkerInfo], 
+        worker_infos: list[WorkerInfo], num_partition: int,
+        scan_comm: Optional[AsyncGRPCComm] = None):
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            final_res: dict[tuple[int, str], Any] = {}
+            if self_worker_info is not None:
+                self_res = await self._fetch_pyspy_info(group_id, mode)
+                final_res[(self_worker_info.rank, self_worker_info.peer_info.uid)] = self_res
+            next_scan_masters, next_scan_partitions = self._next_scan_partition(self_worker_info, worker_infos, num_partition)
+            if not next_scan_masters:
+                return final_res
+
+            remote_call_coros: list[Coroutine[None, None, dict[tuple[int, str], Any]]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                remote_call_coros.append(scan_comm.chunked_remote_call(scan_master.peer_info.url, 
+                    master_serv_names.GROUP_TREE_FETCH_PYSPY_INFO, group_id, mode,
+                    scan_master, scan_partition, num_partition))
+            remote_call_results = await asyncio.gather(*remote_call_coros)
+            for r in remote_call_results:
+                final_res.update(r)
+            return final_res
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
+        
+    async def _fetch_pyspy_info(self, group_id: str, mode: PyspyTraceMode):
+        if mode == PyspyTraceMode.SERVER_PROCESS or mode == PyspyTraceMode.LOCAL_AIO_TASKS:
+            pid = None 
+        else:
+            group = self._groups[group_id]
+            state = group.worker.get_terminal().get_current_state()
+            assert state is not None 
+            pid = state.pid
+        try:
+            return await fetch_pyspy_info(mode, parent_pid=pid)
+        except:
+            CM_LOGGER.exception("get torchrun traceback failed", exc_info=True)
+            return {}
+
+    async def master_fetch_pyspy_info(self, group_id: str, mode: PyspyTraceMode, is_compute: bool):
+        group = self._groups[group_id]
+        res: dict[tuple[int, int], Any] = {}
+        if mode == PyspyTraceMode.PYTORCH_DISTRIBUTED:
+            if is_compute:
+                worker_infos = self._get_group_compute_worker_infos(group_id)
+            else:
+                worker_infos = self._get_group_raft_worker_infos(group_id)
+            return await self.tree_fetch_pyspy_info(group_id, mode, group.worker.get_worker_info(), worker_infos, num_partition=8)
+        root_pyspy_info = await self._fetch_pyspy_info(group_id, mode)
+        for v in root_pyspy_info.values():
+            for pid, info in v.items():
+                res[(group.worker.get_worker_info().rank, pid)] = info
+        return res 
+
+    async def _debug_panel_actions(self, group_id: str, key: str, *args: Any, **kwargs: Any):
+        # pass
+        if group_id not in self._groups:
+            return
+        group = self._groups[group_id]
+        master_panel = group.worker._raft_mgr_panel.debug_panel
+        if master_panel is not None:
+            await master_panel.run_rpc_on_current_processes(key, *args, **kwargs)
+
+    async def master_debug_panel_action(self, group_id: str, key: str, *args: Any, **kwargs: Any):
+        if group_id not in self._groups:
+            return
+        group = self._groups[group_id]
+        self_worker_info = group.worker.get_worker_info()
+        worker_infos = self._get_group_compute_worker_infos(group_id)
+        await self.tree_do_debug_panel_action(group_id, key, args, kwargs, self_worker_info, worker_infos, num_partition=8)
+
+    async def tree_do_debug_panel_action(self, group_id: str, 
+            key: str, args: Any, kwargs: Any,
+            self_worker_info: Optional[WorkerInfo], 
+            worker_infos: list[WorkerInfo], num_partition: int,
+            scan_comm: Optional[AsyncGRPCComm] = None):
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            if self_worker_info is not None:
+                await self._debug_panel_actions(group_id, key, *args, **kwargs)
+            next_scan_masters, next_scan_partitions = self._next_scan_partition(self_worker_info, worker_infos, num_partition)
+            if not next_scan_masters:
+                return 
+            remote_call_coros: list[Coroutine[None, None, dict[tuple[int, str], Any]]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                remote_call_coros.append(scan_comm.chunked_remote_call(scan_master.peer_info.url, 
+                    master_serv_names.GROUP_TREE_DO_DEBUG_PANEL_ACTION, group_id, key, args, kwargs,
+                    scan_master, scan_partition, num_partition))
+            await asyncio.gather(*remote_call_coros)
+            return
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
