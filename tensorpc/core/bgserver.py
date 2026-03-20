@@ -18,7 +18,6 @@ import atexit
 from tensorpc.core import BUILTIN_SERVICES, BuiltinServiceProcType
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta, ServiceCore
 from tensorpc.compat import InMacOS, InLinux
-from tensorpc.apps.dbg.constants import TENSORPC_DBG_SPLIT
 from tensorpc.utils.proctitle import TensorpcServerProcessMeta, set_tensorpc_server_process_title
 from tensorpc.utils.rich_logging import get_logger 
 

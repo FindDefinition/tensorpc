@@ -22,7 +22,7 @@ from typing import (
     Union,
 )
 
-from black import nullcontext
+from contextlib import nullcontext
 import psutil
 import rich
 from tensorpc.apps.cm.components.raft_mgr_panel import RaftManagerPanel
