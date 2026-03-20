@@ -1952,14 +1952,14 @@ class Component(Generic[T_base_props, T_child]):
         camel name, no conversion provided.
         """
         props = self.get_props_dict()
-        props["status"] = self._flow_comp_status
+        # props["status"] = self._flow_comp_status
         props, und = split_props_to_undefined(props)
         props.update(as_dict_no_undefined(self.__raw_props))
         res = {
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
             "props": props,
-            # "status": self._flow_comp_status,
+            "status": self._flow_comp_status,
         }
         if self._flow_data_model_paths:
             dm_paths_new, dm_paths_new_grouped = self._get_dm_props_for_frontend(self._flow_data_model_paths)
@@ -1992,7 +1992,7 @@ class Component(Generic[T_base_props, T_child]):
             "uid": self._flow_uid_encoded,
             "type": self._flow_comp_type.value,
             "props": props,
-            # "status": self._status.value,
+            "status": self._flow_comp_status,
         }
         return res
 
@@ -2003,7 +2003,8 @@ class Component(Generic[T_base_props, T_child]):
         2. update layout: all component will override props
         by previous sync props
         """
-        return {"status": self._flow_comp_status}
+        return {}
+        # return {"status": self._flow_comp_status}
 
     def get_persist_props(self) -> Optional[dict[str, Any]]:
         return None
@@ -2288,7 +2289,8 @@ class Component(Generic[T_base_props, T_child]):
 
     def _create_update_base_props_event(self, dm_props: Optional[Union[dict[str, Any], Undefined]] = None, 
                 used_events: Optional[Union[list[Any], Undefined]] = None,
-                pfl_library: Optional[Union[bytes, Undefined]] = None):
+                pfl_library: Optional[Union[bytes, Undefined]] = None,
+                status: Optional[int] = None):
         data_no_und = {}
         data_unds = []
         if isinstance(dm_props, Undefined):
@@ -2309,7 +2311,8 @@ class Component(Generic[T_base_props, T_child]):
         else:
             if used_events is not None:
                 data_no_und["pflLibraryBin"] = pfl_library
-
+        if status is not None:
+            data_no_und["status"] = status
         assert self._flow_uid is not None
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, False)
@@ -2662,25 +2665,23 @@ class Component(Generic[T_base_props, T_child]):
     async def sync_status(self,
                           sync_state: bool = False,
                           sent_event: Optional[asyncio.Event] = None):
-        if sync_state:
-            sync_props = self.get_sync_props()
-            if sync_props:
-                ev = self.create_update_event(self.get_sync_props())
-                ev.sent_event = sent_event
-                await self.put_app_event(ev)
-        else:
-            ev = self.create_update_event({"status": self._flow_comp_status})
-            ev.sent_event = sent_event
-            await self.put_app_event(ev)
+        ev = self.get_sync_event(sync_state)
+        ev.sent_event = sent_event
+        await self.put_app_event(ev)
 
     async def sync_state(self, sent_event: Optional[asyncio.Event] = None):
         return await self.sync_status(True, sent_event)
 
     def get_sync_event(self, sync_state: bool = False):
         if sync_state:
-            return self.create_update_event(self.get_sync_props())
+            ev = self._create_update_base_props_event(status=self._flow_comp_status)
+            sync_props = self.get_sync_props()
+            if sync_props:
+                ev += self.create_update_event(sync_props)
+            return ev
         else:
-            return self.create_update_event({"status": self._flow_comp_status})
+            return self._create_update_base_props_event(status=self._flow_comp_status)
+            # return self.create_update_event({"status": self._flow_comp_status})
 
     async def _run_mount_special_methods(self, container_comp: "Component", reload_mgr: Optional[AppReloadManager] = None):
         if reload_mgr is None:

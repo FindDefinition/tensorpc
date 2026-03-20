@@ -488,6 +488,7 @@ class App:
                 state[comp._flow_uid_encoded] = {
                     "type": comp._flow_comp_type.value,
                     "props": comp.get_sync_props(),
+                    "status": comp._flow_comp_status,
                 }
             # user state
             st = comp.get_persist_props()
@@ -520,6 +521,7 @@ class App:
                     comp_to_restore = uid_to_comp[k]
                     if comp_to_restore._flow_comp_type.value == s["type"]:
                         comp_to_restore.set_props(s["props"])
+                        comp_to_restore._flow_comp_status = s["status"]
                         ev += comp_to_restore.get_sync_event(True)
             with _enter_app_conetxt(self):
                 for k, s in userstate.items():
