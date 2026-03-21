@@ -4086,7 +4086,12 @@ class DockViewLayoutProps(ContainerBaseProps):
     # model change save debounce.
     debounce: Union[NumberType, Undefined] = undefined
     allowedDndTypes: Union[list[str], Undefined] = undefined
+    # when you drop a item, we will look for tab name (title) by `dragData[tabNameKey]`
+    # if you provide `tabNameKey`.
     tabNameKey: Union[str, Undefined] = undefined
+    # when you drop a item, we will look for tab id by `dragData[tabIdKey]`
+    # if you provide `tabIdKey`. otherwise use uuidv4 to generate a id.
+    tabIdKey: Union[str, Undefined] = undefined
 
 
 class DockViewLayout(MUIContainerBase[DockViewLayoutProps, MUIComponentType]):

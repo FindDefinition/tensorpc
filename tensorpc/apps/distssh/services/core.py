@@ -31,7 +31,8 @@ import humanize
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_BACKEND, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, )
+from tensorpc.apps.cm.constants import (TENSORPC_ENV_CM_NODEMGR_BACKEND, TENSORPC_ENV_CM_NODEMGR_RANK, TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT, TENSORPC_ENV_CM_NODEMGR_WORKDIR, TENSORPC_ENV_CM_NODEMGR_WORLD_SIZE)
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState, MasterActions
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 import shlex
@@ -169,11 +170,11 @@ class FaultToleranceSSHServer:
     def _get_init_cmds(self):
         workdir_p = Path(self._cfg.workdir).resolve()
         init_cmds = [
-            f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
-            f" export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
-            f" export {TENSORPC_ENV_DISTSSH_RANK}={self._cfg.rank}\n",
-            f" export {TENSORPC_ENV_DISTSSH_WORLD_SIZE}={self._cfg.world_size}\n",
-            f" export {TENSORPC_ENV_DISTSSH_BACKEND}=distssh\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_WORKDIR}={str(workdir_p)}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_RANK}={self._cfg.rank}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_WORLD_SIZE}={self._cfg.world_size}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_BACKEND}=distssh\n",
 
         ]
         if self._cfg.env_fwd_re != "":

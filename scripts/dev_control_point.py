@@ -4,7 +4,7 @@ import os
 import tqdm 
 from torch.distributed.device_mesh import init_device_mesh
 import torch.distributed as dist
-from tensorpc.apps.distssh.pth import pth_control_point
+from tensorpc.apps.distssh.client import pth_control_point
 
 def main():
     world_size_str = os.getenv("WORLD_SIZE")

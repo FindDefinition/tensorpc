@@ -4,9 +4,10 @@ from pathlib import Path
 import sys
 import time
 from typing import Any, Optional, Union
+from tensorpc.apps.cm.coretypes import LeaderUIStateResult
 from tensorpc.apps.collections.shm_kvstore import ShmKVStoreTensorClient, ShmTrOnlyKVStoreTensorClient
 
-from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_BACKEND, TENSORPC_ENV_CM_NODEMGR_GROUP_ID, TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT
 from tensorpc.apps.distssh.typedefs import CheckpointMetadata, CheckpointType
 from tensorpc.core.client import RemoteObject, simple_chunk_call
 from tensorpc import simple_remote_call
@@ -16,8 +17,9 @@ from tensorpc.core.tree_id import UniqueTreeId
 import traceback
 from tensorpc.apps.dbg.bkpt import breakpoint, init, force_stop_trace
 from tensorpc.core.bgserver import BACKGROUND_SERVER
+from tensorpc.apps.cm.coretypes import CM_LOGGER
 
-_DISTSSH_URL = os.getenv(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+_DISTSSH_URL = os.getenv(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
 
 def _get_rank_may_distributed():
     import torch.distributed as dist
@@ -148,20 +150,35 @@ def start_distssh_logging(logdir: str):
 
 def pth_control_point(*, _frame_cnt: int = 2):
     import torch.distributed as dist
-    url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+    url_with_port = os.environ.get(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
     if url_with_port is None:
         raise ValueError("You must use pth_control_point inside distssh.")
     if not dist.is_initialized():
         raise RuntimeError(
             "You must use pth_control_point inside a pytorch distributed process group."
         )
+    backend = os.environ.get(TENSORPC_ENV_CM_NODEMGR_BACKEND)
+
     global_rank = dist.get_rank()
     should_enter_breakpoint = False 
     if global_rank == 0:
         try:
-            should_enter_breakpoint = simple_remote_call(
-                url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".is_user_control_enabled"
-            )
+            if backend == "clustermgr":
+                group_id = os.environ.get(TENSORPC_ENV_CM_NODEMGR_GROUP_ID)
+
+                query_res: LeaderUIStateResult = simple_remote_call(
+                    url_with_port, BuiltinServiceKeys.ClusterNodeManager.value + ".query_leader_ui_state",
+                    group_id,
+                )
+                if not query_res.success:
+                    CM_LOGGER.error("query_leader_ui_state failed, maybe leader not ready?")
+                else:
+                    should_enter_breakpoint = query_res.is_user_control_enabled
+            else:
+                should_enter_breakpoint = simple_remote_call(
+                    url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".is_user_control_enabled"
+                )
+
         except:
             # server may not prepared yet, ignore this control.
             traceback.print_exc()
@@ -198,6 +215,10 @@ class PerfMonitorClient:
 
         self._base_ts = 0
         self._cur_ts = time.time_ns()
+        backend = os.environ.get(TENSORPC_ENV_CM_NODEMGR_BACKEND)
+        self._is_enabled = backend is not None 
+        self._is_clustermgr_backend = backend == "clustermgr"
+        self._group_id = os.environ.get(TENSORPC_ENV_CM_NODEMGR_GROUP_ID)
 
     def _check_valid_name(self, name: str):
         # name must be unique in buffer
@@ -254,7 +275,7 @@ class PerfMonitorClient:
         return
 
     def allgather_set_perf_monitor_data(self, step: int, data: list[dict], scale: Optional[float] = None, metadata: Any = None):
-        url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+        url_with_port = os.environ.get(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
         if url_with_port is None:
             return False
         import torch.distributed as dist
@@ -270,10 +291,21 @@ class PerfMonitorClient:
         metadata_list = [x[1] for x in obj_list]
         if global_rank == 0:
             try:
-                simple_chunk_call(
-                    url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
-                    metadata_list, scale
-                )
+                if self._is_clustermgr_backend:
+                    group_id = os.environ.get(TENSORPC_ENV_CM_NODEMGR_GROUP_ID)
+
+                    query_res: LeaderUIStateResult = simple_chunk_call(
+                        url_with_port, BuiltinServiceKeys.ClusterNodeManager.value + ".set_fast_perf_data",
+                        group_id, step, data_list,
+                        metadata_list, scale
+                    )
+                    if not query_res.success:
+                        CM_LOGGER.error("query_leader_ui_state failed, maybe leader not ready?")
+                else:
+                    simple_chunk_call(
+                        url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".set_perf_data", step, data_list,
+                        metadata_list, scale
+                    )
             except:
                 traceback.print_exc()
                 return 

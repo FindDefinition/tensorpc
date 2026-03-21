@@ -1,5 +1,5 @@
 import fire
-from tensorpc.apps.cm.constants import TENSORPC_APPS_CM_DEFAULT_PORT
+from tensorpc.apps.cm.constants import TENSORPC_CM_NODEMGR_DEFAULT_PORT
 from tensorpc.serve.__main__ import serve_in_terminal
 from tensorpc.core import BuiltinServiceKeys
 
@@ -9,7 +9,7 @@ def main(
     uid: str,
     password: str,
     workdir: str = "",
-    port: int = TENSORPC_APPS_CM_DEFAULT_PORT,
+    port: int = TENSORPC_CM_NODEMGR_DEFAULT_PORT,
     username: str = "root",
     logdir: str = "",
     env_fwd_re: str = "",

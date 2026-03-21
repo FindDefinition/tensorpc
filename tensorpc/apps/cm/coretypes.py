@@ -7,7 +7,7 @@ import enum
 
 from tensorpc.core.distributed.comm.grpcimpl import AsyncGRPCCommConfig
 from tensorpc.utils import rich_logging 
-from tensorpc.core.distributed.raft import PeerInfo, RaftConfig
+from tensorpc.core.distributed.raft import LeaderQueryResultBase, PeerInfo, RaftConfig
 from tensorpc.dock.components import mui
 
 CM_LOGGER = rich_logging.get_logger("tensorpc.apps.cm")
@@ -149,6 +149,10 @@ class GroupNodeSpec:
     peer_info: PeerInfo 
     flags: NodeFlags
     resource: Optional[ResourceInfo] = None
+    # store url from provider in cluster panel.
+    # cluster panel can use this to build a map
+    # between node id in server and node id from provider.
+    url_from_provider: Optional[str] = None
 
 @dataclasses.dataclass
 class TaskGroupInfo:
@@ -231,19 +235,25 @@ class WorkerUISSHState:
 
     user_cmd: str = "echo $HOME"
     num_paused: int = 0
+    is_raft_node: bool = False
+
+    is_user_control_enabled: bool = False
 
 
     @mui.DataModel.mark_pfl_query_func
     def get_common_query(self):
         is_leader = self.id == self.cur_leader_id
-        if is_leader:
-            header = "Raft Leader"
+        connect_info = f"{self.num_connected}/{self.world_size}"
+        if self.is_raft_node:
+            if is_leader:
+                header = "Raft Leader"
+            else:
+                header = "Raft Worker"
+            if self.cur_leader_url is not None and not is_leader:
+                header += f" (leader: {self.cur_leader_url})"
+            header += " - " + connect_info
         else:
-            header = "Raft Worker"
-        if self.cur_leader_url is not None and not is_leader:
-            header += " (leader: " + self.cur_leader_url + ")"
-        connect_info = str(self.num_connected) + "/" + str(self.world_size)
-        header += " - " + connect_info
+            header = "Worker"
         start_or_cancel_btn_icon = mui.IconType.Stop
         is_stop_btn_disabled = False
         if self.can_workers_run_cmd:
@@ -256,7 +266,7 @@ class WorkerUISSHState:
                 terminal_is_local = False 
         worker_select_label = "Workers"
         if self.num_paused > 0:
-            worker_select_label += " (" + str(self.num_paused) + " paused) "
+            worker_select_label += f" ({self.num_paused} paused) "
         elif self.group_ssh_status == GroupSSHStatus.HAS_DISCONNECTED:
             worker_select_label += " (disconnected)"
         elif self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITHOUT_ERROR or self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITH_LAST_ERROR:
@@ -285,3 +295,7 @@ class GroupCoarseStatus:
     group_ssh_status: int = int(GroupSSHStatus.HAS_DISCONNECTED)
     last_cmd: Optional[UserCmd] = None
     leader_info: Optional[PeerInfo] = None
+
+@dataclasses.dataclass
+class LeaderUIStateResult(LeaderQueryResultBase):
+    is_user_control_enabled: bool = False

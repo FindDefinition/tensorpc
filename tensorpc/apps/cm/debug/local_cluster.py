@@ -61,7 +61,8 @@ class LocalClusterBase:
             )
             group_id = "test-group"
             num_raft = 1
-            compute_node_infos = [WorkerInfo(peer_info=peer_info, rank=i) for i, peer_info in enumerate(peer_infos)]
+            rc = ResourceInfo(num_cpu=32, num_mem_gb=512, num_gpu=8)
+            compute_node_infos = [WorkerInfo(peer_info=peer_info, rank=i, resource=rc) for i, peer_info in enumerate(peer_infos)]
             raft_node_infos = [peer_infos[i] for i in range(num_raft)]
             
             kwargs = {
@@ -146,7 +147,7 @@ class ManagerApp(LocalClusterBase):
             node_spec = NodeSpec(
                 id=peer_info.uid,
                 tags=[],
-                resource_spec=ResourceInfo(num_cpu=1, num_mem_gb=4, num_gpu=0),
+                resource_spec=ResourceInfo(num_cpu=32, num_mem_gb=512, num_gpu=8),
                 local_url_with_port=peer_info.url,
             )
             node_specs.append(node_spec)

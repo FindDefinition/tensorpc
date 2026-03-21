@@ -733,6 +733,9 @@ class PFLParser:
                 value = self._parse_expr_to_pfl(expr.value, scope)
                 format_spec = undefined
                 if expr.format_spec is not None:
+                    assert isinstance(expr.format_spec, ast.JoinedStr)
+                    format_spec_must_be_constant = len(expr.format_spec.values) == 1 and isinstance(expr.format_spec.values[0], ast.Constant) 
+                    assert format_spec_must_be_constant, "only constant format spec is supported for now"
                     format_spec = self._parse_expr_to_pfl(expr.format_spec, scope)
                     assert isinstance(format_spec, PFLJoinedStr)
                 res = PFLFormattedValue(PFLASTType.FORMATTED_VALUE,

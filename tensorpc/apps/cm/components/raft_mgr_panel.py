@@ -30,18 +30,11 @@ class RaftManagerPanel(mui.FlexBox):
                 fetch_pyspy_info_fn: Optional[Callable[[PyspyTraceMode, bool], Awaitable[None]]],
                 draft: WorkerUISSHState, term: Optional[terminal.AsyncSSHTerminal], default_path: str = "default"):
         self._uid = uid
+        self._draft = draft
         self._remote_term_key = UniqueTreeId.from_parts([group_id, WorkerUIType.TERMINAL.value]).uid_encoded
         start_or_cancel_btn = mui.IconButton(
             mui.IconType.PlayArrow, partial(master_action_fn, RaftMgrActions.START_OR_CANCEL)).prop(iconSize="small",
                                                              size="small")
-        stop_btn = mui.IconButton(mui.IconType.Stop, partial(master_action_fn, RaftMgrActions.SHUTDOWN_ALL)).prop(
-            iconSize="small",
-            size="small",
-            muiColor="error",
-            confirmTitle="Dangerous Operation",
-            confirmMessage=
-            "Are you sure to shutdown (ctrl-c->terminate->kill) ALL running process?",
-            tooltip="shutdown command")
         kill_btn = mui.IconButton(mui.IconType.Delete, partial(master_action_fn, RaftMgrActions.KILL_ALL)).prop(
             iconSize="small",
             size="small",
@@ -147,25 +140,32 @@ class RaftManagerPanel(mui.FlexBox):
                     tooltip="Terminal"),
 
         )
-        self.debug_panel: Optional[MasterDebugPanel] = None
-        if debug_panel_fn is not None:
-            # workers can't call distributed debug action.
-            self.debug_panel = MasterDebugPanel(rpc_call_external=debug_panel_fn if is_raft_node else None)
-            tab_defs.append(
-                mui.TabDef("",
-                        "debug",
-                        self.debug_panel.prop(width="100%", height="100%", overflow="hidden"),
-                        icon=mui.IconType.BugReport,
-                        tooltip="Debug Panel"),
-            )
+        # workers can't call distributed debug action.
+        self.debug_panel = MasterDebugPanel(rpc_call_external=debug_panel_fn if is_raft_node else None)
+        tab_defs.append(
+            mui.TabDef("",
+                    "debug",
+                    self.debug_panel.prop(width="100%", height="100%", overflow="hidden"),
+                    icon=mui.IconType.BugReport,
+                    tooltip="Debug Panel"),
+        )
+        control_btn = mui.ToggleButton(icon=mui.IconType.Adb, callback=self._handle_toggle_btn)
+        control_btn.prop(muiColor="success", size="small")
+        control_btn.bind_draft_change(draft.is_user_control_enabled)
+        control_btn_tooltip = mui.TooltipFlexBox("Toggle all pth_control_point in your running program.", [
+            control_btn,
+        ]).prop(enterDelay=400)
 
         before: list[mui.Component] = [header_str]
         if is_raft_node:
             before.append(worker_select.prop(flex=1))
             before.append(start_or_cancel_btn)
-            before.append(stop_btn)
             before.append(kill_btn)
+            before.append(mui.VDivider())
+            before.append(control_btn_tooltip)
             before.append(self._menu,)
+        else:
+            header_str.prop(flex=1)
         before.append(mui.VDivider())
         self._tabs = mui.Tabs(tab_defs, init_value=init_value, before=before)
         self._tabs.prop(panelProps=mui.FlexBoxProps(
@@ -190,7 +190,6 @@ class RaftManagerPanel(mui.FlexBox):
             start_or_cancel_btn.bind_pfl_query(dm, 
                 icon=(WorkerUISSHState.get_common_query, "start_or_cancel_icon"),
                 disabled=(WorkerUISSHState.get_common_query, "not_leader_disabled"))
-            stop_btn.bind_pfl_query(dm, disabled=(WorkerUISSHState.get_common_query, "stop_btn_disabled"))
             kill_btn.bind_pfl_query(dm, disabled=(WorkerUISSHState.get_common_query, "stop_btn_disabled"))
 
             self._code_editor.bind_draft_change_uncontrolled(master_draft.user_cmd)
@@ -281,3 +280,7 @@ class RaftManagerPanel(mui.FlexBox):
                         "frames": [],
                     }
             await self._pyspy_viewer.set_pyspy_raw_data(data_with_str_id)
+
+    async def _handle_toggle_btn(self, enable: bool):
+        if not enable:
+            await self.debug_panel.release_all_breakpoints()

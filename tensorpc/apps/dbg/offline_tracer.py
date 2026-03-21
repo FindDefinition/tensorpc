@@ -1,24 +1,25 @@
 import contextlib
+import os
 from pathlib import Path
 import time
 from typing import Optional, cast
 
 import yaml
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_GROUP_ID
 from tensorpc.apps.dbg.components.dbgpanel import merge_perfetto_trace_results
-from tensorpc.apps.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
+from tensorpc.apps.dbg.tracer import DebugTracerWrapper
 from tensorpc.apps.dbg.bkpt import _get_viztracer, _try_get_distributed_meta
-from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_TRACE_VIEW_KEY,
-                                    TENSORPC_ENV_DBG_ENABLE,
-                                    BreakpointType, TraceLaunchType,
-                                    TracerConfig, TraceResult, TracerType,
-                                    RecordFilterConfig, DebugDistributedInfo,
-                                    LOGGER)
+from tensorpc.apps.dbg.constants import (TracerConfig, TraceResult, TracerType,
+                                    RecordFilterConfig, DebugDistributedInfo)
 import uuid 
 import dataclasses
 import gzip 
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT
+from tensorpc.core.client import simple_chunk_call
 from tensorpc.dock.client import list_all_app_in_machine, list_all_running_apps_in_relay
 from tensorpc.apps.dbg.components.dbgpanel import INIT_YAML_CONFIG
+
+
 @dataclasses.dataclass
 class WrapperTraceResult:
     meta: DebugDistributedInfo
@@ -53,6 +54,14 @@ class WrapperTraceResult:
                 client = meta.create_client()
                 with client:
                     client.app_chunked_remote_call("external_set_perfetto_data", ui_data[0], ui_data[1], "offline_tracer")
+                return 
+            # try cluster manager panel
+            group_id = os.getenv(TENSORPC_ENV_CM_NODEMGR_GROUP_ID, None)
+            if group_id is not None:
+                from tensorpc.apps.cm.serv_names import master_serv_names
+                url = os.getenv(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
+                assert url is not None
+                simple_chunk_call(url, master_serv_names.DEBUG_SET_PERFETTO_DATA, group_id, ui_data[0], ui_data[1], "offline_tracer")
 
     def submit_to_ui(self, via_relay: bool = False):
         # TODO we currently assume ui is in rank 0.

@@ -8,7 +8,7 @@ import grpc
 
 from tensorpc.apps.cm.manager import ClusterProviderBase, ClusterSpec, NodeSpec
 from tensorpc.apps.cm.coretypes import CM_LOGGER, ClusterBaseInfo, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, TaskGroupInfo, WorkerInfo, WorkerUIType
-from tensorpc.apps.cm.node_master import GroupSpec
+from tensorpc.apps.cm.node_master import GroupSpec, ScanGroupResult
 from tensorpc.autossh.core import SSHConnDesc, enter_ssh_jumps
 from tensorpc.core.annolib import Undefined
 from tensorpc.core.asyncclient import AsyncRemoteManager
@@ -275,8 +275,9 @@ class NodeRuntimeInfo:
     group_infos: dict[str, GroupLocalResourceInfo]
 
     def get_worker_info(self, rank: int, resource_info: Optional[ResourceInfo] = None) -> WorkerInfo:
+        uid = self.node_spec.id if self.node_spec.server_id is None else self.node_spec.server_id
         peer_info = PeerInfo(
-            uid=self.node_spec.id,
+            uid=uid,
             url=self.node_spec.local_url_with_port,
         )
         return WorkerInfo(
@@ -690,7 +691,7 @@ class ClusterManagePanel(mui.FlexBox):
         provider_ui = await self._create_dialog.pop_provider_ui()
         assert isinstance(provider_ui, mui.FlexBox)
         await provider.create_nodes(provider_ui)
-        cur_provider_nodes = await provider.discover()
+        cur_provider_nodes = await provider.discover_with_validation()
         await self._update_provider_nodes(provider_key, cur_provider_nodes)
 
     async def _handle_create_nodes(self):
@@ -698,7 +699,7 @@ class ClusterManagePanel(mui.FlexBox):
 
     async def _all_provider_discover(self):
         for provider_key, provider in self.providers.items():
-            nodes = await provider.discover()
+            nodes = await provider.discover_with_validation()
             await self._update_provider_nodes(provider_key, nodes)
 
     async def _sync_to_frontend(self):
@@ -726,7 +727,10 @@ class ClusterManagePanel(mui.FlexBox):
                             if cnode.resource.gpu_type is not None:
                                 num_gpu_types.add(cnode.resource.gpu_type)
                     if not num_gpu_types:
-                        tags.append(mui.ChipGroupItem(label="CPU Only"))
+                        if num_gpu > 0:
+                            tags.append(mui.ChipGroupItem(label="Unknown GPU"))
+                        else:
+                            tags.append(mui.ChipGroupItem(label="CPU Only"))
                     else:
                         for gpu_type in num_gpu_types:
                             tags.append(mui.ChipGroupItem(label=gpu_type))
@@ -749,7 +753,7 @@ class ClusterManagePanel(mui.FlexBox):
                         cur_cmd="",
                         tags=tags,
                         dragData={
-                            "name": f"{group_id} @ {state.info.name}",
+                            "name": f"{group_id} (ctrl)",
                             "group_id": group_id,
                             "url_with_port": raft_node_spec.local_url_with_port,
                             "ssh_jumps": state.cluster_spec.ssh_jumps,
@@ -769,10 +773,10 @@ class ClusterManagePanel(mui.FlexBox):
             "all_node_urls": all_node_urls,
             "num_partition": 8,
         }
-        group_specs: dict[str, GroupSpec] = await state.cached_chunk_call_async(
+        scan_res: ScanGroupResult = await state.cached_chunk_call_async(
             first_node_spec, master_serv_names.GROUP_TREE_SCAN_GROUPS,  
             rpc_timeout=30, **kwargs)
-        for group_id, group_spec in group_specs.items():
+        for group_id, group_spec in scan_res.group_specs.items():
             for cnode in group_spec.compute_node_specs:
                 node_id = cnode.peer_info.uid
                 if node_id not in nodes_dict:
@@ -786,7 +790,7 @@ class ClusterManagePanel(mui.FlexBox):
                 ginfo = GroupLocalResourceInfo(
                     group_id=group_id, info=resource)
                 rt_info.group_infos[group_id] = ginfo
-        return group_specs
+        return scan_res
 
     async def _delete_group(self, cluster_id: str, group_id: str):
         cluster_state = self._cluster_states[cluster_id]
@@ -834,8 +838,19 @@ class ClusterManagePanel(mui.FlexBox):
         for cid, state in cluster_states.items():
             if not state.nodes:
                 continue 
-            group_specs = await self._scan_group_update(state, state.nodes)
-            cluster_groups[cid] = group_specs
+            state_nodes_url_to_node = {node.node_spec.local_url_with_port: node for node in state.nodes.values()}
+            scan_res = await self._scan_group_update(state, state.nodes)
+            server_ids_uniq_set: set[str] = set()
+            for server_id in scan_res.user_url_to_sever_ids.values():
+                if server_id in server_ids_uniq_set:
+                    # TODO this means invalid server configuration. should we remove invalid nodes?
+                    CM_LOGGER.error(f"Duplicate server id {server_id} found in cluster {cid} group scan result.")
+                server_ids_uniq_set.add(server_id)
+            for client_url, server_id in scan_res.user_url_to_sever_ids.items():
+                assert client_url in state_nodes_url_to_node, f"client url {client_url} not found in cluster nodes for cluster {cid}"
+                node = state_nodes_url_to_node[client_url]
+                node.node_spec.server_id = server_id
+            cluster_groups[cid] = scan_res.group_specs
         return cluster_groups
 
     async def _handle_create_task_group(self):

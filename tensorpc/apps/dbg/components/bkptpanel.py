@@ -8,7 +8,7 @@ from pathlib import Path
 from time import sleep
 from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
-from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_WORKDIR
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_WORKDIR
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import inspecttools
 from tensorpc.apps.dbg.core.frame_id import get_frame_uid
@@ -259,7 +259,7 @@ class BreakpointDebugPanel(mui.FlexBox):
             count -= 1
         assert cur_frame is not None
         frame_uid, frame_meta = get_frame_uid(cur_frame)
-        distssh_workdir = os.getenv(TENSORPC_ENV_DISTSSH_WORKDIR)
+        distssh_workdir = os.getenv(TENSORPC_ENV_CM_NODEMGR_WORKDIR)
         btn = mui.IconButton(mui.IconType.PlayArrow).prop(
             progressColor="primary", muiColor="secondary",
             tooltip="Run Distributed")

@@ -14,7 +14,7 @@ import torch.distributed as dist
 from torch.utils import _pytree as pytree
 
 from tensorpc.apps.distssh.client import TorchDistributedCkptClient, pth_control_point, PerfMonitorClient
-from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT
 import tensorpc 
 def distributed_is_initialized():
     if distributed.is_available():
@@ -231,7 +231,7 @@ class Trainer(object):
         self.device = device
 
     def fit(self, epochs):
-        distssh_url = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+        distssh_url = os.environ.get(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
         assert distssh_url is not None 
         with tensorpc.RemoteManager(distssh_url) as robj:
             ckpt_client = TorchDistributedCkptClient(robj, 4, 4, -1)

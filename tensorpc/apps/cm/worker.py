@@ -26,6 +26,7 @@ from contextlib import nullcontext
 import psutil
 import rich
 from tensorpc.apps.cm.components.raft_mgr_panel import RaftManagerPanel
+from tensorpc.apps.cm.constants import TENSORPC_ENV_CM_NODEMGR_GROUP_ID
 from tensorpc.apps.cm.coretypes import (
     CM_LOGGER,
     GroupSSHStatus,
@@ -66,11 +67,11 @@ from tensorpc.core.distributed.raft import (
     RequestVoteResponse,
     StateMachine,
 )
-from tensorpc.apps.distssh.constants import (
-    TENSORPC_ENV_DISTSSH_RANK,
-    TENSORPC_ENV_DISTSSH_WORLD_SIZE,
-    TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
-    TENSORPC_ENV_DISTSSH_BACKEND
+from tensorpc.apps.cm.constants import (
+    TENSORPC_ENV_CM_NODEMGR_RANK,
+    TENSORPC_ENV_CM_NODEMGR_WORLD_SIZE,
+    TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT,
+    TENSORPC_ENV_CM_NODEMGR_BACKEND
 )
 from tensorpc.dock.components import mui
 from tensorpc.autossh.core import (
@@ -361,6 +362,7 @@ class SSHA2AWorker:
             world_size=self._world_size,
             num_connected=0,
             ssh_status=WorkerSSHStatus(status="idle", last_ts=0),
+            is_raft_node=self._is_raft_worker,
         )
         self.ssh_dm = mui.DataModel(ui_state, [])
         draft = self.ssh_dm.get_draft()
@@ -567,6 +569,10 @@ class SSHA2AWorker:
             CM_LOGGER.error("Failed to propose cmd. usually due to raft group not ready.")
             return 
 
+    @property 
+    def comm(self):
+        return self._comm
+
     def get_all_worker_states(self):
         assert (
             self._is_raft_worker
@@ -587,6 +593,17 @@ class SSHA2AWorker:
             peer_info=self._peer_info, rank=self._rank, resource=self._resource_info
         )
 
+    def is_raft_leader(self) -> bool:
+        return self._is_raft_worker and self._raft_node is not None and self._raft_node.role == RaftRole.LEADER
+
+    def get_leader_info(self) -> Optional[PeerInfo]:
+        if self._raft_node is not None:
+            return self._raft_node.get_leader_peer_info()
+        else:
+            # we always put leader to first of the raft list based on
+            # leader rpc result.
+            return self._cur_raft_infos[0]
+
     def get_node_spec(self) -> GroupNodeSpec:
         flags = NodeFlags(0)
         if self._is_raft_worker:
@@ -601,10 +618,11 @@ class SSHA2AWorker:
 
     def _get_init_cmds(self):
         init_cmds = [
-            f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
-            f" export {TENSORPC_ENV_DISTSSH_RANK}={self._rank}\n",
-            f" export {TENSORPC_ENV_DISTSSH_WORLD_SIZE}={self._world_size}\n",
-            f" export {TENSORPC_ENV_DISTSSH_BACKEND}=clustermgr\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_RANK}={self._rank}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_WORLD_SIZE}={self._world_size}\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_BACKEND}=clustermgr\n",
+            f" export {TENSORPC_ENV_CM_NODEMGR_GROUP_ID}={self._group_id}\n",
         ]
         if self._cfg.env_fwd_re != "":
             # use re to capture env thatt need to forward to ssh

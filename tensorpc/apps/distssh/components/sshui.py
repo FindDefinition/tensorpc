@@ -13,9 +13,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components import mui
 import tensorpc.core.datamodel as D
 import psutil
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY,
-                                             TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
-                                             )
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY)
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
 from ..typedefs import CheckpointActions, CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
 from tensorpc.apps.dbg.components.dbgpanel import MasterDebugPanel

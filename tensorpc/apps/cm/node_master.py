@@ -1,20 +1,18 @@
 # agent manage local SSH connections and compute resources.
-import abc
 import asyncio
-import enum
 from functools import partial
-import os
-from typing import TYPE_CHECKING, Any, Coroutine, Generic, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Coroutine, Generic, Optional, TypeVar, Union, cast
 
 from tensorpc.apps.cm.worker import A2AStateMachine, NodeFlags, GroupNodeSpec, SSHA2AWorker, SSHWorkerConfig
-from tensorpc.autossh.core import SSHConnDesc
+from tensorpc.apps.dbg.components.dbgpanel import list_all_dbg_server_in_machine
 from tensorpc.core import dataclass_dispatch as dataclasses, marker, prim
-from tensorpc.core.distributed.comm.grpcimpl import AsyncGRPCComm, AsyncGRPCCommConfig
+from tensorpc.core.distributed.comm.grpcimpl import AsyncGRPCComm
 from tensorpc.core.distributed.raft import (
     AppendEntriesRequest,
     AppendEntriesResponse,
     InstallSnapshotRequest,
     InstallSnapshotResponse,
+    LeaderQueryResultBase,
     PeerInfo,
     RaftRole,
     RequestVoteRequest,
@@ -24,13 +22,11 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.utils.pyspyutil import PyspyTraceMode
-from .coretypes import CMNodeManagerArgs, GroupCoarseStatus, GroupSSHStatus, ResourceInfo, UserCmd, WorkerInfo, CM_LOGGER, WorkerSSHStatus
+from tensorpc.utils.wait_tools import get_primary_ip
+from .coretypes import CMNodeManagerArgs, GroupCoarseStatus, GroupSSHStatus, LeaderUIStateResult, ResourceInfo, UserCmd, WorkerInfo, CM_LOGGER, WorkerSSHStatus
 from .serv_names import master_serv_names
-from tensorpc.utils.pyspyutil import fetch_pyspy_info, get_all_subprocess_traceback_by_pyspy, get_process_traceback_by_pyspy, get_pyspy_style_asyncio_task_traceback, get_torchrun_traceback_by_pyspy
-
-if TYPE_CHECKING:
-    from _typeshed import DataclassInstance as StandardDataclass
-
+from tensorpc.utils.pyspyutil import fetch_pyspy_info
+from tensorpc.utils.json_utils import json_load_from_bytes
 
 @dataclasses.dataclass
 class GroupSpec:
@@ -41,6 +37,11 @@ class GroupSpec:
     # for ClusterManagePanel only, store frontend info index.
     index: int = -1
     status: int = int(GroupSSHStatus.UNKNOWN)
+
+@dataclasses.dataclass
+class ScanGroupResult:
+    group_specs: dict[str, GroupSpec]
+    user_url_to_sever_ids: dict[str, str]
 
 class GroupInstance:
 
@@ -67,6 +68,14 @@ class NodeMaster:
         )
         self._groups: dict[str, GroupInstance] = {}
         self._lock = asyncio.Lock()
+
+    @marker.mark_server_event(event_type=ServiceEventType.Init)
+    async def _on_init(self):
+        self_ip = get_primary_ip()
+        self_port = prim.get_server_grpc_port()
+        # TODO better unique id generation, e.g. mac address?
+        self._uid = f"{self._uid}@{self_ip}:{self_port}"
+        CM_LOGGER.warning(f"NodeMaster {self._uid}({self_ip}:{self_port}) initialized.")
 
     async def internal_create_group(self, group_id: str, rank: int, world_size: int, peer_info: PeerInfo, raft_node_infos: list[PeerInfo], worker_cfg: Optional[SSHWorkerConfig] = None,
             resource_info: Optional[ResourceInfo] = None,):
@@ -180,10 +189,10 @@ class NodeMaster:
         all_node_urls = list(set(cnode_urls) | set(raft_node_urls))
         scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
         try:
-            group_spec = await self.tree_scan_groups(
+            scan_res = await self.tree_scan_groups(
                 self_url, all_node_urls, num_partition, scan_comm
             )
-            assert group_id not in group_spec, f"group {group_id} already exists"
+            assert group_id not in scan_res.group_specs, f"group {group_id} already exists"
             # TODO validate available resources here.
             # 2. create raft groups
             raft_node_uids = set(node_info.uid for node_info in raft_node_infos)
@@ -275,26 +284,28 @@ class NodeMaster:
     async def tree_scan_groups(
         self, self_url: Optional[str], all_node_urls: list[str], num_partition: int,
         scan_comm: Optional[AsyncGRPCComm] = None,
-    ) -> dict[str, GroupSpec]:
+    ) -> ScanGroupResult:
         # TODO support retry in comm
         # we don't want to keep grpcs in whole cluster, so we create temp comm here.
         is_ext_comm = scan_comm is not None
         if scan_comm is None:
             scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
-        res: dict[str, GroupSpec] = {}
+        res: ScanGroupResult = ScanGroupResult(group_specs={}, user_url_to_sever_ids={})
         # add local results
         async with self._lock:
             try:
+                if self_url is not None:
+                    res.user_url_to_sever_ids[self_url] = self._uid
                 for group_id, group_inst in self._groups.items():
                     cur_spec = group_inst.worker.get_node_spec()
-                    res[group_id] = GroupSpec(group_id, None, [], [])
+                    res.group_specs[group_id] = GroupSpec(group_id, None, [], [])
                     if cur_spec.flags & NodeFlags.IS_RAFT_NODE:
-                        res[group_id].raft_node_specs.append(cur_spec)
+                        res.group_specs[group_id].raft_node_specs.append(cur_spec)
                     if cur_spec.flags & NodeFlags.IS_COMPUTE_NODE:
-                        res[group_id].compute_node_specs.append(cur_spec)
+                        res.group_specs[group_id].compute_node_specs.append(cur_spec)
                     if cur_spec.flags & NodeFlags.IS_RAFT_LEADER:
-                        res[group_id].leader_id = cur_spec.peer_info.uid
-                        res[group_id].status = group_inst.worker.ssh_dm.model.group_ssh_status
+                        res.group_specs[group_id].leader_id = cur_spec.peer_info.uid
+                        res.group_specs[group_id].status = group_inst.worker.ssh_dm.model.group_ssh_status
                 if not all_node_urls:
                     return res
                 all_node_urls = [url for url in all_node_urls if url != self_url]
@@ -304,23 +315,24 @@ class NodeMaster:
                 next_scan_partitions = [[] for _ in range(num_partition)]
                 for i, url in enumerate(all_node_urls[num_partition:]):
                     next_scan_partitions[i % num_partition].append(url)
-                remote_call_coros: list[Coroutine[None, None, dict[str, GroupSpec]]] = []
+                remote_call_coros: list[Coroutine[None, None, ScanGroupResult]] = []
                 for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
                     remote_call_coros.append(scan_comm.remote_call(scan_master, 
                         master_serv_names.GROUP_TREE_SCAN_GROUPS, scan_master, scan_partition,
                         num_partition))
                 remote_call_results = await asyncio.gather(*remote_call_coros)
                 for res_next in remote_call_results:
-                    for group_id, group_spec in res_next.items():
-                        if group_id not in res:
-                            res[group_id] = group_spec
+                    for group_id, group_spec in res_next.group_specs.items():
+                        if group_id not in res.group_specs:
+                            res.group_specs[group_id] = group_spec
                         else:
                             # merge group spec
-                            master_spec = res[group_id]
+                            master_spec = res.group_specs[group_id]
                             if master_spec.leader_id == "":
                                 master_spec.leader_id = group_spec.leader_id
                             master_spec.raft_node_specs.extend(group_spec.raft_node_specs)
                             master_spec.compute_node_specs.extend(group_spec.compute_node_specs)
+                    res.user_url_to_sever_ids.update(res_next.user_url_to_sever_ids)
             finally:
                 if not is_ext_comm:
                     await scan_comm.close()
@@ -550,3 +562,101 @@ class NodeMaster:
         finally:
             if not is_ext_comm:
                 await scan_comm.close()
+
+    async def append_perfetto_data(self, group_id: str, 
+            key: str, args: Any, kwargs: Any,
+            self_worker_info: Optional[WorkerInfo], 
+            worker_infos: list[WorkerInfo], num_partition: int,
+            scan_comm: Optional[AsyncGRPCComm] = None):
+        is_ext_comm = scan_comm is not None
+        if scan_comm is None:
+            scan_comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
+        try:
+            if self_worker_info is not None:
+                await self._debug_panel_actions(group_id, key, *args, **kwargs)
+            next_scan_masters, next_scan_partitions = self._next_scan_partition(self_worker_info, worker_infos, num_partition)
+            if not next_scan_masters:
+                return 
+            remote_call_coros: list[Coroutine[None, None, dict[tuple[int, str], Any]]] = []
+            for scan_master, scan_partition in zip(next_scan_masters, next_scan_partitions):
+                remote_call_coros.append(scan_comm.chunked_remote_call(scan_master.peer_info.url, 
+                    master_serv_names.GROUP_TREE_DO_DEBUG_PANEL_ACTION, group_id, key, args, kwargs,
+                    scan_master, scan_partition, num_partition))
+            await asyncio.gather(*remote_call_coros)
+            return
+        finally:
+            if not is_ext_comm:
+                await scan_comm.close()
+
+    async def set_perfetto_data(self, group_id: str, data: bytes, all_timestamps: list[int], key: str):
+        group = self._groups[group_id]
+        assert group.worker._raft_mgr_panel.debug_panel is not None, "debug panel is not available"
+        await group.worker._raft_mgr_panel.debug_panel.external_set_perfetto_data(data, all_timestamps, key)
+
+    async def query_leader_ui_state(self, group_id: str) -> LeaderUIStateResult:
+        """pth control point will access this value and 
+        enter breakpoint when set.
+        """
+        group = self._groups[group_id]
+        if group.worker.is_raft_leader():
+            return LeaderUIStateResult(
+                success=True,
+                leader_info=None,
+                is_user_control_enabled=group.worker.ssh_dm.model.is_user_control_enabled,
+            )
+        leader = group.worker.get_leader_info()
+        fail_res = LeaderUIStateResult(
+            success=False,
+            leader_info=group.worker.get_leader_info(),
+        )
+        if leader is None:
+            return fail_res
+        try:
+            query_res: LeaderUIStateResult = await group.worker.comm.remote_call(
+                leader.url,
+                master_serv_names.GROUP_QUERY_LEADER_UI_STATE,
+                group_id,
+            )
+            return query_res
+        except Exception as e:
+            CM_LOGGER.exception(
+                f"Failed to perform query_leader_ui_state from {leader.uid}: {e}"
+            )
+            return fail_res
+
+    def list_all_debug_servers(self):
+        return list_all_dbg_server_in_machine()
+
+    async def _set_perf_data(self, group: GroupInstance, rpc_done_ev: Optional[asyncio.Event], step: int, data: Union[list[list[dict]], bytes], metadata: list[Any], scale: Optional[float] = None):
+        if rpc_done_ev is not None:
+            await rpc_done_ev.wait()
+        if isinstance(data, bytes):
+            data = json_load_from_bytes(data)
+        return await group.worker._raft_mgr_panel.debug_panel.perf_monitor.append_perf_data(step, cast(Any, data), metadata, scale)
+
+    async def set_fast_perf_data(self, group_id: str, step: int, data: Union[list[list[dict]], bytes], 
+            metadata: list[Any], scale: Optional[float] = None) -> LeaderQueryResultBase:
+        group = self._groups[group_id]
+        if group.worker.is_raft_leader():
+            asyncio.create_task(self._set_perf_data(group, prim.get_async_rpc_done_event(), step, data, metadata, scale))
+            return LeaderQueryResultBase(success=True, leader_info=None)
+
+        leader = group.worker.get_leader_info()
+        fail_res = LeaderQueryResultBase(
+            success=False,
+            leader_info=group.worker.get_leader_info(),
+        )
+        if leader is None:
+            return fail_res
+        try:
+            query_res: LeaderQueryResultBase = await group.worker.comm.remote_call(
+                leader.url,
+                master_serv_names.DEBUG_SET_FAST_PERF_DATA,
+                group_id,
+            )
+            return query_res
+        except Exception as e:
+            CM_LOGGER.exception(
+                f"Failed to perform query_leader_ui_state from {leader.uid}: {e}"
+            )
+            return fail_res

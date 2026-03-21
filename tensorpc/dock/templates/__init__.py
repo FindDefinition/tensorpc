@@ -13,13 +13,17 @@ export type AppTemplate = {
 from pathlib import Path
 
 from .d3 import frontend_ev
-from . import distssh, tutorials, debugpanel
+from . import distssh, tutorials, debugpanel, clustermgr
 
 _ALL_GROUPS = set(["example", "tools", "debug"])
 
 def get_all_app_templates():
     all_mods = [{
-        "label": "DistSSH Master Panel",
+        "label": "Cluster Manager",
+        "mod": clustermgr,
+        "group": "tools",
+    }, {
+        "label": "DistSSH Master Panel (deprecated)",
         "mod": distssh,
         "group": "tools",
     }, {

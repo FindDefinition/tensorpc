@@ -138,18 +138,18 @@ class RaftRole(enum.Enum):
 class NotLeaderError(RuntimeError):
     pass
 
-
 @dataclass
-class ProposeResult:
+class LeaderQueryResultBase:
     success: bool
     leader_info: Optional[PeerInfo]
+
+@dataclass
+class ProposeResult(LeaderQueryResultBase):
     index: Optional[int] = None
 
 
 @dataclass
-class ChangeConfigurationResult:
-    success: bool
-    leader_info: Optional[PeerInfo]
+class ChangeConfigurationResult(LeaderQueryResultBase):
     joint_index: Optional[int] = None
     final_index: Optional[int] = None
 

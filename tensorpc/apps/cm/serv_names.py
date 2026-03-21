@@ -65,6 +65,11 @@ class AgentServNames:
         return get_service_key_by_type(NodeMaster, NodeMaster.tree_do_debug_panel_action.__name__)
 
     @property
+    def GROUP_QUERY_LEADER_UI_STATE(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.query_leader_ui_state.__name__)
+
+    @property
     def INTERNAL_GROUP_TREE_CREATE_GROUP(self):
         from tensorpc.apps.cm.node_master import NodeMaster
         return get_service_key_by_type(NodeMaster, NodeMaster.internal_tree_create_group.__name__)
@@ -73,6 +78,20 @@ class AgentServNames:
     def INTERNAL_GROUP_CREATE_GROUP(self):
         from tensorpc.apps.cm.node_master import NodeMaster
         return get_service_key_by_type(NodeMaster, NodeMaster.internal_create_group.__name__)
+
+    @property
+    def DEBUG_SET_PERFETTO_DATA(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.set_perfetto_data.__name__)
+
+    @property
+    def DEBUG_LIST_ALL_DEBUG_PROC(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.list_all_debug_servers.__name__)
     
+    @property
+    def DEBUG_SET_FAST_PERF_DATA(self):
+        from tensorpc.apps.cm.node_master import NodeMaster
+        return get_service_key_by_type(NodeMaster, NodeMaster.set_fast_perf_data.__name__)
 
 master_serv_names = AgentServNames()

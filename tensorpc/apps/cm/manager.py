@@ -21,8 +21,17 @@ class NodeSpec:
     # we first try tensorpc grpc servers to access it.
     # remote jump call (chunk) is enabled for all tensorpc grpc servers by default.
     tensorpc_jump_urls: Optional[list[str]] = None
-    # use external_url_with_port in app (not in cluster) if set.
+    # use external_url_with_port in app client (not in cluster) if set.
     external_url_with_port: Optional[str] = None  
+    # you assign a unique id when you start NodeMaster server, this may
+    # different with node id from provider. this will be set after scan_group.
+    server_id: Optional[str] = None
+
+    @property 
+    def client_url_with_port(self):
+        if self.external_url_with_port is not None:
+            return self.external_url_with_port
+        return self.local_url_with_port
 
 @dataclasses.dataclass
 class ClusterSpec:
@@ -102,6 +111,21 @@ class ClusterProviderBase(abc.ABC):
         """Delete nodes with the given spec.
         """
         pass
+
+    async def discover_with_validation(self) -> list[ClusterSpec]:
+        cluster_specs = await self.discover()
+        # validate url and uid uniqueness for all nodes in each cluster.
+        for cluster_spec in cluster_specs:
+            url_set = set()
+            uid_set = set()
+            for node_spec in cluster_spec.nodes:
+                if node_spec.client_url_with_port in url_set:
+                    raise ValueError(f"Duplicate url {node_spec.client_url_with_port} in cluster {cluster_spec.name}")
+                url_set.add(node_spec.client_url_with_port)
+                if node_spec.id in uid_set:
+                    raise ValueError(f"Duplicate id {node_spec.id} in cluster {cluster_spec.name}")
+                uid_set.add(node_spec.id)
+        return cluster_specs
 
 class FixedClusterProvider(ClusterProviderBase):
     """A cluster provider with fixed nodes. It will only discover nodes and doesn't support creation and deletion.
