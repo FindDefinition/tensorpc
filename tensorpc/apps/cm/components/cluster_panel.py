@@ -68,36 +68,41 @@ class GroupCreateModel:
 
 class GroupCard(mui.Paper):
     def __init__(self, group_info_draft: TaskGroupInfo, on_delete_group: Callable[[mui.Event], mui.CORO_ANY]):
-        header_draft = D.literal_val("%s @ %s") % (group_info_draft.group_name, group_info_draft.cluster_name)
+        header_draft = D.literal_val("%s@%s") % (group_info_draft.group_name, group_info_draft.cluster_name)
+        delete_btn = mui.IconButton(mui.IconType.Delete)
+        delete_btn.prop(size="small", iconSize="small", tooltip="Delete Task Group", 
+                confirmTitle="Are you sure to delete this task group?", confirmMessage="This action cannot be undone.")
+        delete_btn.event_click.on_standard(on_delete_group)
+
         self.header = mui.HBox([
+            mui.Icon(mui.IconType.DragIndicator).prop(iconSize="small"),
             mui.FlexBox([
                 mui.Typography().prop(variant="body2", value=header_draft, 
                     textOverflow="ellipsis", overflow="hidden", 
                     whiteSpace="nowrap"),
             ]).prop(flex=1, minWidth=0),
-            mui.Typography().prop(variant="caption", value=group_info_draft.status, muiColor=group_info_draft.color),
-        ]).prop(takeDragRef=True, cursor="move", alignItems="baseline", minWidth=0)
+            delete_btn,
+        ]).prop(takeDragRef=True, cursor="move", alignItems="center", minWidth=0)
         cluster_info_draft = (group_info_draft.num_nodes, group_info_draft.num_cpu, group_info_draft.num_gpu)
         # card get bigger when hover
         tags_chip = mui.Chip("tag").prop(muiColor="success",
                                         size="small",
                                         clickable=False,
                                         items=group_info_draft.tags)
-        delete_btn = mui.IconButton(mui.IconType.Delete)
-        delete_btn.prop(size="small", tooltip="Delete Task Group", 
-                confirmTitle="Are you sure to delete this task group?", confirmMessage="This action cannot be undone.")
-        delete_btn.event_click.on_standard(on_delete_group)
-        self.dragable_box = mui.HBox([
-            mui.VBox([
+        self.dragable_box = mui.VBox([
                 self.header,
                 mui.HDivider(),
                 mui.Markdown("").prop(value=D.literal_val("`%s` Nodes, `%d` CPUs, `%d` GPUs") % cluster_info_draft),
                 mui.HDivider(),
                 tags_chip,
-            ]).prop(flex=1, minWidth=0),
-            mui.VDivider(),
-            delete_btn,
-        ])
+                mui.HDivider(),
+                mui.HBox([
+                    mui.Typography().prop(variant="caption", value=group_info_draft.status, muiColor=group_info_draft.color, flex=1),
+                    mui.Typography().prop(variant="caption", value=group_info_draft.worker_last_activity),
+
+                ]),
+
+            ]).prop(flex=1, minWidth=0)
         self.dragable_box.prop(draggable=True, flex=1, dragInChild=True, dragType="ClusterPanelTaskGroup", 
             dragData=group_info_draft.dragData, minWidth=0)
         super().__init__([
@@ -623,7 +628,6 @@ class ClusterManagePanel(mui.FlexBox):
                                     CM_LOGGER.warning(f"Group {group_id} in cluster {cluster_id} has no raft node.")
                                     continue
                                 elif group_status.leader_info is not None:
-                                    print("!group_status.leader_info.uid", group_status.leader_info.uid)
                                     group_spec.leader_id = group_status.leader_info.uid
                                     client_leader_id = state.server_id_to_client_id[group_spec.leader_id]
 
@@ -644,7 +648,11 @@ class ClusterManagePanel(mui.FlexBox):
                                 status, color = group_ssh_status_to_ui_repr(GroupSSHStatus(group_status.group_ssh_status))
                                 draft.task_groups[group_spec.index].status = status
                                 draft.task_groups[group_spec.index].color = color
-
+                                draft.task_groups[group_spec.index].worker_last_activity = group_status.worker_last_activity
+                            else:
+                                draft.task_groups[group_spec.index].status = "unknown"
+                                draft.task_groups[group_spec.index].color = "error"
+                                draft.task_groups[group_spec.index].worker_last_activity = ""
 
     async def _sync_scan_groups_and_update(self):
         cluster_states = self._create_cluster_states()
@@ -735,13 +743,12 @@ class ClusterManagePanel(mui.FlexBox):
                                 num_gpu_types.add(cnode.resource.gpu_type)
                     if not num_gpu_types:
                         if num_gpu > 0:
-                            tags.append(mui.ChipGroupItem(label="Unknown GPU"))
+                            tags.append(mui.ChipGroupItem(label="GPU"))
                         else:
                             tags.append(mui.ChipGroupItem(label="CPU Only"))
                     else:
                         for gpu_type in num_gpu_types:
                             tags.append(mui.ChipGroupItem(label=gpu_type))
-                    print(state.server_id_to_client_id, group_spec.leader_id)
                     if group_spec.leader_id is not None:
                         client_node_id = state.server_id_to_client_id[group_spec.leader_id]
                         raft_node_spec = node_id_to_nodespec[client_node_id]
@@ -762,6 +769,7 @@ class ClusterManagePanel(mui.FlexBox):
                         color=color,
                         cur_cmd="",
                         tags=tags,
+                        worker_last_activity=group_spec.worker_last_activity,
                         dragData={
                             "name": f"{group_id} (ctrl)",
                             "group_id": group_id,

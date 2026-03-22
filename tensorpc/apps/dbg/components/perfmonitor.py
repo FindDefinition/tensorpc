@@ -562,7 +562,6 @@ class PerfMonitor(mui.FlexBox):
 
     async def _sync_history_select(self):
         hist_len = max(0, len(self.history) - 1)
-        print("self.history", len(self.history))
         if not self.history:
             await self.history_slider.update_ranges(0, 0, 1, value=0)
         else:

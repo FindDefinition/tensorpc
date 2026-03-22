@@ -424,9 +424,13 @@ class SSHA2AWorker:
                 self._worker_observe_loop(self._local_shutdown_event)
             )
             if self._cfg.workdir.strip() != "":
-                workdir = Path(self._cfg.workdir) 
-                fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False, with_bak=True)
-                self.ssh_dm.connect_draft_store(f"_cm_raft_group_store_{self._peer_info.uid}_{self._group_id}", fs_backend)
+                if len(self._cur_raft_infos) == 1:
+                    # only support workdir on one raft node (trivial mode)
+                    workdir = Path(self._cfg.workdir) 
+                    fs_backend = DraftSimpleFileStoreBackend(workdir, verbose_fs=False, with_bak=True)
+                    self.ssh_dm.connect_draft_store(f"_cm_raft_group_store_{self._group_id}", fs_backend)
+                else:
+                    CM_LOGGER.warning("Workdir is only supported in single-raft-node mode, ignore workdir config.")
         if self._is_compute_worker:
             self._leader_observe_task = asyncio.create_task(
                 self._raft_leader_observe_loop(self._awake_event, self._local_shutdown_event)

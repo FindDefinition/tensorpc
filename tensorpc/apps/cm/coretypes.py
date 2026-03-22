@@ -177,6 +177,7 @@ class TaskGroupInfo:
     dragData: dict[str, Any] = dataclasses.field(default_factory=dict)
     color: mui.StdColorNoDefault = "inherit"
     tags: list[mui.ChipGroupItem] = dataclasses.field(default_factory=list)
+    worker_last_activity: str = ""
 
 class WorkerUIType(enum.Enum):
     TERMINAL = "terminal"
@@ -279,12 +280,12 @@ class WorkerUISSHState:
             worker_select_label += " (idle)"
         elif self.group_ssh_status == GroupSSHStatus.HAS_PARTIAL_RUNNING:
             if self.worker_last_activity != "":
-                worker_select_label += f" (running partial {self.worker_last_activity})"
+                worker_select_label += f" (running partial|{self.worker_last_activity})"
             else:
                 worker_select_label += " (running partial)"
         else:
             if self.worker_last_activity != "":
-                worker_select_label += f" (running {self.worker_last_activity})"
+                worker_select_label += f" (running|{self.worker_last_activity})"
             else:
                 worker_select_label += " (running)"
         return {
@@ -307,6 +308,7 @@ class GroupCoarseStatus:
     group_ssh_status: int = int(GroupSSHStatus.HAS_DISCONNECTED)
     last_cmd: Optional[UserCmd] = None
     leader_info: Optional[PeerInfo] = None
+    worker_last_activity: str = ""
 
 @dataclasses.dataclass
 class LeaderUIStateResult(LeaderQueryResultBase):

@@ -37,6 +37,7 @@ class GroupSpec:
     # for ClusterManagePanel only, store frontend info index.
     index: int = -1
     status: int = int(GroupSSHStatus.UNKNOWN)
+    worker_last_activity: str = ""
 
 @dataclasses.dataclass
 class ScanGroupResult:
@@ -290,6 +291,7 @@ class NodeMaster:
             is_raft_node=True,
             group_ssh_status=group_ssh_status,
             last_cmd=last_cmd,
+            worker_last_activity=group.worker.ssh_dm.model.worker_last_activity,
         )
 
     async def tree_scan_groups(
@@ -317,6 +319,7 @@ class NodeMaster:
                     if cur_spec.flags & NodeFlags.IS_RAFT_LEADER:
                         res.group_specs[group_id].leader_id = cur_spec.peer_info.uid
                         res.group_specs[group_id].status = group_inst.worker.ssh_dm.model.group_ssh_status
+                        res.group_specs[group_id].worker_last_activity = group_inst.worker.ssh_dm.model.worker_last_activity    
                 if not all_node_urls:
                     return res
                 all_node_urls = [url for url in all_node_urls if url != self_url]
