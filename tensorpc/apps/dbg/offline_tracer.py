@@ -55,13 +55,13 @@ class WrapperTraceResult:
                 with client:
                     client.app_chunked_remote_call("external_set_perfetto_data", ui_data[0], ui_data[1], "offline_tracer")
                 return 
-            # try cluster manager panel
-            group_id = os.getenv(TENSORPC_ENV_CM_NODEMGR_GROUP_ID, None)
-            if group_id is not None:
-                from tensorpc.apps.cm.serv_names import master_serv_names
-                url = os.getenv(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
-                assert url is not None
-                simple_chunk_call(url, master_serv_names.DEBUG_SET_PERFETTO_DATA, group_id, ui_data[0], ui_data[1], "offline_tracer")
+        # try cluster manager panel
+        group_id = os.getenv(TENSORPC_ENV_CM_NODEMGR_GROUP_ID, None)
+        if group_id is not None:
+            from tensorpc.apps.cm.serv_names import master_serv_names
+            url = os.getenv(TENSORPC_ENV_CM_NODEMGR_URL_WITH_PORT)
+            assert url is not None
+            simple_chunk_call(url, master_serv_names.DEBUG_SET_PERFETTO_DATA, group_id, ui_data[0], ui_data[1], "offline_tracer")
 
     def submit_to_ui(self, via_relay: bool = False):
         # TODO we currently assume ui is in rank 0.

@@ -84,6 +84,7 @@ class NodeMaster:
         comm = AsyncGRPCComm(self._cfg.master_comm_cfg)
         if worker_cfg is None:
             worker_cfg = self._cfg.get_worker_cfg()
+        assert peer_info.uid == self._uid, f"peer_info.uid {peer_info.uid} must be same with self._uid {self._uid}"
         worker = SSHA2AWorker(
             group_id,
             rank=rank,
@@ -169,9 +170,11 @@ class NodeMaster:
         self, group_id: str, self_uid: str, compute_node_infos: list[WorkerInfo], 
         raft_node_infos: list[PeerInfo], num_partition: int, worker_cfg: Optional[SSHWorkerConfig] = None, 
     ):
+        # WARNING: self_uid and uids in infos are **client uid** from provider, which may different from self._uid,
+        # we only trust urls in infos.
+        # so we do a map after scan group.
         world_size = len(compute_node_infos)
         # TODO validate uids is unique
-        cnode_id_to_info = {node_info.peer_info.uid: node_info for node_info in compute_node_infos}
         # 1. run a scan to make sure all nodes are alive and get their peer info and resource info, and then we can decide how to partition the group.
         cnode_urls = [node_info.peer_info.url for node_info in compute_node_infos if node_info.peer_info.uid != self_uid]
         raft_node_urls = [node_info.url for node_info in raft_node_infos if node_info.uid != self_uid]
@@ -192,10 +195,18 @@ class NodeMaster:
             scan_res = await self.tree_scan_groups(
                 self_url, all_node_urls, num_partition, scan_comm
             )
+            del all_node_urls, cnode_urls, raft_node_urls
             assert group_id not in scan_res.group_specs, f"group {group_id} already exists"
+            user_url_to_server_ids = scan_res.user_url_to_sever_ids
+            # map self_uid, uid in compute_node_infos and raft_node_infos to server uids.
+            if self_url is not None:
+                self_uid = user_url_to_server_ids[self_url]
+            compute_node_infos = [x.replace_uid(user_url_to_server_ids[x.peer_info.url]) for x in compute_node_infos]
+            raft_node_infos = [x.replace_uid(user_url_to_server_ids[x.url]) for x in raft_node_infos]
             # TODO validate available resources here.
             # 2. create raft groups
             raft_node_uids = set(node_info.uid for node_info in raft_node_infos)
+            cnode_id_to_info = {node_info.peer_info.uid: node_info for node_info in compute_node_infos}
             for raft_info in raft_node_infos:
                 rank = -1
                 rc: Optional[ResourceInfo] = None

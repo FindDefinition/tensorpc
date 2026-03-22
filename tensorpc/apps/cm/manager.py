@@ -119,9 +119,9 @@ class ClusterProviderBase(abc.ABC):
             url_set = set()
             uid_set = set()
             for node_spec in cluster_spec.nodes:
-                if node_spec.client_url_with_port in url_set:
-                    raise ValueError(f"Duplicate url {node_spec.client_url_with_port} in cluster {cluster_spec.name}")
-                url_set.add(node_spec.client_url_with_port)
+                if node_spec.local_url_with_port in url_set:
+                    raise ValueError(f"Duplicate url {node_spec.local_url_with_port} in cluster {cluster_spec.name}")
+                url_set.add(node_spec.local_url_with_port)
                 if node_spec.id in uid_set:
                     raise ValueError(f"Duplicate id {node_spec.id} in cluster {cluster_spec.name}")
                 uid_set.add(node_spec.id)

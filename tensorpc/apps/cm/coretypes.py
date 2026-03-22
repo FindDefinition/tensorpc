@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Self
 from typing_extensions import TypedDict
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -54,6 +54,9 @@ class WorkerInfo:
     @property 
     def uid(self) -> str:
         return self.peer_info.uid
+
+    def replace_uid(self, new_uid: str) -> Self:
+        return dataclasses.replace(self, peer_info=self.peer_info.replace_uid(new_uid))
 
 @dataclasses.dataclass
 class UserCmd:
@@ -209,6 +212,7 @@ class WorkerSSHStatus:
     last_ts: int 
     exit_code: Optional[int] = None
     is_paused: bool = False
+    last_ssh_out_ts: int = -1
 
 @dataclasses.dataclass
 class WorkerSelectItem:
@@ -238,6 +242,8 @@ class WorkerUISSHState:
     is_raft_node: bool = False
 
     is_user_control_enabled: bool = False
+
+    worker_last_activity: str = ""
 
 
     @mui.DataModel.mark_pfl_query_func
@@ -272,9 +278,15 @@ class WorkerUISSHState:
         elif self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITHOUT_ERROR or self.group_ssh_status == GroupSSHStatus.ALL_IDLE_WITH_LAST_ERROR:
             worker_select_label += " (idle)"
         elif self.group_ssh_status == GroupSSHStatus.HAS_PARTIAL_RUNNING:
-            worker_select_label += " (running partial)"
+            if self.worker_last_activity != "":
+                worker_select_label += f" (running partial {self.worker_last_activity})"
+            else:
+                worker_select_label += " (running partial)"
         else:
-            worker_select_label += " (running)"
+            if self.worker_last_activity != "":
+                worker_select_label += f" (running {self.worker_last_activity})"
+            else:
+                worker_select_label += " (running)"
         return {
             "header": header,
             "connect_info": connect_info,

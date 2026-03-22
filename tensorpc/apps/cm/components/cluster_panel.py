@@ -313,11 +313,13 @@ class ClusterBackendState:
     cluster_spec: ClusterSpec
     ssh_jump_conn: Optional[ClusterSSHJumpConn] = None
     lock: asyncio.Lock = dataclasses_plain.field(default_factory=asyncio.Lock)
+    server_id_to_client_id: dict[str, str] = dataclasses_plain.field(default_factory=dict)
 
     async def close(self):
-        if self.ssh_jump_conn is not None:
-            await self.ssh_jump_conn.conn_ctx.__aexit__(None, None, None)
-            self.ssh_jump_conn = None
+        async with self.lock:
+            if self.ssh_jump_conn is not None:
+                await self.ssh_jump_conn.conn_ctx.__aexit__(None, None, None)
+                self.ssh_jump_conn = None
 
     async def cached_chunk_call_async(self,
                                     node: NodeSpec,
@@ -443,7 +445,7 @@ class ClusterManagePanel(mui.FlexBox):
             clusters=[],
             task_groups=[],
         )
-        self._scan_timeout = 5
+        self._scan_timeout = 10
         self._group_query_timeout = 5
         self.dm = mui.DataModel(state, [])
         draft = self.dm.get_draft()
@@ -577,6 +579,7 @@ class ClusterManagePanel(mui.FlexBox):
                         state.groups = cluster_groups.get(cluster_id, {})
                     await self._merge_cluster_states(cluster_states)
                     await self._sync_to_frontend()
+                    CM_LOGGER.warning("Scan loop finished one round of scan and update.")
                 except grpc.aio.AioRpcError as e:
                     CM_LOGGER.error(f"gRPC error in scan loop: {e}")
                     continue
@@ -601,7 +604,8 @@ class ClusterManagePanel(mui.FlexBox):
                             leader_id = group_spec.leader_id
                             if leader_id is None:
                                 continue
-                            leader_node = state.nodes.get(leader_id, None)
+                            client_leader_id = state.server_id_to_client_id[leader_id]
+                            leader_node = state.nodes.get(client_leader_id, None)
                             if leader_node is None:
                                 CM_LOGGER.warning(f"Leader node {leader_id} for group {group_id} not found in cluster {cluster_id}")
                                 continue 
@@ -619,10 +623,13 @@ class ClusterManagePanel(mui.FlexBox):
                                     CM_LOGGER.warning(f"Group {group_id} in cluster {cluster_id} has no raft node.")
                                     continue
                                 elif group_status.leader_info is not None:
+                                    print("!group_status.leader_info.uid", group_status.leader_info.uid)
                                     group_spec.leader_id = group_status.leader_info.uid
-                                    leader_node = state.nodes.get(group_spec.leader_id, None)
+                                    client_leader_id = state.server_id_to_client_id[group_spec.leader_id]
+
+                                    leader_node = state.nodes.get(client_leader_id, None)
                                     if leader_node is None:
-                                        CM_LOGGER.warning(f"Leader node {group_spec.leader_id} for group {group_id} not found in cluster {cluster_id}")
+                                        CM_LOGGER.warning(f"Leader node {client_leader_id} for group {group_id} not found in cluster {cluster_id}")
                                         continue
                                     try:
                                         group_status: GroupCoarseStatus = await state.cached_chunk_call_async(
@@ -734,10 +741,13 @@ class ClusterManagePanel(mui.FlexBox):
                     else:
                         for gpu_type in num_gpu_types:
                             tags.append(mui.ChipGroupItem(label=gpu_type))
+                    print(state.server_id_to_client_id, group_spec.leader_id)
                     if group_spec.leader_id is not None:
-                        raft_node_spec = node_id_to_nodespec[group_spec.leader_id]
+                        client_node_id = state.server_id_to_client_id[group_spec.leader_id]
+                        raft_node_spec = node_id_to_nodespec[client_node_id]
                     else:
-                        raft_node_spec = node_id_to_nodespec[group_spec.raft_node_specs[0].peer_info.uid]
+                        client_node_id = state.server_id_to_client_id[group_spec.raft_node_specs[0].peer_info.uid]
+                        raft_node_spec = node_id_to_nodespec[client_node_id]
                     group_spec.index = len(task_groups)
                     status, color = group_ssh_status_to_ui_repr(GroupSSHStatus(group_spec.status))
                     task_groups.append(TaskGroupInfo(
@@ -764,9 +774,9 @@ class ClusterManagePanel(mui.FlexBox):
             draft.task_groups = task_groups 
 
 
-    async def _scan_group_update(self, state: ClusterBackendState, nodes_dict: dict[str, NodeRuntimeInfo]):
-        all_node_urls = [node.node_spec.local_url_with_port for node in nodes_dict.values()]
-        first_node_spec = list(nodes_dict.values())[0].node_spec
+    async def _scan_group_update(self, state: ClusterBackendState, nodes_url_dict: dict[str, NodeRuntimeInfo]):
+        all_node_urls = [node.node_spec.local_url_with_port for node in nodes_url_dict.values()]
+        first_node_spec = list(nodes_url_dict.values())[0].node_spec
         self_url = all_node_urls[0]
         kwargs = {
             "self_url": self_url,
@@ -776,13 +786,19 @@ class ClusterManagePanel(mui.FlexBox):
         scan_res: ScanGroupResult = await state.cached_chunk_call_async(
             first_node_spec, master_serv_names.GROUP_TREE_SCAN_GROUPS,  
             rpc_timeout=30, **kwargs)
+        scan_res.user_url_to_sever_ids
+        server_id_to_user_url = {v: k for k, v in scan_res.user_url_to_sever_ids.items()}
         for group_id, group_spec in scan_res.group_specs.items():
             for cnode in group_spec.compute_node_specs:
                 node_id = cnode.peer_info.uid
-                if node_id not in nodes_dict:
+                if node_id not in server_id_to_user_url:
                     CM_LOGGER.warning(f"node {node_id} in group {group_id} not found in cluster nodes.")
                     continue
-                rt_info = nodes_dict[node_id]
+                user_url = server_id_to_user_url[node_id]
+                if user_url not in nodes_url_dict:
+                    CM_LOGGER.warning(f"user url {user_url} for node {node_id} in group {group_id} not found in cluster nodes.")
+                    continue
+                rt_info = nodes_url_dict[user_url]
                 if cnode.resource is not None:
                     resource = cnode.resource
                 else:
@@ -839,8 +855,9 @@ class ClusterManagePanel(mui.FlexBox):
             if not state.nodes:
                 continue 
             state_nodes_url_to_node = {node.node_spec.local_url_with_port: node for node in state.nodes.values()}
-            scan_res = await self._scan_group_update(state, state.nodes)
+            scan_res = await self._scan_group_update(state, state_nodes_url_to_node)
             server_ids_uniq_set: set[str] = set()
+            state.server_id_to_client_id.clear()
             for server_id in scan_res.user_url_to_sever_ids.values():
                 if server_id in server_ids_uniq_set:
                     # TODO this means invalid server configuration. should we remove invalid nodes?
@@ -850,6 +867,7 @@ class ClusterManagePanel(mui.FlexBox):
                 assert client_url in state_nodes_url_to_node, f"client url {client_url} not found in cluster nodes for cluster {cid}"
                 node = state_nodes_url_to_node[client_url]
                 node.node_spec.server_id = server_id
+                state.server_id_to_client_id[server_id] = node.node_spec.id
             cluster_groups[cid] = scan_res.group_specs
         return cluster_groups
 

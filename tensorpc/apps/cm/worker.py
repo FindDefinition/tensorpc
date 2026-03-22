@@ -23,6 +23,7 @@ from typing import (
 )
 
 from contextlib import nullcontext
+import humanize
 import psutil
 import rich
 from tensorpc.apps.cm.components.raft_mgr_panel import RaftManagerPanel
@@ -222,22 +223,6 @@ class SSHA2AWorkerState:
     cmd_version: int = -1
     finished_rt_cmd_uids: LRUCache[Union[int, str], Any] = dataclasses.field(
         default_factory=lambda: LRUCache(100)
-    )
-
-
-def _get_terminal_menus(term: terminal.AsyncSSHTerminal):
-
-    return mui.MenuList(
-        [mui.MenuItem("Clear", "Clear", iconSize="small", iconFontSize="small")], term
-    ).prop(
-        flex=1,
-        overflow="auto",
-        display="flex",
-        flexFlow="column nowrap",
-        triggerMethod="contextmenu",
-        anchorReference="anchorPosition",
-        dense=True,
-        paperProps=mui.PaperProps(width="20ch"),
     )
 
 
@@ -653,7 +638,7 @@ class SSHA2AWorker:
             "paused": []
         }
         uid_to_item: dict[str, WorkerSelectItem] = {}
-
+        last_ssh_ts_max = -1
         for worker_id, worker_info in workers.items():
             worker_status = worker_status_dict[worker_id]
             ssh_status = worker_status.status
@@ -661,6 +646,8 @@ class SSHA2AWorker:
                 ssh_status = "paused"
             if ssh_status not in cur_items:
                 cur_items[ssh_status] = []
+            if worker_status.last_ssh_out_ts > 0:
+                last_ssh_ts_max = max(last_ssh_ts_max, worker_status.last_ssh_out_ts)
             select_item = WorkerSelectItem(
                 id=worker_id,
                 label=f"{worker_info['worker_info'].rank} ({worker_info['worker_info'].peer_info.url})",
@@ -712,7 +699,11 @@ class SSHA2AWorker:
                 else:
                     group_status = GroupSSHStatus.ALL_IDLE_WITHOUT_ERROR
                 draft.group_ssh_status = int(group_status)
-                
+                if last_ssh_ts_max > 0:
+                    cur_ts = time.time_ns()
+                    duration_ns = cur_ts - last_ssh_ts_max
+                    draft.worker_last_activity = f"{humanize.naturaldelta(duration_ns / 1e9)} ago"
+                    
     async def _ssh_event_cb(self, event: SSHEvent):
         if event.ev_type == SSHEventType.Command:
             assert isinstance(event, CommandEvent)
@@ -856,7 +847,11 @@ class SSHA2AWorker:
                 sleep_task.cancel()
                 awake_event.clear()
                 awake_immediately_task = asyncio.create_task(awake_event.wait())
-            my_ssh_status = self.ssh_dm.model.ssh_status
+            last_ssh_ts :int = -1
+            cur_ssh_state = self._terminal.get_current_state()
+            if cur_ssh_state is not None:
+                last_ssh_ts = cur_ssh_state.last_ts
+            my_ssh_status = dataclasses.replace(self.ssh_dm.model.ssh_status, last_ssh_out_ts=last_ssh_ts)
             query_args = {
                 "group_id": self._group_id,
                 "worker_peer_info": self._peer_info,
@@ -1117,7 +1112,7 @@ class SSHA2AWorker:
         if worker_uid not in worker_status_dict:
             worker_status_dict[worker_uid] = WorkerSSHStatus(
                 status=ssh_status.status, last_ts=time.time_ns(), exit_code=ssh_status.exit_code,
-                is_paused=ssh_status.is_paused
+                is_paused=ssh_status.is_paused, last_ssh_out_ts=ssh_status.last_ssh_out_ts
             )
         else:
             worker_status = self._raft_node.state_machine.worker_status_dict[
@@ -1127,6 +1122,7 @@ class SSHA2AWorker:
             worker_status.status = ssh_status.status
             worker_status.exit_code = ssh_status.exit_code
             worker_status.is_paused = ssh_status.is_paused
+            worker_status.last_ssh_out_ts = ssh_status.last_ssh_out_ts
         await self._debouncer.call(self._sync_status_to_ui)
         # print("!!!", worker_uid, self._peer_info.uid, ssh_status.status)
         return {

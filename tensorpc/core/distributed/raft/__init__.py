@@ -4,7 +4,7 @@ import enum
 import random
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import Field, TypeAdapter
@@ -24,6 +24,8 @@ class PeerInfo:
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, PeerInfo) and self.url == other.url
 
+    def replace_uid(self, new_uid: str):
+        return replace(self, uid=new_uid)
 
 def _create_peer_info_map(self_peer: PeerInfo, peers: list[PeerInfo]) -> dict[str, PeerInfo]:
     by_uid: dict[str, PeerInfo] = {}
