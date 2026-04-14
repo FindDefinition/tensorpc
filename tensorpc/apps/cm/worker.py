@@ -264,7 +264,7 @@ class AsyncDebouncer:
                 and self._task is not None
                 and not self._task.done()
             ):
-                self._task.cancel()
+                await cancel_task(self._task)
             if self._is_running_user_func:
                 await self._done_event.wait()
             self._task = asyncio.create_task(
@@ -786,7 +786,7 @@ class SSHA2AWorker:
             )
             if global_shutdown_ev_task in done or shutdown_ev_task in done:
                 for task in pending:
-                    task.cancel()
+                    await cancel_task(task)
                 CM_LOGGER.warning("Shutdown event received, stop worker observe loop.")
                 break
             # check all workers last timestamp
@@ -845,12 +845,12 @@ class SSHA2AWorker:
             )
             if global_shutdown_ev_task in done or shutdown_ev_task in done:
                 for task in pending:
-                    task.cancel()
+                    await cancel_task(task)
                 CM_LOGGER.warning("Shutdown event received, stop worker observe loop.")
                 break
             if awake_immediately_task in done:
                 # cancel sleep task
-                sleep_task.cancel()
+                await cancel_task(sleep_task)
                 awake_event.clear()
                 awake_immediately_task = asyncio.create_task(awake_event.wait())
             last_ssh_ts :int = -1
@@ -913,7 +913,7 @@ class SSHA2AWorker:
                     "Failed to query worker heartbeat from all raft peers. exiting observe loop."
                 )
                 for task in pending:
-                    task.cancel()
+                    await cancel_task(task)
                 break
             if not query_res["is_leader"]:
                 # may be no leader. warn and retry in next loop.

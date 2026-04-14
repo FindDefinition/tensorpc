@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import Field, TypeAdapter
 from pydantic.dataclasses import dataclass as pydantic_dataclass
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.distributed.logger import LOGGER
 
@@ -447,7 +448,7 @@ class RaftNode:
         self._stop_event.set()
         tasks = [task for task in [self._run_task, self._apply_task] if task is not None]
         for task in tasks:
-            task.cancel()
+            await cancel_task(task)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._run_task = None

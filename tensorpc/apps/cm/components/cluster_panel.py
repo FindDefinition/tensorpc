@@ -12,6 +12,7 @@ from tensorpc.apps.cm.node_master import GroupSpec, ScanGroupResult
 from tensorpc.autossh.core import SSHConnDesc, enter_ssh_jumps
 from tensorpc.core.annolib import Undefined
 from tensorpc.core.asyncclient import AsyncRemoteManager
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.distributed.raft import PeerInfo
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.dock.components import mui
@@ -574,6 +575,8 @@ class ClusterManagePanel(mui.FlexBox):
             wait_task = asyncio.create_task(asyncio.sleep(scan_timeout))
             done, pending = await asyncio.wait([shutdown_task, wait_task], return_when=asyncio.FIRST_COMPLETED)
             if shutdown_task in done:
+                for task in pending:
+                    await cancel_task(task)
                 break
             async with self._scan_lock:
                 try:
@@ -600,6 +603,8 @@ class ClusterManagePanel(mui.FlexBox):
             wait_task = asyncio.create_task(asyncio.sleep(self._group_query_timeout))
             done, pending = await asyncio.wait([shutdown_task, wait_task], return_when=asyncio.FIRST_COMPLETED)
             if shutdown_task in done:
+                for task in pending:
+                    await cancel_task(task)
                 break
             async with self._scan_lock:
                 async with self.dm.draft_update() as draft:
