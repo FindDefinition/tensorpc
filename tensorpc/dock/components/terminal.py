@@ -378,6 +378,7 @@ class AsyncSSHTerminal(Terminal):
         self._line_raw_ev_max_length = line_raw_ev_max_length
         self._line_raw_event_buffer: deque[bytes] = deque(maxlen=line_raw_ev_max_length)
         self._log_to_stdout = log_to_stdout
+        self._size_state: Optional[TerminalResizeEvent] = None
 
     async def connect(self,
                       event_callback: Optional[Callable[[SSHEvent],
@@ -464,6 +465,11 @@ class AsyncSSHTerminal(Terminal):
                                            term_line_event_callback=term_line_event_callback),))
         self._ssh_state = _AsyncSSHTerminalState(cur_inp_queue, ssh_task, False, -1, size_state, base_ts, exit_event)
         # TODO change init event to future
+        if self._size_state is not None:
+            await self._ssh_state.inp_queue.put(
+                SSHRequest(SSHRequestType.ChangeSize,
+                           [self._size_state.width, self._size_state.height]))
+
         await self._init_event.wait()
         if self._ssh_state is None:
             raise RuntimeError("SSH connect failed.")

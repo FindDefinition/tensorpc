@@ -40,7 +40,7 @@ from tensorpc.core.httpservers import aiohttp_impl as httpserver
 # from tensorpc.core.httpservers import blacksheep_impl as httpserver
 import aiohttp
 
-from tensorpc.utils.wait_tools import get_free_ports
+from tensorpc.utils.wait_tools import get_free_ports, get_primary_ip
 
 LOGGER = get_logger("tensorpc.aioserver", log_time_format="[%x %X]")
 
@@ -219,7 +219,7 @@ async def serve_service(
                 server.add_secure_port(url, credentials)
             else:
                 server.add_insecure_port(url)
-            LOGGER.warning("server started at {}".format(url))
+            LOGGER.warning("server started at {}({})".format(url, get_primary_ip()))
             break
         except:
             traceback.print_exc()

@@ -316,7 +316,7 @@ class TritonSimModel:
     @pfl.js.mark_js_compilable
     def _on_matrix_table_elem_hover_pfl(self, data: three.PointerEvent):
         if data.dataIndexes:
-            dataIndexes = pfl.compiler_remove_optional(data.dataIndexes)
+            dataIndexes = pfl.compiler.remove_optional(data.dataIndexes)
             local_mat = self.expr_trace_matrices.matrices[dataIndexes[0]]
             # hover vis
             point_unified_x = data.pointLocal[0] + 0.5

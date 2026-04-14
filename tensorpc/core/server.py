@@ -36,7 +36,7 @@ from tensorpc.protos_export import rpc_message_pb2
 from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.rich_logging import get_logger
-from tensorpc.utils.wait_tools import get_free_ports
+from tensorpc.utils.wait_tools import get_free_ports, get_primary_ip
 
 LOGGER = get_logger("tensorpc.server")
 
@@ -179,7 +179,7 @@ def serve_service(service: RemoteObjectService,
                 server.add_secure_port(url, credentials)
             else:
                 server.add_insecure_port(url)
-            LOGGER.info("server started at {}".format(url))
+            LOGGER.warning("server started at {}({})".format(url, get_primary_ip()))
             break
         except:
             traceback.print_exc()

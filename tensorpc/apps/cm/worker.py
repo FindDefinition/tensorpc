@@ -284,6 +284,7 @@ class SSHWorkerUILeaderState:
 class CmdTaskState:
     task: asyncio.Task
     event: asyncio.Event
+    trigger_cancel_ev: asyncio.Event
 
 class SSHA2AWorker:
     def __init__(
@@ -458,7 +459,7 @@ class SSHA2AWorker:
             await self._leader_observe_task
             self._leader_observe_task = None
         if self._cmd_task is not None:
-            self._cmd_task.event.set()
+            self._cmd_task.trigger_cancel_ev.set()
             await self._cmd_task.task
             self._cmd_task = None
         self._local_shutdown_event = None
@@ -497,6 +498,7 @@ class SSHA2AWorker:
         if cmd is None:
             CM_LOGGER.error(f"Unimplemented raft manager action {act}")
             return 
+        CM_LOGGER.warning(f"Propose cmd {cmd} to raft group.")
         sync_all_workers = self._world_size <= 8 # TODO avoid hardcode
         run_iff_num_worker = None
         final_query_res: Optional[ProposeResult] = None
@@ -924,6 +926,7 @@ class SSHA2AWorker:
             if cmd_version == -1:
                 # no cmd from leader, just continue.
                 continue
+
             async with self._cmd_apply_lock:
                 if (
                     query_res["runtime_cmd"] is not None
@@ -955,11 +958,16 @@ class SSHA2AWorker:
                         "Failed to get terminal state, may be terminal is not ready. retrying in next loop."
                     )
                     continue
+                CM_LOGGER.warning(f"Run cmd {last_cmd} from raft group.")
+
                 if last_cmd.type == UserCmdType.RECONNECT_SSH:
+                    CM_LOGGER.warning(f"[reconnect]Try to exit cur task...")
+
                     if self._cmd_task is not None:
-                        self._cmd_task.event.set()
+                        self._cmd_task.trigger_cancel_ev.set()
                         await self._cmd_task.task
                         self._cmd_task = None
+                    CM_LOGGER.warning(f"[reconnect]Try to disconnect...")
                     await self.get_terminal().disconnect()
                     await self._connect_ssh()
                 elif last_cmd.type == UserCmdType.TRY_CTRL_C:
@@ -969,7 +977,7 @@ class SSHA2AWorker:
                         is_term=False
                     )
                     if self._cmd_task is not None:
-                        self._cmd_task.event.set()
+                        self._cmd_task.trigger_cancel_ev.set()
                         await self._cmd_task.task
                         self._cmd_task = None
 
@@ -987,7 +995,7 @@ class SSHA2AWorker:
                             is_term=False
                         )
                         if self._cmd_task is not None:
-                            self._cmd_task.event.set()
+                            self._cmd_task.trigger_cancel_ev.set()
                             await self._cmd_task.task
                             self._cmd_task = None
 
@@ -999,7 +1007,8 @@ class SSHA2AWorker:
                         await fut
                     shell_cmd = last_cmd.content
                     exit_ev = asyncio.Event()
-                    self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(shell_cmd, exit_ev)), exit_ev)
+                    shutdown_ev = asyncio.Event()
+                    self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(shell_cmd, exit_ev, shutdown_ev)), exit_ev, shutdown_ev)
                     # await self.get_terminal().ssh_command_rpc_future(shell_cmd + "\n")
                 else:
                     CM_LOGGER.warning(
@@ -1009,7 +1018,7 @@ class SSHA2AWorker:
                 self._worker_state.cur_cmd = last_cmd
                 self._worker_state.cmd_version = cmd_version
 
-    async def _cmd_waiter(self, cmd: str, exit_ev: asyncio.Event):
+    async def _cmd_waiter(self, cmd: str, exit_ev: asyncio.Event, shutdown_ev: asyncio.Event):
         CM_LOGGER.warning("Launch command:")
         rich.print(cmd)
         ssh_state = self._terminal.get_current_state()
@@ -1043,17 +1052,20 @@ class SSHA2AWorker:
                 tmp_file.write(cmd)
                 tmp_file.flush()
             shell_cmd = f" {shell_cmd_prefix} {shell_file_path.absolute()}"
-            shutdown_ev = prim.get_async_shutdown_event()
+            global_shutdown_ev = prim.get_async_shutdown_event()
+            global_shutdown_ev_task = asyncio.create_task(global_shutdown_ev.wait(), name="ft-ssh-cmdwaiter-global-wait")
             shutdown_ev_task = asyncio.create_task(shutdown_ev.wait(), name="ft-ssh-cmdwaiter-wait")
             try:
                 run_cmd_task = asyncio.create_task(self._terminal.ssh_command_rpc(shell_cmd), name="cmd task")
                 done, pending = await asyncio.wait(
-                    [shutdown_ev_task, run_cmd_task],
+                    [global_shutdown_ev_task, shutdown_ev_task, run_cmd_task],
                     return_when=asyncio.FIRST_COMPLETED)
-                if shutdown_ev_task in done:
-                    await cancel_task(run_cmd_task)
+                if global_shutdown_ev_task in done or shutdown_ev_task in done:
+                    for task in pending:
+                        await cancel_task(task)
                     # TODO use ctrl-c->terminal->kill sequence
-                    await self._terminal.disconnect()
+                    if global_shutdown_ev_task in done:
+                        await self._terminal.disconnect()
                     return 
                 assert run_cmd_task in done, "run_cmd_task should be done"
                 res = run_cmd_task.result()

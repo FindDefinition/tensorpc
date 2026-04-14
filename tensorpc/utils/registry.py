@@ -15,8 +15,10 @@
 import inspect
 from typing import Any, Callable, Dict, Hashable, List, Optional, Generic, Type, TypeVar, Union
 
-T = TypeVar("T", bound=Union[Type, Callable])
+T = TypeVar("T", bound=Union[type, Callable])
 
+T_key = TypeVar("T_key", bound=Union[Type, Callable])
+T_value = TypeVar("T_value")
 
 class HashableRegistry(Generic[T]):
 
@@ -139,3 +141,30 @@ class HashableSeqRegistryKeyOnly(Generic[T]):
 
     def items(self):
         yield from self.global_dict.items()
+
+class DictRegistry(Generic[T_value]):
+
+    def __init__(self, allow_duplicate: bool = False):
+        self.global_dict: Dict[Hashable, T_value] = {}
+        self.allow_duplicate = allow_duplicate
+
+
+    def register(self, key: Hashable):
+        def wrapper(func: T_value) -> T_value:
+            key_ = key
+            if not self.allow_duplicate and key_ in self.global_dict:
+                raise KeyError("key {} already exists".format(key_))
+            self.global_dict[key_] = func
+            return func
+
+        return wrapper
+
+    def __contains__(self, key: Hashable):
+        return key in self.global_dict
+
+    def __getitem__(self, key: Hashable):
+        return self.global_dict[key]
+
+    def items(self):
+        yield from self.global_dict.items()
+

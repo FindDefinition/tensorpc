@@ -23,6 +23,7 @@ from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 from contextlib import suppress
 from tensorpc.core.serviceunit import ServiceEventType
+from tensorpc.utils.wait_tools import get_primary_ip
 from .aiohttp_file import FileProxy, FileProxyResponse
 
 from tensorpc.utils.rich_logging import get_logger
@@ -338,7 +339,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                            ws_service.handle_new_backup_connection_aiohttp)
         app.router.add_get(langserver_name, ls_service.handle_ls_open)
 
-        LOGGER.warning("server started at {}".format(port))
+        LOGGER.warning("server started at {}({})".format(port, get_primary_ip()))
 
         ssl_context = None
         if ssl_key_path != "" and ssl_key_path != "":

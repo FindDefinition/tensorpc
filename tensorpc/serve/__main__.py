@@ -6,7 +6,6 @@ import os
 import fire
 import time
 from tensorpc.constants import TENSORPC_PORT_MAX_TRY
-from tensorpc.core.client import RemoteManager
 from tensorpc.core.asyncserver import serve, serve_with_http
 from tensorpc.core.defs import Service, ServiceDef, from_yaml_path, decode_config_b64_and_update, update_service_def_config
 from tensorpc.core import BUILTIN_SERVICES

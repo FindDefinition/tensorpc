@@ -169,7 +169,7 @@ class RaftManagerPanel(mui.FlexBox):
         before.append(mui.VDivider())
         self._tabs = mui.Tabs(tab_defs, init_value=init_value, before=before)
         self._tabs.prop(panelProps=mui.FlexBoxProps(
-                                  height="100%", padding=0,),
+                                  height="100%", padding=0, minHeight=0),
                         orientation="horizontal",
                         borderBottom=1,
                         flex=1,
@@ -181,7 +181,7 @@ class RaftManagerPanel(mui.FlexBox):
         ssh_panel = mui.ThemeProvider([
             mui.VBox([
                 self._tabs
-            ]).prop(flex=1, overflow="hidden")
+            ]).prop(flex=1, overflow="hidden", minHeight=0)
         ], get_tight_icon_tab_theme_horizontal(size="40px"))
 
         # self.dm.event_storage_fetched.on(self._init_fields_when_fetch_model)
@@ -206,7 +206,7 @@ class RaftManagerPanel(mui.FlexBox):
             pyspy_dbg_dialog,
             ssh_panel,
         ])
-        self.prop(flexDirection="column", flex=1)
+        self.prop(flexDirection="column", flex=1, minHeight=0, overflow="hidden")
 
     async def _on_term_menu(self, item_id: str):
         if self._terminal is None:
