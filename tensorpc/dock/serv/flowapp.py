@@ -508,10 +508,12 @@ class FlowApp:
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 # this is stream remote call, will use stream data to call a remote function, 
                 # so we must yield (args, kwargs) instead of data.
-                yield [ev.to_dict()], {}
-                # trigger sent event here.
-                if ev.sent_event is not None:
-                    ev.sent_event.set()
+                try:
+                    yield [ev.to_dict()], {}
+                finally:
+                    # trigger sent event here.
+                    if ev.sent_event is not None:
+                        ev.sent_event.set()
                 if ev._after_send_callback is not None:
                     try:
                         res = ev._after_send_callback()

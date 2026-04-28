@@ -122,13 +122,13 @@ class RemoteComponentService:
 
     async def _remove_layout_object_internal(self, key: str):
         app_obj = self._app_objs[key]
+        app_obj.app.app_terminate()
+        await app_obj.app.app_terminate_async()
         app_obj.shutdown_ev.set()
         app_obj.mounted_app_meta = None
         app_obj.mount_ev.clear()
         if app_obj.send_loop_task is not None:
             await app_obj.send_loop_task
-        app_obj.app.app_terminate()
-        await app_obj.app.app_terminate_async()
         app_obj.app.app_storage.set_remote_grpc_url(None)
 
     def has_layout_object(self, key: str):
@@ -340,10 +340,12 @@ class RemoteComponentService:
                         ev = wait_queue_task.result()
                         if isinstance(ev, AppEvent):
                             ev_dict = self._patch_app_event(ev, prefixes, app_obj.app)
-                            yield ev_dict
-                            if ev.sent_event is not None:
-                                ev.sent_event.set()
-                                ev.sent_event = None
+                            try:
+                                yield ev_dict
+                            finally:
+                                if ev.sent_event is not None:
+                                    ev.sent_event.set()
+                                    ev.sent_event = None
                         elif isinstance(ev, RemoteCompEvent):
                             yield ev 
                         wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
@@ -357,7 +359,7 @@ class RemoteComponentService:
                     await cancel_task(shutdown_task)
                     break
         except:
-            traceback.print_exc()
+            REMOTE_APP_SERV_LOGGER.exception("Unknown Error in App %s", key)
             raise 
         finally:
             REMOTE_APP_SERV_LOGGER.warning("Unmount remote comp %s (Generator)", key)
@@ -369,6 +371,7 @@ class RemoteComponentService:
                 await asyncio.gather(client_coro, self.unmount_app(key, is_local_call=True))
             else:
                 await self.unmount_app(key, is_local_call=True)
+            # set sent_event in queue
 
 
     async def _send_loop(self, app_obj: AppObject):
@@ -378,54 +381,58 @@ class RemoteComponentService:
         wait_tasks: List[asyncio.Task] = [
             shut_task, send_task
         ]
-        while True:
-            (done,
-             pending) = await asyncio.wait(wait_tasks,
-                                           return_when=asyncio.FIRST_COMPLETED)
-            if shut_task in done:
-                for task in pending:
-                    await cancel_task(task)
-                # print("!!!", "send loop closed by event", last_key, os.getpid())
-                break
-            ev: AppEvent = send_task.result()
-            if ev.is_loopback:
-                raise NotImplementedError("loopback not implemented")
-            if app_obj.mounted_app_meta is None:
-                # we got app event, but
-                # remote component isn't mounted, ignore app event
+        try:
+            while True:
+                (done,
+                pending) = await asyncio.wait(wait_tasks,
+                                            return_when=asyncio.FIRST_COMPLETED)
+                if shut_task in done:
+                    for task in pending:
+                        await cancel_task(task)
+                    # print("!!!", "send loop closed by event", last_key, os.getpid())
+                    break
+                ev: AppEvent = send_task.result()
+                if ev.is_loopback:
+                    raise NotImplementedError("loopback not implemented")
+                if app_obj.mounted_app_meta is None:
+                    # we got app event, but
+                    # remote component isn't mounted, ignore app event
+                    send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
+                    wait_tasks: List[asyncio.Task] = [
+                        shut_task, send_task
+                    ]
+                    if ev.sent_event is not None:
+                        ev.sent_event.set()
+                    continue
+                # ev.uid = app_obj.mounted_app_meta.node_uid
                 send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
-                wait_tasks: List[asyncio.Task] = [
-                    shut_task, send_task
-                ]
-                if ev.sent_event is not None:
-                    ev.sent_event.set()
-                continue
-            # ev.uid = app_obj.mounted_app_meta.node_uid
-            send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
-            wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            # when user use additional event such as RemoteCompEvent, regular app event may be empty.
-            shouldn_t_set_sent_ev = False
-            if self._ft_group is None or self._is_master:
-                # only master send event to UI
-                if ev.type_event_tuple:
-                    assert app_obj.mounted_app_meta.remote_gen_queue is not None
-                    await app_obj.mounted_app_meta.remote_gen_queue.put(ev)
-                    shouldn_t_set_sent_ev = True 
-            # trigger sent event here.
-            if not shouldn_t_set_sent_ev:
-                if ev.sent_event is not None:
-                    ev.sent_event.set()
-                    ev.sent_event = None
-            # handle additional events
-            if self._ft_group is None or self._is_master:
-                # only master send event to UI
-                for addi_ev in ev._additional_events:
-                    if isinstance(addi_ev, RemoteCompEvent):
+                wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+                # when user use additional event such as RemoteCompEvent, regular app event may be empty.
+                shouldn_t_set_sent_ev = False
+                if self._ft_group is None or self._is_master:
+                    # only master send event to UI
+                    if ev.type_event_tuple:
                         assert app_obj.mounted_app_meta.remote_gen_queue is not None
-                        await app_obj.mounted_app_meta.remote_gen_queue.put(addi_ev)
-
-        app_obj.send_loop_task = None
-        app_obj.mounted_app_meta = None
+                        await app_obj.mounted_app_meta.remote_gen_queue.put(ev)
+                        shouldn_t_set_sent_ev = True 
+                # trigger sent event here.
+                if not shouldn_t_set_sent_ev:
+                    if ev.sent_event is not None:
+                        ev.sent_event.set()
+                        ev.sent_event = None
+                # handle additional events
+                if self._ft_group is None or self._is_master:
+                    # only master send event to UI
+                    for addi_ev in ev._additional_events:
+                        if isinstance(addi_ev, RemoteCompEvent):
+                            assert app_obj.mounted_app_meta.remote_gen_queue is not None
+                            await app_obj.mounted_app_meta.remote_gen_queue.put(addi_ev)
+        except:
+            REMOTE_APP_SERV_LOGGER.exception("Unknown error in send loop")
+            raise
+        finally:
+            app_obj.send_loop_task = None
+            app_obj.mounted_app_meta = None
 
     async def run_dist_call_create_task(self, method_name: str,
                                        task_uuid: str,

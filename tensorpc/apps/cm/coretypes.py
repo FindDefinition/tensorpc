@@ -77,8 +77,8 @@ class SSHWorkerConfig:
     raft_cfg: RaftConfig
     # we will look for last user raft log to determine what should we do
     # next.  
-    leader_check_interval: int = 5
-    worker_check_interval: int = 5
+    leader_check_interval: float = 5
+    worker_check_interval: float = 5
 
     worker_disconnect_timeout: int = 30
     worker_update_debounce: float = 0.5
@@ -109,8 +109,8 @@ class CMNodeManagerArgs:
     num_mem_gb: int = -1
 
     # default worker cfgs
-    leader_check_interval: int = 5
-    worker_check_interval: int = 5
+    leader_check_interval: float = 5
+    worker_check_interval: float = 5
 
     worker_disconnect_timeout: int = 30
 

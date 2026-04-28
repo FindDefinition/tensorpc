@@ -15,8 +15,8 @@ def main(
     env_fwd_re: str = "",
     local_ssh_port: int = 22,
     log_to_stdout: bool = False,
-    leader_check_interval: int = 5,
-    worker_check_interval: int = 5,
+    leader_check_interval: float = 5,
+    worker_check_interval: float = 5,
     worker_disconnect_timeout: int = 30,
 
 ):

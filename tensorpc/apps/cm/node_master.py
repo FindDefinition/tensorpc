@@ -383,6 +383,9 @@ class NodeMaster:
                     num_partition,
                     remove_stopped_group=remove_stopped_group))
             await asyncio.gather(*remote_call_coros)
+        except:
+            CM_LOGGER.exception(f"Failed to remove group {group_id} in tree remove group", exc_info=True)
+            raise
         finally:
             if not is_ext_comm:
                 await scan_comm.close()

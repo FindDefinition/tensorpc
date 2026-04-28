@@ -268,7 +268,7 @@ class AsyncDebouncer:
             if self._is_running_user_func:
                 await self._done_event.wait()
             self._task = asyncio.create_task(
-                self._debounce_loop(callback, *args, **kwargs)
+                self._debounce_loop(callback, *args, **kwargs), name="AsyncDebouncer_debounce_loop"
             )
 
     async def cancel(self):
@@ -422,7 +422,7 @@ class SSHA2AWorker:
             self._raft_node.events.on(RaftEventType.COMMIT_APPLIED, self._sync_status_to_ui)
             await self._raft_node.start()
             self._workers_observe_task = asyncio.create_task(
-                self._worker_observe_loop(self._local_shutdown_event)
+                self._worker_observe_loop(self._local_shutdown_event), name="raft_worker_observe_loop"
             )
             if self._cfg.workdir.strip() != "":
                 if len(self._cur_raft_infos) == 1:
@@ -434,7 +434,7 @@ class SSHA2AWorker:
                     CM_LOGGER.warning("Workdir is only supported in single-raft-node mode, ignore workdir config.")
         if self._is_compute_worker:
             self._leader_observe_task = asyncio.create_task(
-                self._raft_leader_observe_loop(self._awake_event, self._local_shutdown_event)
+                self._raft_leader_observe_loop(self._awake_event, self._local_shutdown_event), name="raft_leader_observe_loop"
             )
 
     def awake_leader_observe_loop(self):
@@ -779,7 +779,7 @@ class SSHA2AWorker:
         global_shutdown_ev_task = asyncio.create_task(global_shutdown_ev.wait())
         while True:
             sleep_task = asyncio.create_task(
-                asyncio.sleep(self._cfg.worker_check_interval)
+                asyncio.sleep(self._cfg.worker_check_interval), name="raft_worker_observe_loop_sleep"
             )
             done, pending = await asyncio.wait(
                 [global_shutdown_ev_task, shutdown_ev_task, sleep_task], return_when=asyncio.FIRST_COMPLETED
@@ -837,7 +837,7 @@ class SSHA2AWorker:
 
         while True:
             sleep_task = asyncio.create_task(
-                asyncio.sleep(self._cfg.leader_check_interval)
+                asyncio.sleep(self._cfg.leader_check_interval), name="raft_leader_observe_loop_sleep"
             )
             done, pending = await asyncio.wait(
                 [global_shutdown_ev_task, shutdown_ev_task, sleep_task, awake_immediately_task],
@@ -852,7 +852,7 @@ class SSHA2AWorker:
                 # cancel sleep task
                 await cancel_task(sleep_task)
                 awake_event.clear()
-                awake_immediately_task = asyncio.create_task(awake_event.wait())
+                awake_immediately_task = asyncio.create_task(awake_event.wait(), name="raft_leader_observe_loop_awake_wait")
             last_ssh_ts :int = -1
             cur_ssh_state = self._terminal.get_current_state()
             if cur_ssh_state is not None:
@@ -1008,7 +1008,7 @@ class SSHA2AWorker:
                     shell_cmd = last_cmd.content
                     exit_ev = asyncio.Event()
                     shutdown_ev = asyncio.Event()
-                    self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(shell_cmd, exit_ev, shutdown_ev)), exit_ev, shutdown_ev)
+                    self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(shell_cmd, exit_ev, shutdown_ev), name="cmd_wait_task"), exit_ev, shutdown_ev)
                     # await self.get_terminal().ssh_command_rpc_future(shell_cmd + "\n")
                 else:
                     CM_LOGGER.warning(
