@@ -481,7 +481,8 @@ class PeerSSHClient:
                  stderr: "VscodeSSHReader",
                  separators: bytes = _DEFAULT_SEPARATORS,
                  uid: str = "",
-                 encoding: Optional[str] = None):
+                 encoding: Optional[str] = None,
+                 init_cmd_pairs: Optional[list[tuple[str, Union[str, bytes]]]] = None):
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
@@ -490,8 +491,17 @@ class PeerSSHClient:
         self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
+        self.is_inited_ev = asyncio.Event()
+        self._is_inited: bool = False
+        if init_cmd_pairs is None:
+            self.is_inited_ev.set()
+            self._is_inited = True
+            self._init_cmd_pairs: list[tuple[str, Union[str, bytes]]] = []
+        else:
+            self._init_cmd_pairs: list[tuple[str, Union[str, bytes]]] = init_cmd_pairs
 
-    async def send(self, content: str):
+
+    async def send(self, content: Union[str, bytes]):
         self.stdin.write(content)
 
     async def send_ctrl_c(self):
@@ -568,7 +578,25 @@ class PeerSSHClient:
                                   uid=self.uid)
                 if ce.type == CommandEventType.PROMPT_END:
                     ce.arg = data[:match.start()]
+                    if not self._is_inited:
+                        if not self._init_cmd_pairs:
+                            self.is_inited_ev.set()
+                            self._is_inited = True
+                        else:
+                            user_cmd = self._init_cmd_pairs[0][1]
+                            if isinstance(user_cmd, str):
+                                final_cmd = user_cmd.rstrip().rstrip("\n") + "\n"
+                            else:
+                                assert isinstance(user_cmd, bytes)
+                                final_cmd = user_cmd.rstrip(b"\n") + b"\n"
+                            await self.send(final_cmd)
+
                 else:
+                    if not self._is_inited:
+                        if self._init_cmd_pairs:
+                            cur_cmd_indicator, cur_cmd = self._init_cmd_pairs[0]
+                            if cur_cmd_indicator.encode() in data_line:
+                                self._init_cmd_pairs.pop(0)
                     if data_line:
                         await callback(
                             LineEvent(ts,
@@ -578,6 +606,12 @@ class PeerSSHClient:
                                       is_command=True))
                 await callback(ce)
             else:
+                if not self._is_inited:
+                    if self._init_cmd_pairs:
+                        cur_cmd_indicator, cur_cmd = self._init_cmd_pairs[0]
+                        if cur_cmd_indicator.encode() in data:
+                            self._init_cmd_pairs.pop(0)
+
                 await callback(
                     LineEvent(ts, data, is_stderr=is_stderr, uid=self.uid))
         return False
@@ -1262,7 +1296,9 @@ class SSHClient:
             line_raw_callback: Optional[Callable[[LineRawEvent],
                                                        Awaitable[None]]] = None,
             conn_set_callback: Optional[Callable[[Optional[asyncssh.SSHClientConnection]], None]] = None,
-            shell_type_callback: Optional[Callable[[ShellInfo], None]] = None):
+            shell_type_callback: Optional[Callable[[ShellInfo], None]] = None,
+            resize_callback: Optional[Callable[[int, int], Awaitable[None]]] = None,
+            init_cmd_pairs: Optional[list[tuple[str, Union[str, bytes]]]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -1309,10 +1345,38 @@ class SSHClient:
                     rbuf_max_length=rbuf_max_length, term_type=term_type,
                     enable_raw_event=enable_raw_event)
                 session.uid = self.uid
+                if init_cmd_pairs is None:
+                    init_cmd_pairs = []
+                if env:
+                    if self.encoding is None:
+                        cmds2: list[bytes] = []
+                        cmds2.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"".encode("utf-8"))
+                        for k, v in env.items():
+                            if shell_type.os_type == "windows":
+                                cmds2.append(f"$Env:{k} = '{v}'".encode("utf-8"))
+                            else:
+                                cmds2.append(f"export {k}=\"{v}\"".encode("utf-8"))
+                        if shell_type.os_type == "windows":
+                            init_cmd_pairs.insert(0, (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, b" " + b"; ".join(cmds2) + b"\n"))
+                        else:
+                            init_cmd_pairs.insert(0, (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, b" " + b" && ".join(cmds2) + b"\n"))
+                    else:
+                        cmds: list[str] = []
+                        cmds.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"")
+                        for k, v in env.items():
+                            if shell_type.os_type == "windows":
+                                cmds.append(f"$Env:{k} = '{v}'")
+                            else:
+                                cmds.append(f"export {k}=\"{v}\"")
+                        if shell_type.os_type == "windows":
+                            init_cmd_pairs.insert(0, (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, " " + "; ".join(cmds) + "\n"))
+                        else:
+                            init_cmd_pairs.insert(0, (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, " " + " && ".join(cmds) + "\n"))
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
-                                            uid=self.uid)
+                                            uid=self.uid,
+                                            init_cmd_pairs=init_cmd_pairs)
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task, line_raw_callback))
                 wait_tasks = [
@@ -1329,35 +1393,11 @@ class SSHClient:
                 #     wait_tasks.append(asyncio.create_task(listener.wait_closed()))
                 if env_port_modifier is not None and (rfwd_ports or fwd_ports):
                     env_port_modifier(fwd_ports, rfwd_ports, env)
+                await peer_client.is_inited_ev.wait()
                 if init_event is not None:
                     init_event.set()
                 if conn_set_callback is not None:
                     conn_set_callback(conn)
-                if env:
-                    if self.encoding is None:
-                        cmds2: List[bytes] = []
-                        cmds2.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"".encode("utf-8"))
-                        for k, v in env.items():
-                            if shell_type.os_type == "windows":
-                                cmds2.append(f"$Env:{k} = '{v}'".encode("utf-8"))
-                            else:
-                                cmds2.append(f"export {k}=\"{v}\"".encode("utf-8"))
-                        if shell_type.os_type == "windows":
-                            stdin.write(b" " + b"; ".join(cmds2) + b"\n")
-                        else:
-                            stdin.write(b" " + b" && ".join(cmds2) + b"\n")
-                    else:
-                        cmds: List[str] = []
-                        cmds.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"")
-                        for k, v in env.items():
-                            if shell_type.os_type == "windows":
-                                cmds.append(f"$Env:{k} = '{v}'")
-                            else:
-                                cmds.append(f"export {k}=\"{v}\"")
-                        if shell_type.os_type == "windows":
-                            stdin.write(" " + "; ".join(cmds) + "\n")
-                        else:
-                            stdin.write(" " + " && ".join(cmds) + "\n")
                 while True:
                     done, pending = await asyncio.wait(
                         wait_tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -1388,6 +1428,8 @@ class SSHClient:
                         if text.type == SSHRequestType.ChangeSize:
                             chan.change_terminal_size(text.data[0],
                                                       text.data[1])
+                            if resize_callback is not None:
+                                await resize_callback(text.data[0], text.data[1])
                     else:
                         if isinstance(text, bytes):
                             if self.encoding is not None:

@@ -55,6 +55,7 @@ dependencies = [
     "lark",
     "cmap",
     "aiortc",
+    "pyte",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +93,8 @@ select = [
 ]
 ignore = [
     "E501",
+    "E741",
+    "F541",
 ]
 
 [tool.ruff.format]

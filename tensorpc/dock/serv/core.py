@@ -472,6 +472,8 @@ class NodeWithSSHBase(RunnableNodeBase):
         self.stdout = b""
 
         self.init_terminal_size: Tuple[int, int] = (34, 16)
+        self._terminal_size: Optional[Tuple[int, int]] = None
+
         self._terminal_state = b""
         self.terminal_close_ts: int = -1
         self._raw_event_history: "deque[RawEvent]" = deque()
@@ -1013,13 +1015,18 @@ class CommandNode(NodeWithSSHBase):
                                  env_port_modifier=self._env_port_modifier,
                                  exit_callback=exit_callback,
                                  init_event=init_event,
-                                 exit_event=self.exit_event))
+                                 exit_event=self.exit_event,
+                                 resize_callback=self._set_cur_terminal_size))
         self.set_start_status(session_key)
-
+        term_size = self._terminal_size
+        if term_size is None:
+            term_size = self.init_terminal_size
         await self.input_queue.put(
-            SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
+            SSHRequest(SSHRequestType.ChangeSize, term_size))
         return True, init_event
 
+    async def _set_cur_terminal_size(self, w, h):
+        self._terminal_size = (w, h)
 
 @ALL_NODES.register
 class AppNode(CommandNode, DataStorageNodeBase):
@@ -1156,10 +1163,15 @@ class AppNode(CommandNode, DataStorageNodeBase):
                                  env_port_modifier=self._app_env_port_modifier,
                                  exit_callback=exit_callback,
                                  init_event=init_event,
-                                 exit_event=self.exit_event))
+                                 exit_event=self.exit_event,
+                                 resize_callback=self._set_cur_terminal_size))
         self.set_start_status(session_key)
+        term_size = self._terminal_size
+        if term_size is None:
+            term_size = self.init_terminal_size
         await self.input_queue.put(
-            SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
+            SSHRequest(SSHRequestType.ChangeSize, term_size))
+        await init_event.wait()
         return True, init_event
 
     def _get_cfg_encoded(self):

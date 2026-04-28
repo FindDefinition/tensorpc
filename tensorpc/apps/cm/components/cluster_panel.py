@@ -799,7 +799,6 @@ class ClusterManagePanel(mui.FlexBox):
         scan_res: ScanGroupResult = await state.cached_chunk_call_async(
             first_node_spec, master_serv_names.GROUP_TREE_SCAN_GROUPS,  
             rpc_timeout=30, **kwargs)
-        scan_res.user_url_to_sever_ids
         server_id_to_user_url = {v: k for k, v in scan_res.user_url_to_sever_ids.items()}
         for group_id, group_spec in scan_res.group_specs.items():
             for cnode in group_spec.compute_node_specs:
@@ -827,11 +826,12 @@ class ClusterManagePanel(mui.FlexBox):
         all_node_urls: list[str] = []
         entry_node: Optional[NodeRuntimeInfo] = None
         for cnode in group_spec.raft_node_specs + group_spec.compute_node_specs:
-            node_id = cnode.peer_info.uid
-            if node_id not in cluster_state.nodes:
-                CM_LOGGER.warning(f"node {node_id} in group {group_id} not found in cluster nodes.")
+            node_server_id = cnode.peer_info.uid
+            node_client_id = cluster_state.server_id_to_client_id[node_server_id]
+            if node_client_id not in cluster_state.nodes:
+                CM_LOGGER.warning(f"node {node_client_id} in group {group_id} not found in cluster nodes {cluster_state.nodes.keys()}.")
                 continue
-            rt_info = cluster_state.nodes[node_id]
+            rt_info = cluster_state.nodes[node_client_id]
             if entry_node is None:
                 entry_node = rt_info
             all_node_urls.append(rt_info.node_spec.local_url_with_port)
