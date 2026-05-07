@@ -1,3 +1,7 @@
+"""Server side launch:
+`python -m tensorpc.apps.cm.cli --username root --password "xxx"`
+"""
+
 from tensorpc.apps.cm.constants import TENSORPC_CM_NODEMGR_DEFAULT_PORT
 from tensorpc.apps.cm.coretypes import ResourceInfo
 from tensorpc.apps.cm.manager import ClusterSpec, FixedClusterProvider, NodeSpec
